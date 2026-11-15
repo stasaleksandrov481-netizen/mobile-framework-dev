@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 
 type Mode = "signup" | "verify" | "signin" | "done";
 
 export function Registration() {
-  const [open, setOpen] = useState(false);
+  return (
+    <Link id="register" className="button button--primary" href="/register">
+      Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+    </Link>
+  );
+}
+
+export function RegistrationForm() {
   const [mode, setMode] = useState<Mode>("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,39 +25,13 @@ export function Registration() {
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [wasSignin, setWasSignin] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-      if (event.key !== "Tab" || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        "a[href], button:not([disabled]), input:not([disabled])",
-      ));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    const timer = window.setTimeout(() => dialogRef.current?.querySelector<HTMLElement>("input, button")?.focus(), 0);
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      document.removeEventListener("keydown", onKey);
-      window.clearTimeout(timer);
-      triggerRef.current?.focus();
-    };
-  }, [open]);
+    if (new URLSearchParams(window.location.search).get("mode") === "signin") {
+      setMode("signin");
+    }
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,6 +53,7 @@ export function Registration() {
         if (signupError) throw signupError;
         if (data.session) {
           await savePreregistration(notify);
+          setWasSignin(false);
           setMode("done");
         } else {
           setMode("verify");
@@ -82,14 +65,16 @@ export function Registration() {
         });
         if (verifyError) throw verifyError;
         await savePreregistration(notify);
+        setWasSignin(false);
         setMode("done");
       } else if (mode === "signin") {
         const { error: signinError } = await cortexAuth.auth.signInWithPassword({
           email: email.trim().toLowerCase(), password,
         });
         if (signinError) throw signinError;
-        await savePreregistration(notify);
+        // Signing in must not silently overwrite previously granted notification consent.
         setPassword("");
+        setWasSignin(true);
         setMode("done");
       }
     } catch (failure) {
@@ -116,79 +101,77 @@ export function Registration() {
   }
 
   return (
-    <>
-      <button ref={triggerRef} type="button" id="register" className="button button--primary" onClick={() => { setError(""); setOpen(true); }}>
-        Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
-      </button>
-      {open && (
-        <div className="modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
-          <div ref={dialogRef} className="registration-dialog" role="dialog" aria-modal="true" aria-labelledby="registration-title">
-            <button type="button" className="dialog-close" aria-label="Закрыть" onClick={() => setOpen(false)}>
-              <UiIcon name="close" size={19} />
-            </button>
-            <div className="dialog-kicker">CORTEX · РАННИЙ ДОСТУП</div>
-            {mode === "done" ? (
-              <div className="dialog-success">
-                <div className="success-icon" aria-hidden="true"><UiIcon name="check" size={25} /></div>
-                <h2 id="registration-title">Ты в списке.</h2>
-                <p>Аккаунт подтверждён. Мы зарезервировали 5 000 бонусных ИИ-токенов к запуску открытой беты.</p>
-                <button className="button button--primary dialog-submit" type="button" onClick={() => setOpen(false)}>Готово</button>
-              </div>
+    <section className="auth-form-area" aria-labelledby="auth-title">
+      <div className="auth-kicker"><span className="auth-kicker-dot" /> CORTEX · РАННИЙ ДОСТУП</div>
+      {mode === "done" ? (
+        <div className="auth-success" role="status">
+          <div className="auth-success-mark"><UiIcon name="check" size={28} /></div>
+          <h1 id="auth-title">{wasSignin ? "С возвращением." : "Ты в списке."}</h1>
+          <p>{wasSignin
+            ? "Ты вошёл в свой аккаунт CORTEX. Открытая бета начнётся 20 ноября."
+            : "Почта подтверждена. Мы зарезервировали 5 000 бонусных ИИ-токенов к запуску беты."}</p>
+          <Link href="/" className="button button--primary auth-submit">На главную <UiIcon name="arrow-right" size={18} /></Link>
+        </div>
+      ) : (
+        <>
+          <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" ? "Проверь почту." : "С возвращением."}</h1>
+          <p className="auth-description">{mode === "signup"
+            ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
+            : mode === "verify"
+              ? "Мы отправили письмо с подтверждением. Введи код из письма или перейди по ссылке."
+              : "Войди в свой аккаунт CORTEX."}</p>
+
+          <form onSubmit={submit} className="registration-form">
+            <label htmlFor="registration-email">Электронная почта</label>
+            <input id="registration-email" autoComplete="email" type="email" inputMode="email"
+              value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254}
+              readOnly={mode === "verify"} placeholder="you@example.com" />
+
+            {mode === "verify" ? (
+              <>
+                <label htmlFor="registration-code">Код из письма</label>
+                <input id="registration-code" className="verification-input" inputMode="numeric" autoComplete="one-time-code"
+                  value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
+                  required minLength={6} maxLength={10} placeholder="000000" />
+              </>
             ) : (
               <>
-                <h2 id="registration-title">{mode === "signup" ? "Будь первым." : mode === "verify" ? "Проверь почту." : "С возвращением."}</h2>
-                <p className="dialog-description">
-                  {mode === "signup"
-                    ? "Регистрируйся сейчас. 20 ноября откроем бету, а тебе начислим +5 000 ИИ-токенов."
-                    : mode === "verify"
-                      ? "Мы отправили письмо с подтверждением. Введи код из письма или перейди по ссылке."
-                      : "Войди в существующий аккаунт, чтобы получить ранний доступ."}
-                </p>
-                <form onSubmit={submit} className="registration-form">
-                  <label htmlFor="registration-email">Почта</label>
-                  <input id="registration-email" autoComplete="email" type="email" value={email}
-                    onChange={(event) => setEmail(event.target.value)} required maxLength={254} readOnly={mode === "verify"}
-                    placeholder="you@example.com" />
-                  {mode === "verify" ? (
-                    <>
-                      <label htmlFor="registration-code">Код из письма</label>
-                      <input id="registration-code" className="verification-input" inputMode="numeric" autoComplete="one-time-code" value={code}
-                        onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
-                        required minLength={6} maxLength={10} placeholder="000000" />
-                    </>
-                  ) : (
-                    <>
-                      <label htmlFor="registration-password">Пароль</label>
-                      <input id="registration-password" autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                        type="password" value={password} onChange={(event) => setPassword(event.target.value)}
-                        required minLength={8} placeholder="Не менее 8 символов" />
-                    </>
-                  )}
-                  {mode === "signup" && (
-                    <label className="form-check"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
-                      <span>Согласен с <a href="/privacy" target="_blank" rel="noopener noreferrer">обработкой данных</a>.</span>
-                    </label>
-                  )}
-                  {mode !== "verify" && (
-                    <label className="form-check"><input type="checkbox" checked={notify} onChange={(event) => setNotify(event.target.checked)} />
-                      <span>Прислать письмо, когда откроется бета.</span>
-                    </label>
-                  )}
-                  {error && <p role="alert" className="form-error">{error}</p>}
-                  <button className="button button--primary dialog-submit" type="submit" disabled={busy}>
-                    {busy ? "Подождите..." : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить" : "Войти"}
-                  </button>
-                </form>
-                <div className="dialog-switch">
-                  {mode === "signup" ? <>Уже есть аккаунт? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
-                    : <>Нужна новая регистрация? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
-                </div>
+                <label htmlFor="registration-password">Пароль</label>
+                <input id="registration-password" autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  type="password" value={password} onChange={(event) => setPassword(event.target.value)}
+                  required minLength={8} placeholder="Не менее 8 символов" />
               </>
             )}
+
+            {mode === "signup" && (
+              <label className="form-check">
+                <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
+                <span className="custom-check" aria-hidden="true"><UiIcon name="check" size={13} /></span>
+                <span className="check-label">Согласен с <Link href="/privacy" target="_blank" rel="noopener noreferrer">обработкой персональных данных</Link></span>
+              </label>
+            )}
+            {mode === "signup" && (
+              <label className="form-check">
+                <input type="checkbox" checked={notify} onChange={(event) => setNotify(event.target.checked)} />
+                <span className="custom-check" aria-hidden="true"><UiIcon name="check" size={13} /></span>
+                <span className="check-label">Уведомить меня по почте о запуске беты</span>
+              </label>
+            )}
+
+            {error && <p role="alert" className="form-error">{error}</p>}
+            <button className="button button--primary auth-submit" type="submit" disabled={busy}>
+              <span>{busy ? "Подождите..." : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : "Войти"}</span>
+              {!busy && <UiIcon name="arrow-right" size={18} />}
+            </button>
+          </form>
+
+          <div className="auth-switch">
+            {mode === "signup" ? <>Уже есть аккаунт? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
+              : <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
           </div>
-        </div>
+        </>
       )}
-    </>
+    </section>
   );
 }
 

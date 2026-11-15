@@ -1,4 +1,3 @@
-import PhoneModel from "@/components/PhoneModel";
 import { DownloadCTA, Registration } from "@/components/Registration";
 import UiIcon from "@/components/UiIcon";
 
@@ -29,9 +28,6 @@ export default function Home() {
             <DownloadCTA url={downloadUrl} />
           </div>
           <p className="bonus-note"><strong>+5 000 ИИ-токенов</strong> за раннюю регистрацию. О запуске сообщим по почте, если согласишься получать уведомление.</p>
-        </div>
-        <div className="hero-visual">
-          <PhoneModel />
         </div>
       </main>
 
