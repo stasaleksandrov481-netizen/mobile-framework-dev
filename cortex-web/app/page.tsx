@@ -13,7 +13,7 @@ export default function Home() {
           <span>CORTEX</span>
         </a>
         <a className="header-action" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">
-          <span>Telegram</span><UiIcon name="arrow-up-right" size={17} />
+          <UiIcon name="telegram" size={18} /><span>Telegram</span>
         </a>
       </header>
 
@@ -39,7 +39,7 @@ export default function Home() {
         <span>© 2026 CORTEX</span>
         <div className="footer-links">
           <a href="/privacy"><UiIcon name="shield" size={15} />Конфиденциальность</a>
-          <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">Telegram<UiIcon name="arrow-up-right" size={15} /></a>
+          <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer"><UiIcon name="telegram" size={15} />Telegram</a>
         </div>
       </footer>
     </div>
