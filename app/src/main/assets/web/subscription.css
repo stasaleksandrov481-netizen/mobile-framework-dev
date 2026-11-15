@@ -1,0 +1,30 @@
+.sub-page{display:grid;gap:22px;color:#fff}
+.sub-hero,.sub-plan,.sub-compare,.sub-payments>li{border:1px solid #fff4;border-radius:23px;background:#000}
+.sub-hero{display:grid;gap:16px;padding:23px;background:radial-gradient(ellipse at top right,#fff2,transparent 60%),#000}
+.sub-hero header,.sub-plan header,.sub-payments>li{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sub-hero header>strong{background:#fff;color:#000;border-radius:100px;padding:6px 12px}
+.sub-balance{display:grid;gap:2px;font-variant-numeric:tabular-nums}
+.sub-balance strong{font-size:clamp(36px,10vw,58px);line-height:1;letter-spacing:-.07em}
+.sub-hero dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px;margin:0}
+.sub-hero dt,.sub-plan small,.sub-payments small,.sub-note,.sub-status{color:#fff}
+.sub-hero dd{margin:4px 0 0;font-weight:650}
+.sub-meter{height:4px;background:#fff4;border-radius:20px;overflow:hidden}
+.sub-meter i{display:block;width:var(--sub-percent);height:100%;background:#fff;animation:sub-meter .65s cubic-bezier(.2,.8,.25,1) both}
+.sub-section{display:grid;gap:12px}
+.sub-section h2,.sub-section p,.sub-plan h3,.sub-plan p,.sub-note{margin:0}
+.sub-plans{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:10px}
+.sub-plan{display:grid;align-content:start;gap:9px;padding:16px;animation:sub-in .36s ease-out both}
+.sub-plan:nth-child(2){animation-delay:35ms}.sub-plan:nth-child(3){animation-delay:70ms}.sub-plan:nth-child(4){animation-delay:105ms}.sub-plan:nth-child(5){animation-delay:140ms}
+.sub-plan.sub-current{border-color:#fff}
+.sub-plan .action{justify-self:start;margin-top:3px}
+.sub-compare{padding:14px 16px}.sub-compare summary{cursor:pointer}
+.sub-compare>div{overflow:auto}.sub-compare table{width:100%;margin-top:10px;border-collapse:collapse;text-align:left}
+.sub-compare th,.sub-compare td{padding:8px 4px;border-bottom:1px solid #fff3}
+.sub-payments{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.sub-payments>li{padding:14px 15px}.sub-payments small{display:block;margin-top:4px}
+.sub-page button{color:#fff;border-color:#fff7;background:none;-webkit-tap-highlight-color:transparent;transition:transform .2s ease,background-color .2s ease}
+.sub-page button:active{transform:scale(.96);background:#fff2}
+.sub-page button:focus-visible,.sub-compare summary:focus-visible{outline:2px solid #fff;outline-offset:3px}
+@keyframes sub-meter{from{width:0}}
+@keyframes sub-in{from{opacity:0;transform:translateY(7px)}}
+@media(prefers-reduced-motion:reduce){.sub-page *{animation:none!important;transition:none!important}}

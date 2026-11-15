@@ -158,7 +158,7 @@ function connectionFailure(error: unknown): Failure {
   return new Failure("provider", 502);
 }
 
-type MeasuredUsage = { input: number; output: number };
+export type MeasuredUsage = { input: number; output: number; costMicros: number | null };
 export type Reservation = { maxOutput: number; finish: (usage: MeasuredUsage | null) => Promise<Record<string, unknown> | null> };
 export type ModelResponse = {
   response: Response;
@@ -172,7 +172,9 @@ function measuredUsage(value: unknown): MeasuredUsage | null {
   const input = usage?.prompt_tokens, output = usage?.completion_tokens;
   if (typeof input !== "number" || typeof output !== "number" || !Number.isSafeInteger(input) ||
       !Number.isSafeInteger(output) || input < 0 || output < 0 || input > 2_000_000 || output > 2_000_000) return null;
-  return { input, output };
+  const cost = usage?.cost;
+  return { input, output, costMicros: typeof cost === "number" && Number.isFinite(cost) && cost >= 0 && cost <= 1000
+    ? Math.ceil(cost * 1_000_000) : null };
 }
 
 export async function completion(
@@ -180,8 +182,10 @@ export async function completion(
   signal: AbortSignal, device = false, repair = false, firstTokenMs = 18_000, quick = false, plan = false,
   hold?: (estimatedInput: number, output: number) => Promise<Reservation>,
   visualOutput?: Record<string, unknown>,
+  paidPrice?: number,
 ): Promise<ModelResponse> {
-  if (!key || !models.length || models.some(model => !/^[a-z0-9._-]+\/[a-z0-9._-]+:free$/.test(model))) {
+  if (!key || !models.length || models.some(model => paidPrice
+    ? !/^[a-z0-9._-]+\/[a-z0-9._-]+$/.test(model) : !/^[a-z0-9._-]+\/[a-z0-9._-]+:free$/.test(model))) {
     throw new Failure("unconfigured", 503);
   }
   const tools = plan ? (repair ? planRepairTools : planTools) : (repair ? repairTools : deviceTools);
@@ -196,20 +200,21 @@ export async function completion(
   const toolInput = device ? { tools, tool_choice: repair ? "required" : "auto" } : {};
   const requested = visualOutput ? 740 : plan ? Math.max(limit, 1600) : limit;
   // Only provider-reported usage is charged. The estimate protects concurrent in-flight calls.
-  const estimatedInput = Math.ceil(new TextEncoder().encode(JSON.stringify({ messages, ...toolInput, visualOutput })).length / 3) + 128;
+  const bytes = new TextEncoder().encode(JSON.stringify({ messages, ...toolInput, visualOutput })).length;
+  const estimatedInput = Math.ceil(bytes / (paidPrice ? 1 : 3)) + 128;
   const reservation = await hold?.(estimatedInput, requested);
   let usage: MeasuredUsage | null = null;
   let generationId = "";
   let settled: Promise<Record<string, unknown> | null> | undefined;
   const finish = () => settled ??= (async () => {
     if (!reservation) return null;
-    if (!usage && generationId) {
+    if ((!usage || paidPrice && usage.costMicros === null) && generationId) {
       try {
         const response = await network("https://openrouter.ai/api/v1/generation?id=" + encodeURIComponent(generationId),
           { headers: { Authorization: "Bearer " + key }, redirect: "error", signal: AbortSignal.timeout(2200) });
         if (response.ok) {
           const { data } = await response.json();
-          usage = measuredUsage({ usage: { prompt_tokens: data?.native_tokens_prompt, completion_tokens: data?.native_tokens_completion } });
+          usage = measuredUsage({ usage: { prompt_tokens: data?.native_tokens_prompt, completion_tokens: data?.native_tokens_completion, cost: data?.total_cost } }) ?? usage;
         } else await response.body?.cancel().catch(() => {});
       } catch { /* A disconnected generation may not report usage yet. */ }
     }
@@ -239,7 +244,7 @@ export async function completion(
         ...visualOutput,
         ...(quick && !visualOutput ? { reasoning: { effort: "none", exclude: true } } : {}),
         provider: {
-          max_price: { prompt: 0, completion: 0 },
+          max_price: { prompt: paidPrice ?? 0, completion: paidPrice ?? 0, request: 0, image: 0, audio: 0, web_search: 0 },
           ...(device || visualOutput ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),
         },
       }),

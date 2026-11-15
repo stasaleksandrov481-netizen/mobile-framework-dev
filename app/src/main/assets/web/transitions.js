@@ -23,7 +23,7 @@ const CortexMotion = (() => {
       { transform: "translateY(0)", opacity: 1 },
       { transform: "translateY(-18%)", opacity: .94, offset: .27 },
       { transform: "translateY(-105%)", opacity: 0 }
-    ], { duration: 495, easing: ease });
+    ], { duration: 690, easing: ease });
     flow.finished.then(() => curtain.remove(), () => curtain.remove());
     return () => { flow.cancel(); curtain.remove(); };
   }
@@ -39,7 +39,7 @@ const CortexMotion = (() => {
     return surface.animate([
       { opacity: .25, transform: "translateY(18px) scale(.985)" },
       { opacity: 1, transform: "none" }
-    ], { duration: 489, easing: ease });
+    ], { duration: 680, easing: ease });
   }
 
   function reply(body) {

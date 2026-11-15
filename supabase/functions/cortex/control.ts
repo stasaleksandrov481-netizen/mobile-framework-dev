@@ -56,17 +56,29 @@ export function createControl(database: Database) {
       );
       if (["owner", "admin", "support"].includes(roles[0]?.role ?? "")) return OPEN;
     }
+    if (settings.maintenance_enabled && accountId &&
+        (UUID.test(accountId) || /^yandex_[A-Za-z0-9_-]{43}$/.test(accountId))) {
+      const grants = await database<Array<{ maintenance_until: string }>>(
+        "cortex_public_accounts?select=maintenance_until&subject=eq." + accountId + "&limit=1",
+      );
+      if (Date.parse(grants[0]?.maintenance_until || "") > Date.now()) return OPEN;
+    }
     if (settings.maintenance_enabled) {
       return { mode: "maintenance", message: settings.maintenance_message || "CORTEX временно недоступен." };
     }
     return { mode: "update", message: "Установите актуальную версию CORTEX.", update_url: httpsUrl(settings.update_url) };
   }
 
-  async function presence(install: string, input: Record<string, unknown>, version: string) {
+  async function presence(install: string, input: Record<string, unknown>, version: string, stable: string | null, account?: string) {
     const session = input.session_id;
     const screen = input.screen;
     if (typeof session !== "string" || !UUID.test(session) || typeof screen !== "string" ||
         !/^[a-z][a-z-]{0,39}$/.test(screen)) throw new Failure("invalid", 400);
+    if (stable) {
+      await database("rpc/cortex_record_launch", "POST", {
+        p_device: stable, p_session: session, p_subject: account ?? null, p_version: version, p_old_install: install,
+      });
+    }
     const time = new Date().toISOString();
     await database("cortex_installs?on_conflict=install_hash", "POST", {
       install_hash: install, last_seen_at: time, app_version: version, platform: "android", last_screen: screen,

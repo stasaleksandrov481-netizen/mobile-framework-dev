@@ -3,6 +3,7 @@ package app.cortex.assistant
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -32,6 +33,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
     private val lifecycle = Any()
     private val installId = installToken(context)
+    private val deviceId = runCatching {
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    }.getOrNull()?.takeIf { it.matches(Regex("^[a-f0-9]{16}$")) }
     private val endpoint = "https://jjcqrjztxohnifmziksy.supabase.co/functions/v1/cortex/v1/"
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
 
@@ -92,6 +96,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private fun perform(request: JSONObject, id: String, onEvent: (JSONObject) -> Unit): JSONObject {
         return when (request.optString("operation")) {
             "status" -> call("GET", "status", null, id)
+            "subscription" -> call("GET", "subscription", null, id)
+            "subscription-payment" -> call("POST", "subscription/payment", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "support-inbox" -> call("GET", "support/inbox", null, id)
             "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent)
@@ -162,6 +168,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.requestMethod = method
             connection.setRequestProperty("Accept", if (onEvent == null) "application/json" else "text/event-stream")
             connection.setRequestProperty("X-Cortex-Install", installId)
+            if (route == "presence") deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")

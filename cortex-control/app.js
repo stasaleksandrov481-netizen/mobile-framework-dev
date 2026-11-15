@@ -9,19 +9,19 @@ const feedback = document.querySelector("#feedback");
 const redirectTo = "https://cortex-control-phi.vercel.app/";
 const labels = {
   overview: "Обзор", support: "Обращения", updates: "Версии", maintenance: "Техработы",
-  roles: "Доступы", quota: "Лимиты ИИ", audit: "Журнал"
+  roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
 const roles = { owner: "Владелец", admin: "Разработчик", support: "Поддержка" };
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
-let quotaId = "";
+let quotaId = "", supportFilter = "active";
 
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
-const date = value => value ? new Date(value).toLocaleString("ru-RU") : "—";
+const date = value => value ? new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) : "—";
 const dateNumber = value => Number(value || 0).toLocaleString("ru-RU");
 const checked = value => value ? " checked" : "";
 const button = (text, action, value = "") => '<button type="button" data-action="' + action + '" data-value="' +
@@ -54,7 +54,7 @@ function signIn() {
   showAuth("Вход в панель", form("signin",
     field("email", "Email", "email", "", 'autocomplete="username" required') +
     field("password", "Пароль", "password", "", 'autocomplete="current-password" required'), "Войти") +
-    '<div class="actions">' + button("Забыли пароль?", "recover") + button("Создать аккаунт", "signup") + '</div>');
+    '<div class="actions">' + button("Забыли пароль?", "recover") + '</div>');
 }
 
 function recover(email) {
@@ -98,6 +98,11 @@ async function initialize() {
   user = data(await db.auth.getUser()).user;
   if (!user) { signIn(); return; }
   if (previous !== user.id) { factor = enrollment = ticket = null; quotaId = ""; }
+  if (!data(await db.rpc("cortex_control_signin"))) {
+    role = null;
+    showAuth("Доступ закрыт", '<p>Войдите с аккаунтом администратора.</p>' + button("Выйти", "logout"));
+    return;
+  }
   const assurance = data(await db.auth.mfa.getAuthenticatorAssuranceLevel());
   if (assurance.currentLevel !== "aal2") {
     const factors = data(await db.auth.mfa.listFactors());
@@ -121,7 +126,7 @@ async function initialize() {
 
 function allowedTabs() {
   if (role === "owner") return Object.keys(labels);
-  if (role === "admin") return ["overview", "support", "updates", "maintenance", "quota", "audit"];
+  if (role === "admin") return ["overview", "support", "updates", "maintenance", "quota", "billing", "audit"];
   return ["overview", "support"];
 }
 
@@ -155,26 +160,32 @@ async function loadTab() {
 }
 
 async function overview() {
-  const summary = data(await db.rpc("cortex_admin_overview")) || {};
-  const counters = [
-    ["total_installs", "Установки"], ["active_installs", "Устройств на связи"], ["total_launches", "Все запуски"],
-    ["launches_today", "Запуски сегодня"], ["ai_today", "Запросы к ИИ сегодня"], ["support_open", "Открытые обращения"],
-    ["support_all", "Всего обращений"]
-  ].filter(([key]) => Object.hasOwn(summary, key));
-  const stats = counters.length ? counters : Object.entries(summary).filter(([, value]) => typeof value === "number")
-    .map(([key]) => [key, key.replaceAll("_", " ")]);
-  const cards = stats.map(([key, label]) => card(label, '<strong class="count">' + dateNumber(summary[key]) + '</strong>')).join("");
-  const days = Array.isArray(summary.usage_last_7_days) ? summary.usage_last_7_days : [];
-  const week = days.length ? card("Запуски по дням", '<ul class="record-list">' + days.map(day =>
-    '<li><span>' + escape(day.date) + '</span><strong>' + dateNumber(day.launches) + '</strong></li>').join("") + '</ul>') : "";
-  return cards ? '<div class="cards">' + cards + '</div>' + week : '<p>Статистика пока недоступна.</p>';
+  const [summary, activity] = (await Promise.all([
+    db.rpc("cortex_admin_overview"), db.rpc("cortex_admin_activity")
+  ])).map(data);
+  const labels = { devices: "Уникальные устройства", new_today: "Впервые открыли сегодня",
+    opened_today: "Устройств открыли сегодня", accounts_today: "Аккаунтов открыли сегодня", launches_today: "Сеансов сегодня" };
+  const cards = Object.entries(labels).map(([key, label]) =>
+    card(label, '<strong class="count">' + dateNumber(activity[key]) + '</strong>')).join("");
+  const other = [["ai_today", "Запросы к ИИ сегодня"], ["support_open", "Открытые обращения"]]
+    .filter(([key]) => Object.hasOwn(summary || {}, key))
+    .map(([key, label]) => card(label, '<strong class="count">' + dateNumber(summary[key]) + '</strong>')).join("");
+  const seen = activity.today.map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
+    date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
+  return '<div class="cards">' + cards + other + '</div><p class="muted">Сегодня по Москве. Учёт устройств начинается с обновления.</p>' +
+    card("Кто открыл CORTEX сегодня", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Сегодня пока нет входов с аккаунтом.</p>');
 }
 
 async function support() {
   const selected = ticket;
-  const tickets = data(await db.from("cortex_support")
-    .select("id,created_at,category,message,reply_to,app_version,status").order("created_at", { ascending: false }).limit(100)) || [];
-  if (!tickets.length) return '<p>Обращений пока нет.</p>';
+  const filters = { active: "Активные", open: "Открытые", in_progress: "В работе", answered: "С ответом", closed: "Закрытые" };
+  const filterBar = '<div class="ticket-filters" aria-label="Статус обращений">' + Object.entries(filters).map(([id, label]) =>
+    '<button type="button" data-action="ticket-filter" data-value="' + id + '" aria-pressed="' + (id === supportFilter) + '">' +
+    label + '</button>').join("") + '</div>';
+  const query = db.from("cortex_support").select("id,created_at,category,message,reply_to,app_version,status");
+  const tickets = data(await (supportFilter === "active" ? query.neq("status", "closed") : query.eq("status", supportFilter))
+    .order("created_at", { ascending: false }).limit(100)) || [];
+  if (!tickets.length) return filterBar + '<p>В этой категории нет обращений.</p>';
   const current = tickets.find(item => item.id === selected) || tickets[0];
   if (ticket === selected) ticket = current.id;
   const [replies, attachment] = await Promise.all([
@@ -186,17 +197,18 @@ async function support() {
     '"' + (item.id === current.id ? ' aria-current="true"' : '') + '><strong>' +
     escape(categories[item.category] || item.category) + ' · ' + escape(ticketStates[item.status] || item.status) +
     '</strong><small>' + escape(item.message.slice(0, 70)) + '</small></button>').join("");
-  const thread = (replies || []).map(reply => '<article class="reply"><small>' + date(reply.created_at) + '</small><p>' +
+  const thread = (replies || []).map(reply => '<article class="ticket-message from-control"><small>Поддержка · ' + date(reply.created_at) + '</small><p>' +
     escape(reply.message) + '</p></article>').join("");
   const details = '<p class="muted">' + date(current.created_at) + ' · № ' + escape(current.id.slice(0, 8).toUpperCase()) + '</p>' +
-    '<p class="long-text">' + escape(current.message) + '</p>' +
+    '<div class="ticket-messages"><article class="ticket-message"><small>Пользователь · ' + date(current.created_at) + '</small><p>' +
+    escape(current.message) + '</p></article>' + thread + '</div>' +
     (current.reply_to ? '<p class="muted">Email: ' + escape(current.reply_to) + '</p>' : "") +
     (current.app_version ? '<p class="muted">Версия: ' + escape(current.app_version) + '</p>' : "") +
     (/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screenshot) ?
       '<details><summary>Скриншот</summary><img class="attachment" src="' + escape(screenshot) + '" alt="Приложенный скриншот"></details>' : "") +
-    thread + form("reply", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Ответ пользователю<textarea name="message" rows="4" maxlength="4000" required></textarea></label>', "Отправить ответ") +
+    form("reply", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Ответ пользователю<textarea name="message" rows="4" maxlength="4000" required></textarea></label>', "Отправить ответ") +
     form("ticket-status", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Статус<select name="status">' + options(ticketStates, current.status) + '</select></label>', "Сохранить статус");
-  return '<div class="support-layout"><div class="ticket-list">' + list + '</div>' + card("Обращение", details) + '</div>';
+  return filterBar + '<div class="support-layout"><div class="ticket-list">' + list + '</div>' + card("Диалог", details) + '</div>';
 }
 
 async function controlConfig() {
@@ -208,7 +220,10 @@ async function maintenance() {
   return card("Режим технических работ", form("maintenance",
     '<label class="check"><input type="checkbox" name="enabled"' + checked(config.maintenance_enabled) + '>Включить режим</label>' +
     '<label>Сообщение пользователям<textarea name="message" rows="3" maxlength="400">' + escape(config.maintenance_message) +
-    '</textarea></label>', "Сохранить"));
+    '</textarea></label>', "Сохранить")) + card("Доступ во время техработ", form("maintenance-access",
+    field("public_id", "Короткий ID аккаунта", "text", "", 'placeholder="@id000001" required') +
+    field("days", "Дней доступа (0 — отозвать)", "number", 1, 'min="0" max="31" required'),
+    "Применить"));
 }
 
 async function updates() {
@@ -246,7 +261,6 @@ async function audit() {
 async function quotas() {
   const config = data(await db.rpc("cortex_admin_ai", { p_operation: "config" }));
   const budget = card("Общий бюджет ИИ", form("ai-config",
-    field("limit", "Токенов в сутки на пользователя", "number", config.daily_tokens, 'min="0" max="1000000" required') +
     field("day", "Запросов OpenRouter в сутки", "number", config.requests_day, 'min="1" max="1000" placeholder="Лимит сервера"') +
     field("minute", "Запросов OpenRouter в минуту", "number", config.requests_minute, 'min="1" max="20" placeholder="Лимит сервера"') +
     field("model", "Основная бесплатная модель", "text", config.model, 'maxlength="120" placeholder="provider/model:free"') +
@@ -254,7 +268,8 @@ async function quotas() {
   const search = form("quota-search", field("id", "ID профиля или гостя", "text", quotaId,
     'maxlength="50" required autocomplete="off"'), "Найти");
   if (!quotaId) return budget + card("Поиск по ID", search);
-  const quota = data(await db.rpc("cortex_admin_ai", { p_subject: quotaId }));
+  const target = await resolveAccount(quotaId);
+  const quota = target && data(await db.rpc("cortex_admin_ai", { p_subject: target }));
   if (!quota) return budget + card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
   const summary = "<p>" + escape(quota.id) + "</p><p>Использовано " + dateNumber(quota.used) +
     " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + " токенов</p>" +
@@ -270,15 +285,57 @@ async function quotas() {
 
 async function updateQuota(operation, limit) {
   if (!quotaId || !["owner", "admin"].includes(role)) return;
-  const quota = data(await db.rpc("cortex_admin_ai", {
-    p_subject: quotaId, p_operation: operation, p_limit: limit ?? null
+  const target = await resolveAccount(quotaId);
+  const quota = target && data(await db.rpc("cortex_admin_ai", {
+    p_subject: target, p_operation: operation, p_limit: limit ?? null
   }));
   if (!quota) throw new Error("Запись с этим ID больше недоступна.");
   flash("Лимит обновлён.");
   await loadTab();
 }
 
-const views = { overview, support, maintenance, updates, roles: access, quota: quotas, audit };
+async function resolveAccount(id) {
+  return id.startsWith("@") ? data(await db.rpc("cortex_admin_activity", { p_action: "account", p_id: id }))?.subject : id;
+}
+
+const planNames = { guest: "Guest", free: "Free", start: "Start", pro: "Pro", ultra: "Ultra" };
+const rub = value => (Number(value) / 100).toLocaleString("ru-RU", { style: "currency", currency: "RUB" });
+const dollars = value => "$" + (Number(value) / 1e6).toFixed(4);
+const billingRpc = (p_action, p_data = {}) => db.rpc("cortex_admin_billing", { p_action, p_data }).then(data);
+
+async function subscriptions() {
+  const result = await billingRpc("overview");
+  const funding = result.funding;
+  const numbers = [["Действующие подписчики", dateNumber(result.paid_accounts)], ["Оплачено", rub(result.collected)],
+    ["Возвращено", rub(result.refunded)], ["Зарезервировано", dollars(funding.committed_micros) + " / " + dollars(funding.funded_micros)]];
+  const summary = card("Подписки и платежи", '<ul class="record-list">' +
+    numbers.map(([title,value]) => '<li>' + title + '<strong>' + value + '</strong></li>').join("") + '</ul>');
+  const budget = card("Расходы OpenRouter за 30 дней", form("billing-funding",
+    field("usd", "Обеспеченный бюджет, USD", "number", funding.funded_micros / 1e6, 'min="0" step=".000001" required') +
+    '<label class="check"><input name="checkout" type="checkbox"' + checked(funding.checkout_enabled) +
+    '>Разрешить оплату после подключения Platega</label>', "Сохранить бюджет") + '<ul class="record-list">' +
+    result.models.map(m => '<li>' + escape(m.model) + ' · ' + dateNumber(m.calls) +
+      ' <strong>' + dollars(m.measured_micros) + ' · резерв ' + dollars(m.unsettled_micros) + '</strong></li>').join("") + '</ul>');
+  const grant = card("Выдать тестовый доступ", form("billing-grant",
+    field("subject", "ID аккаунта", "text", "", 'placeholder="@id000001" maxlength="50" required') +
+    '<label>Тариф<select name="plan">' + options({ start: "Start", pro: "Pro", ultra: "Ultra" }) + '</select></label>' +
+    field("days", "Дней доступа", "number", 7, 'min="1" max="31" required'), "Выдать доступ"));
+  const plans = result.plans.map(p => card(planNames[p.code], form("billing-plan",
+    '<input type="hidden" name="plan" value="' + escape(p.code) + '">' +
+    field("price", "Цена в месяц, ₽", "number", p.price_kopecks / 100, 'min="0" step=".01" required') +
+    field("tokens", "Токенов в день", "number", p.daily_tokens, 'min="1" max="1000000" required') +
+    field("advanced", "Токенов сложного ИИ в день", "number", p.advanced_tokens, 'min="0" required') +
+    field("context", "Контекст, символов", "number", p.context_chars, 'min="3000" max="51000" required'), "Сохранить тариф"))).join("");
+  const states = { creating: "Создаётся", pending: "Ожидает оплаты", confirmed: "Подтверждено", canceled: "Отменено", refunded: "Возврат" };
+  const entries = result.recent.map(p => '<li><span>' + escape(p.public_id || p.subject) + ' · ' + escape(planNames[p.plan]) +
+    '<br><small>' + escape(states[p.state]) + ' · ' + (p.mode === "manual" ? "Промодоступ до " + date(p.ends_at) : rub(p.amount)) +
+    '</small></span>' + (p.state === "confirmed" ? button(p.mode === "manual" ? "Отозвать" : "Возврат",
+      p.mode === "manual" ? "billing-revoke" : "billing-refund", p.id) : "") + '</li>').join("");
+  return '<div class="cards">' + summary + budget + grant + '</div><div class="cards">' + plans + '</div>' +
+    card("Подписчики и платежи", entries ? '<ul class="record-list">' + entries + '</ul>' : '<p>Записей пока нет.</p>');
+}
+
+const views = { overview, support, maintenance, updates, roles: access, quota: quotas, billing: subscriptions, audit };
 
 async function saveConfig(values) {
   data(await db.from("cortex_control_config").update({ ...values, updated_at: new Date().toISOString() })
@@ -311,6 +368,24 @@ app.addEventListener("click", async event => {
         break;
       case "refresh": await loadTab(); break;
       case "ticket": ticket = value; await loadTab(); break;
+      case "ticket-filter": supportFilter = value; ticket = null; await loadTab(); break;
+      case "billing-revoke":
+        if (!confirm("Отозвать выданный доступ?")) break;
+        await billingRpc("revoke", { id: value });
+        await loadTab();
+        break;
+      case "billing-refund": {
+        if (!confirm("Запросить полный возврат?")) break;
+        const { session } = data(await db.auth.getSession());
+        if (!session) throw new Error("Войдите в панель снова.");
+        const response = await fetch("/api/billing", { method: "POST",
+          headers: { Authorization: "Bearer " + session.access_token, "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "refund", id: value }) });
+        if (!response.ok) throw new Error("Platega не приняла запрос на возврат.");
+        flash("Запрос на возврат принят.");
+        await loadTab();
+        break;
+      }
       case "menu":
         document.querySelector("#mobile-nav").showModal();
         control.setAttribute("aria-expanded", "true");
@@ -414,10 +489,31 @@ app.addEventListener("submit", async event => {
         data(await db.rpc("cortex_set_admin_role", { p_email: read("email"), p_role: read("role") }));
         break;
       case "ai-config":
-        data(await db.rpc("cortex_admin_ai", { p_operation: "configure", p_limit: Number(read("limit")),
+        data(await db.rpc("cortex_admin_ai", { p_operation: "configure", p_limit: 15000,
           p_day: read("day") ? Number(read("day")) : null, p_minute: read("minute") ? Number(read("minute")) : null,
           p_model: read("model") || null }));
         break;
+      case "billing-plan":
+        await billingRpc("plan", { plan: read("plan"), price: Math.round(Number(read("price")) * 100),
+          tokens: Number(read("tokens")), advanced: Number(read("advanced")), context: Number(read("context")) });
+        break;
+      case "billing-funding":
+        await billingRpc("funding", { micros: Math.round(Number(read("usd")) * 1e6), checkout: formData.has("checkout") });
+        break;
+      case "billing-grant": {
+        const subject = await resolveAccount(read("subject"));
+        if (!subject) throw new Error("Аккаунт не найден.");
+        await billingRpc("grant", { subject, plan: read("plan"), days: Number(read("days")) });
+        break;
+      }
+      case "maintenance-access": {
+        const result = data(await db.rpc("cortex_admin_activity", {
+          p_action: "maintenance", p_id: read("public_id"), p_days: Number(read("days"))
+        }));
+        if (!result) throw new Error("Аккаунт не найден.");
+        flash(result.maintenance_until ? "Доступ до " + date(result.maintenance_until) + " МСК" : "Доступ отозван.");
+        return;
+      }
       case "quota-search":
         quotaId = read("id");
         await loadTab();

@@ -14,8 +14,7 @@ window.CortexControl = (() => {
   layer.innerHTML = '<div class="cortex-guard-card"><div class="cortex-guard-halo" aria-hidden="true"><i></i>' +
     '<img src="art/mark.svg" alt=""></div><h1 id="gate-title"></h1><p class="cortex-guard-copy"></p>' +
     '<div class="cortex-guard-actions"><button type="button" data-gate-update hidden>Обновить CORTEX</button>' +
-    '<button type="button" data-gate-retry>Проверить снова</button><button type="button" data-gate-login hidden>Войти в профиль</button>' +
-    '<button type="button" data-gate-admin>Панель управления</button></div></div>';
+    '<button type="button" data-gate-retry>Проверить снова</button><button type="button" data-gate-login hidden>Войти в профиль</button></div></div>';
   document.body.append(layer);
   const update = layer.querySelector("[data-gate-update]");
   let gate = { mode: "open" }, checking = false, again = false;
@@ -48,12 +47,13 @@ window.CortexControl = (() => {
   }
   layer.querySelector("[data-gate-retry]").addEventListener("click", check);
   layer.querySelector("[data-gate-login]").addEventListener("click", () => window.cortexAdminLogin?.());
-  layer.querySelector("[data-gate-admin]").addEventListener("click", () => send("open-link", { url: "https://cortex-control-phi.vercel.app/" }));
   update.addEventListener("click", () => {
     if (/^https:\/\//.test(gate.update_url || "")) send("open-link", { url: gate.update_url });
   });
 
-  const session = crypto.randomUUID();
+  let session = crypto.randomUUID();
+  let wasVisible = visible();
+  let hiddenAt = 0;
   let lastHeartbeat = 0;
   async function heartbeat() {
     if (!visible() || Date.now() - lastHeartbeat < 42_000) return;
@@ -186,8 +186,18 @@ window.CortexControl = (() => {
     void heartbeat();
     void checkReplies();
   }
-  document.addEventListener("visibilitychange", refresh);
-  window.addEventListener("cortex-app-visibility", refresh);
+  function visibilityChanged() {
+    const nowVisible = visible();
+    if (!nowVisible && wasVisible) hiddenAt = Date.now();
+    if (nowVisible && !wasVisible && Date.now() - hiddenAt >= 45_000) {
+      session = crypto.randomUUID();
+      lastHeartbeat = 0;
+    }
+    wasVisible = nowVisible;
+    refresh();
+  }
+  document.addEventListener("visibilitychange", visibilityChanged);
+  window.addEventListener("cortex-app-visibility", visibilityChanged);
   window.addEventListener("cortex-account-changed", () => {
     inboxRequest?.controller.abort();
     inboxRequest = null;

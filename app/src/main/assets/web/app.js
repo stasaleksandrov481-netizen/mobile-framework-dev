@@ -27,7 +27,8 @@
   let route = "home", chatId = "", rule = "goal";
   let accountMode = "password", accountEmail = "";
   let pending, login, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
-  let connectionLoad, loginCleanup;
+  let connectionLoad, loginCleanup, subscriptionLoad;
+  let subscriptionEpoch = 0;
   let keyboardBaseline = 0, keyboardObserved = false, historySearchTimer = 0;
   let statusEpoch = 0, splashFrame = 0, splashTimer = 0, splashPrevious = null;
 
@@ -285,6 +286,7 @@
     }
     if (permissionsPage()) sendDevice("permissions");
     Planner.enter(route);
+    if (route === "subscription") void refreshSubscription();
   }
 
   function readRoute() {
@@ -312,6 +314,7 @@
     }
     if (permissionsPage()) sendDevice("permissions");
     Planner.enter(route);
+    if (route === "subscription") void refreshSubscription();
   }
 
   function back() {
@@ -506,6 +509,9 @@
     M.useAccount(account);
     if (changed) {
       connection.quota = null;
+      connection.subscription = null;
+      connection.subscriptionError = "";
+      subscriptionEpoch++;
       drafts.clear();
       errors.clear();
       ruleDrafts.clear();
@@ -550,11 +556,56 @@
     }
   }
 
+  async function refreshSubscription() {
+    const epoch = ++subscriptionEpoch;
+    const account = S.account?.id;
+    connection.subscriptionError = "";
+    subscriptionLoad = Api.request("subscription");
+    try {
+      const data = await subscriptionLoad;
+      if (epoch !== subscriptionEpoch || account !== S.account?.id) return;
+      connection.subscription = data;
+      connection.quota = data.quota || connection.quota;
+    } catch (error) {
+      if (epoch !== subscriptionEpoch || account !== S.account?.id) return;
+      connection.subscriptionError = error.message;
+    } finally {
+      if (epoch === subscriptionEpoch) {
+        subscriptionLoad = null;
+        if (route === "subscription" && account === S.account?.id) render();
+      }
+    }
+  }
+
+  let paymentInProgress = false;
+  async function subscriptionAction(operation, value) {
+    if (paymentInProgress) return;
+    if (!S.account) { navigate("account"); return; }
+    paymentInProgress = true;
+    const account = S.account.id;
+    try {
+      const payload = operation === "status" ? { operation, id: value } : { operation, plan: value };
+      const result = await Api.request("subscription-payment", { payload });
+      if (account !== S.account?.id) return;
+      if (result.checkout_url) {
+        const url = Markdown.webUrl(result.checkout_url);
+        if (!url || !sendDevice("open-link", { url })) flash("Не удалось открыть страницу оплаты.");
+      } else if (operation === "status") {
+        flash(result.state === "confirmed" ? "Оплата подтверждена." : "Статус платежа обновлён.");
+      }
+      if (route === "subscription") await refreshSubscription();
+    } catch (error) {
+      if (account === S.account?.id) flash(error.message);
+    } finally {
+      paymentInProgress = false;
+    }
+  }
+
   addEventListener("cortex-quota", event => {
     const quota = event.detail;
     if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
     connection.quota = quota;
-    if (["profile", "models"].includes(route)) render();
+    if (["profile", "models", "subscription"].includes(route)) render();
   });
 
   function updateLogin(message) {
@@ -1341,6 +1392,10 @@
       haptic(); navigate(value, { origin: control });
     },
     go: (value, control) => navigate(value, { origin: control }),
+    "subscription-refresh": () => { if (!subscriptionLoad) void refreshSubscription(); },
+    "subscription-checkout": value => void subscriptionAction("checkout", value),
+    "subscription-renew": value => void subscriptionAction("renew", value),
+    "subscription-status": value => void subscriptionAction("status", value),
     back, close: dismissSheet,
     confirm() {
       const run = activeSheet?.confirm;
