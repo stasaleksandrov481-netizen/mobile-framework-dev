@@ -19,15 +19,19 @@ window.CortexControl = (() => {
   const update = layer.querySelector("[data-gate-update]");
   let gate = { mode: "open" }, checking = false, again = false;
   function applyGate(value, canSignIn) {
-    if (!["open", "maintenance", "update"].includes(value?.mode)) return;
+    if (!["open", "maintenance", "update", "beta"].includes(value?.mode)) return;
     gate = value;
     layer.hidden = gate.mode === "open";
     send("gate-state", { mode: gate.mode });
     if (layer.hidden) return;
-    layer.querySelector("h1").textContent = gate.mode === "maintenance" ? "Скоро вернёмся" : "Обновите CORTEX";
-    const copy = gate.mode === "maintenance"
-      ? "Мы обслуживаем CORTEX. Попробуйте проверить доступ чуть позже."
-      : "Установите свежую версию, чтобы продолжить.";
+    const titles = { maintenance: "Скоро вернёмся", update: "Обновите CORTEX", beta: "Закрытая бета" };
+    const descriptions = {
+      maintenance: "Мы обслуживаем CORTEX. Попробуйте проверить доступ чуть позже.",
+      update: "Установите свежую версию, чтобы продолжить.",
+      beta: "Войдите в аккаунт, допущенный к закрытому тестированию."
+    };
+    layer.querySelector("h1").textContent = titles[gate.mode];
+    const copy = descriptions[gate.mode];
     layer.querySelector(".cortex-guard-copy").textContent = String(gate.message || copy).slice(0, 400);
     layer.dataset.mode = gate.mode;
     layer.querySelector("[data-gate-login]").hidden = !canSignIn;

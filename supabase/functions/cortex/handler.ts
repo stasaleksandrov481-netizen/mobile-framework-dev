@@ -487,7 +487,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
           yandex, email_login: emailLogin, email_auth: emailReady, account: account ? { ...account, public_id: publicId } : null, guest: guests, support: storage, device_tools: true,
           device_profiles: true, device_repair: true, device_action_plan: true, visual_plan: true, model_fallback: true,
-          ...(storage ? { gate: await control.gate(request, account?.id), quota } : { fault: "storage_config" }),
+          ...(storage ? { gate: await control.gate(request, account), quota } : { fault: "storage_config" }),
         });
       }
       if (path === "/v1/subscription" && method === "GET") {
@@ -501,6 +501,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       if (path === "/v1/subscription/payment" && method === "POST") {
         const caller = await actor(request);
         if (!caller.account) throw new Failure("sign_in", 401);
+        const gate = await control.gate(request, caller.account);
+        if (gate.mode !== "open") throw new Failure(gate.mode, 403);
         if (!billingOrigin || !billingToken) throw new Failure("payments_disabled", 503);
         await reserve({ bucket: "billing:" + caller.bucket, seconds: 60, maximum: 6 });
         const input = await body(request, 2048);
@@ -529,7 +531,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const device = request.headers.get("x-cortex-device") || "";
         const stable = /^[a-f0-9]{16}$/.test(device) ? await hash("cortex-device-v1:" + device) : null;
         await control.presence(install, input, /^[A-Za-z0-9.+-]{1,24}$/.test(version) ? version : "unknown", stable, account?.id);
-        return json({ gate: await control.gate(request, account?.id) });
+        return json({ gate: await control.gate(request, account) });
       }
       if (method === "POST" && path === "/v1/auth/start") {
         return await begin(request, url.searchParams.get("return") === "android", url.searchParams.get("scheme"));
@@ -549,7 +551,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const input = isChat ? chatInput(await body(request, 260_000)) : {
           messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
         };
-        const gate = await control.gate(request, caller.account?.id);
+        const gate = await control.gate(request, caller.account);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
         const id = await subject(request, caller.account);
         if (!id) throw new Failure("sign_in", 401);

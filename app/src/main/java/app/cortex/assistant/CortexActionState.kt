@@ -29,7 +29,7 @@ internal object CortexActionState {
         private set
 
     fun setGate(mode: String) {
-        gate = if (mode in setOf("maintenance", "update")) mode else "open"
+        gate = if (mode in setOf("maintenance", "update", "beta")) mode else "open"
         if (gate != "open") stop()
     }
 

@@ -266,12 +266,12 @@ async function quotas() {
     field("model", "Основная бесплатная модель", "text", config.model, 'maxlength="120" placeholder="provider/model:free"') +
     '<p>Лимиты запросов ограничены параметрами аккаунта OpenRouter, указанными на сервере.</p>', "Сохранить"));
   const search = form("quota-search", field("id", "ID профиля или гостя", "text", quotaId,
-    'maxlength="50" required autocomplete="off"'), "Найти");
+    'maxlength="50" placeholder="@id000001" required autocomplete="off"'), "Найти");
   if (!quotaId) return budget + card("Поиск по ID", search);
   const target = await resolveAccount(quotaId);
   const quota = target && data(await db.rpc("cortex_admin_ai", { p_subject: target }));
   if (!quota) return budget + card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
-  const summary = "<p>" + escape(quota.id) + "</p><p>Использовано " + dateNumber(quota.used) +
+  const summary = "<p>" + escape(quotaId) + " · " + escape(planNames[quota.plan] || "—") + "</p><p>Использовано " + dateNumber(quota.used) +
     " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + " токенов</p>" +
     "<p>Сброс в 03:00 по Москве.</p>";
   return budget + card("Поиск по ID", search) + card("Суточный лимит", summary +

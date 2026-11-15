@@ -131,3 +131,61 @@ returns boolean language sql stable set search_path = ''
 as $$ select cortex_private.control_signin() $$;
 revoke execute on function cortex_private.control_signin(),public.cortex_control_signin() from public,anon;
 grant execute on function cortex_private.control_signin(),public.cortex_control_signin() to authenticated;
+
+-- Accept newly registered CORTEX accounts before their first cloud request.
+CREATE OR REPLACE FUNCTION cortex_private.admin_ai(p_subject text, p_operation text, p_limit integer, p_day integer, p_minute integer, p_model text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare
+    caller uuid := auth.uid();
+begin
+    if caller is null or coalesce(auth.jwt()->>'aal', '') <> 'aal2' or not exists (
+        select 1 from public.cortex_admin_roles where user_id = caller and role::text in ('owner', 'admin')
+    ) or not exists (
+        select 1 from auth.sessions where user_id = caller and id::text = auth.jwt()->>'session_id'
+    ) then
+        raise exception 'Administrative access required' using errcode = '42501';
+    end if;
+
+    if p_operation in ('config', 'configure') then
+        if p_operation = 'configure' then
+            perform pg_advisory_xact_lock(140387, 1);
+            if p_limit is null then raise exception 'Enter a daily token limit' using errcode = '22023'; end if;
+            update public.cortex_ai_settings set daily_tokens = p_limit, requests_day = p_day,
+                requests_minute = p_minute, model = nullif(p_model, '') where singleton;
+            insert into cortex_private.ai_changes (admin_id, subject, operation, daily_tokens)
+                values (caller, 'openrouter', 'token_config', p_limit);
+        end if;
+        return (select to_jsonb(s) - 'singleton' from public.cortex_ai_settings s where s.singleton);
+    end if;
+
+    if p_subject is null or p_subject !~ '^(guest_[A-Za-z0-9_-]{43}|yandex_[A-Za-z0-9_-]{43}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})$' then
+        return null;
+    end if;
+    if not exists (select 1 from public.cortex_ai_limits where subject = p_subject)
+        and not exists (select 1 from public.cortex_ai_attempts where subject = p_subject)
+        and not exists (select 1 from public.cortex_installs where 'guest_' || install_hash = p_subject)
+        and not exists (select 1 from auth.users where id::text = p_subject)
+        and not exists (select 1 from public.cortex_public_accounts where subject = p_subject) then return null;
+    end if;
+
+    if p_operation = 'read' then return public.cortex_ai_usage(p_subject); end if;
+    if p_operation is null or p_operation not in ('limit', 'reset', 'unlimited', 'revoke')
+        or (p_operation = 'limit' and p_limit is null) then
+        raise exception 'Invalid quota operation' using errcode = '22023';
+    end if;
+    perform pg_advisory_xact_lock(140387, 1);
+    insert into public.cortex_ai_limits (subject) values (p_subject) on conflict (subject) do nothing;
+    update public.cortex_ai_limits l set
+        daily_tokens = case when p_operation = 'limit' then p_limit when p_operation = 'revoke' then null else l.daily_tokens end,
+        unlimited = case when p_operation = 'unlimited' then true when p_operation in ('limit', 'revoke') then false else l.unlimited end,
+        cleared_at = case when p_operation = 'reset' then clock_timestamp() else l.cleared_at end
+        where l.subject = p_subject;
+    insert into cortex_private.ai_changes (admin_id, subject, operation, daily_tokens)
+        values (caller, p_subject, 'token_' || p_operation, p_limit);
+    return public.cortex_ai_usage(p_subject);
+end
+$function$;
