@@ -206,3 +206,23 @@ h1,h2,h3,p{margin:0}
   .hero-visual{min-height:695px}
   .phone-stage{height:700px}
 }
+
+/* Real WebGL phone: an unobstructed black studio presentation. */
+.hero-visual{background:transparent}
+.phone-stage--webgl{position:relative;min-height:0;isolation:isolate}
+.phone-viewport{position:absolute;inset:0;outline:none}
+.phone-viewport:focus-visible{outline:2px solid rgba(255,255,255,.8);outline-offset:-7px;border-radius:24px}
+.phone-stage--webgl .phone-viewport canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+.phone-stage--webgl .phone-viewport[data-dragging="true"] canvas{cursor:grabbing}
+.phone-fallback{position:absolute;left:50%;top:50%;width:238px;height:auto;transform:translate(-50%,-50%);border:8px solid #121212;border-radius:36px;box-shadow:0 30px 65px #000}
+
+/* Rounded controls, with white as the primary action color. */
+.button,.header-action{border-radius:999px}
+.button--outline{border-color:#e0e0e0;color:#f6f6f6}
+.button--outline:hover{background:#f6f6f6;color:#0a0a0a}
+.eyebrow{border-radius:999px}
+.header-action{border-color:#c5c5c5;color:#fff}
+.header-action:hover{background:#f2f2f2;color:#090909}
+
+@media(max-width:800px){.phone-stage--webgl{min-height:0}}
+@media(max-width:530px){.phone-stage--webgl{height:490px}.phone-fallback{width:170px}}

@@ -1,4 +1,4 @@
-import InteractivePhone from "@/components/InteractivePhone";
+import PhoneModel from "@/components/PhoneModel";
 
 const icons = {
   voice: <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="12" y="4" width="8" height="16" rx="4" stroke="currentColor" strokeWidth="1.6"/><path d="M8 16a8 8 0 0016 0M16 24v4m-5 0h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>,
@@ -43,10 +43,8 @@ export default function Home() {
               <div className="hero-footnote"><span className="mini-stack" aria-hidden="true"><span /><span /><span /></span> Android · Голос · Действия · Сценарии</div>
             </div>
             <div className="hero-visual">
-              <div className="backdrop-halo" aria-hidden="true" />
-              <InteractivePhone />
+              <PhoneModel />
             </div>
-            <div className="hero-rail" aria-hidden="true"><span>УПРАВЛЕНИЕ БЕЗ ЛИШНИХ ДВИЖЕНИЙ</span><span>SCROLL TO EXPLORE ↓</span></div>
           </section>
           <div className="ticker" aria-label="Функции CORTEX"><div className="ticker-inner"><span>ГОЛОСОВОЙ ИНТЕРФЕЙС</span><span className="diamond">✦</span><span>ДЕЙСТВИЯ В ANDROID</span><span className="diamond">✦</span><span>УМНЫЕ СЦЕНАРИИ</span><span className="diamond">✦</span><span>ЛОКАЛЬНЫЕ КОМАНДЫ</span><span className="diamond">✦</span><span>ГОЛОСОВОЙ ИНТЕРФЕЙС</span></div></div>
           <section className="features-section" id="capabilities">
