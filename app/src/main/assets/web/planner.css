@@ -208,16 +208,16 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-width: 112px;
-  min-height: 40px;
+  width: var(--island-width, 132px);
+  min-height: var(--island-height, 40px);
   padding: 7px 14px;
   color: var(--island-text);
   background: var(--island-bg);
   background: color-mix(in srgb, var(--island-bg) var(--island-opacity), transparent);
   border: var(--island-weight) solid var(--island-style-border);
   border-radius: var(--island-radius);
-  scale: var(--island-size);
   font-size: .76rem;
+  white-space: nowrap;
 }
 .plan-logo {
   width: 17px;
@@ -225,7 +225,7 @@
   mask: url("art/mark.svg") center / contain no-repeat;
   background: var(--island-text);
 }
-.plan-island-sample i { position: absolute; inset: auto 36% 3px; height: 2px; border-radius: 5px; background: var(--island-accent); }
+.plan-island-sample > i { position: absolute; inset: auto 36% 3px; height: 2px; border-radius: 5px; background: var(--island-accent); }
 .quota-panel, .faq { padding: 14px 15px; }
 .quota-balance { display: flex; align-items: baseline; gap: 8px; }
 .quota-balance strong { font-size: 1.7rem; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -244,8 +244,6 @@
 .quota-history summary { cursor: pointer; min-height: 44px; padding: 11px 0; }
 .quota-history ul { padding: 0; margin: 0; list-style: none; }
 .quota-history li { display: flex; justify-content: space-between; padding: 6px 0; border-top: 1px solid var(--hairline); }
-.faq-filters { display: flex; flex-wrap: wrap; gap: 6px; }
-.faq-filters .pill { min-height: 44px; }
 .faq details[open] > p { animation: faq-answer .18s var(--ease) both; }
 @keyframes faq-answer { from { opacity: .3; transform: translateY(-3px); } }
 .reduce-motion .faq details[open] > p { animation: none; }
@@ -291,7 +289,7 @@
 .scenario-empty p { color: var(--ink-muted); font-size: .93rem; }
 .scenario-empty .action { margin-top: 6px; }
 .scenario-illustration { width: 100%; display: flex; align-items: center; gap: 5px; margin-block: 4px 12px; }
-.scenario-illustration span { width: 43px; aspect-ratio: 1; flex-shrink: 0; display: grid; place-items: center; border-radius: 14px; background: #10111580; border: 1px solid #ffffff27; }
+.scenario-illustration span { width: 43px; aspect-ratio: 1; flex-shrink: 0; display: grid; place-items: center; border-radius: 14px; background: #11111180; border: 1px solid #ffffff27; }
 .scenario-illustration span:nth-of-type(2) { width: 53px; box-shadow: inset 0 1px #ffffff24, 0 5px 17px #0007; }
 .scenario-illustration i { display: block; height: 1px; width: clamp(5px, 6vw, 32px); background: #ffffff5e; }
 .scenario-draft, .scenario-card, .scenario-assist {
@@ -325,17 +323,18 @@
   z-index: 2;
   top: 0;
   min-height: 126px;
-  background: radial-gradient(ellipse at 62% 8%, #ffffff21, transparent 58%), #1b1c20;
+  background: radial-gradient(ellipse at 62% 8%, #ffffff21, transparent 58%), #1c1c1c;
   border-color: #ffffff32;
 }
 .plan-face {
+  flex: 0 0 24px;
   display: inline-grid;
   grid-template-columns: repeat(2, 3px);
   grid-template-rows: 4px 5px;
   place-content: center;
   gap: 2px 3px;
   background: #eee;
-  color: #17181b;
+  color: #181818;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -366,8 +365,8 @@
 .quota-balance strong { font-size: clamp(1.85rem, 8vw, 2.55rem); font-weight: 660; letter-spacing: -.045em; }
 .quota-balance small { color: var(--ink-muted); }
 .quota-track { height: 6px; background: #ffffff16; }
-.quota-track span { border-radius: inherit; background: linear-gradient(90deg, #b7b8c0, #f4f4f8); }
+.quota-track span { border-radius: inherit; background: linear-gradient(90deg, #b8b8b8, #f4f4f4); }
 .quota-history summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; list-style: none; }
 .quota-bars { display: flex; width: 69px; height: 20px; align-items: flex-end; gap: 3px; }
-.quota-bars i { flex: 1; height: var(--bar); border-radius: 2px; background: #e9e9ef91; }
-.quota-bars i:last-child { background-color: #f0f0f6; }
+.quota-bars i { flex: 1; height: var(--bar); border-radius: 2px; background: #e9e9e991; }
+.quota-bars i:last-child { background-color: #f0f0f0; }

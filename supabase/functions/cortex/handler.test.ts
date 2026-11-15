@@ -9,7 +9,7 @@ const accountId = "98d87a12-240b-4a57-95e0-7bc0bbbd0f42";
 const ticketId = "2f343286-09bb-4e8e-9aa3-21ecc664219b";
 const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
-function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50) {
+function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50, emailReady = true) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -31,7 +31,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
     OPENROUTER_API_KEY: "test-key",
     YANDEX_CLIENT_ID: "yandex-test-app",
     YANDEX_CLIENT_SECRET: "yandex-test-secret",
-    CORTEX_EMAIL_AUTH: "true",
+    CORTEX_EMAIL_AUTH: emailReady ? "true" : undefined,
     OPENROUTER_MODEL: "example/unavailable:free",
     OPENROUTER_FALLBACK_MODEL: "example/working:free",
   }, async (input, init) => {
@@ -47,6 +47,20 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       assert.equal(body.provider.max_price.completion, 0);
       assert.match(body.model, /:free$/);
       models.push(body.model);
+      if (body.tools?.[0]?.function?.name === "plan_android_screen") {
+        assert.equal(body.tool_choice, "required");
+        assert.equal(body.stream, false);
+        return Response.json({ choices: [{ message: { tool_calls: [{
+          function: { name: "plan_android_screen", arguments: '{"steps":[{"action":"unknown"}]}' },
+        }] } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
+      }
+      if (body.response_format?.type === "json_schema") {
+        assert.equal(body.provider.require_parameters, true);
+        assert.equal(body.provider.sort, "latency");
+        return Response.json({ choices: [{ message: { content: JSON.stringify({
+          steps: [{ action: "open", target: "Настройки" }, { action: "tap", target: "Дисплей" }], done: true,
+        }) } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
+      }
       if (body.model === "example/unavailable:free") {
         return Response.json({ error: { metadata: { provider_name: "upstream" } } }, { status: 429 });
       }
@@ -395,4 +409,28 @@ test("delivers an explicit error after interrupted output and ends the stream", 
   const stream = await response.text();
   assert.match(stream, /data: {"delta":"Начало ответа"}/);
   assert.match(stream, /data: {"error":"provider"}\n\n$/);
+});
+
+test("a malformed visual tool response is replaced by a validated plan and both calls are counted", async () => {
+  const { call, models } = fixture();
+  const response = await call("chat", { messages: [{ role: "user", content: "Открой настройки и раздел Дисплей" }],
+    visual_plan: true, profile: "fast" });
+  assert.equal(response.status, 200);
+  const { text, quota } = await response.json();
+  assert.deepEqual(JSON.parse(text).steps.map((step: { action: string }) => step.action), ["open", "tap"]);
+  assert.equal(quota.used, 200);
+  assert.equal(models.length, 2);
+});
+
+test("verified password login is available during SMTP configuration", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, false);
+  const status = await (await call("status")).json();
+  assert.equal(status.email_login, true);
+  assert.equal(status.email_auth, false);
+  const credentials = { email: "admin@example.test", password: "a-test-password" };
+  const unavailable = await call("auth/signup", credentials);
+  assert.equal((await unavailable.json()).error, "account_config");
+  assert.ok(!requests.includes("POST /auth/v1/signup"));
+  const signedIn = await call("auth/password", credentials);
+  assert.equal((await signedIn.json()).state, "signed_in");
 });

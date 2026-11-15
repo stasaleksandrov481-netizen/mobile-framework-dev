@@ -4,50 +4,149 @@
   inset: 0;
   overflow: auto;
   display: grid;
-  align-content: center;
+  place-items: center;
+  padding: 24px;
+  background: #000;
+}
+.cortex-guard-card {
+  width: min(100%, 390px);
+  display: grid;
   justify-items: center;
-  gap: 16px;
-  padding: 28px;
+  gap: 15px;
+  padding: clamp(24px, 7vw, 40px) clamp(16px, 6vw, 34px);
+  border: 1px solid #ffffff31;
+  border-radius: 30px;
+  background: radial-gradient(ellipse at 50% 0%, #ffffff17, transparent 60%), #000;
   text-align: center;
-  background: radial-gradient(ellipse at 50% 33%, #1b1b1b, #030303 68%);
 }
 .cortex-guard-halo {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 80px;
-  height: 80px;
-  border: 1px solid #555;
-  border-radius: 28px;
-  background: linear-gradient(150deg, #2d2d2d, #0a0a0a);
+  width: 88px;
+  aspect-ratio: 1;
+  border: 1px solid #ffffff49;
+  border-radius: 27px;
+  background: linear-gradient(150deg, #ffffff20, transparent 65%);
+  margin-bottom: 5px;
 }
-.cortex-guard-halo img { width: 42px; }
-.cortex-guard h1 { font-size: clamp(1.8rem, 8vw, 2.6rem); letter-spacing: -.045em; }
-.cortex-guard-copy { max-width: 32ch; color: #ccc; line-height: 1.5; }
-.cortex-guard-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.cortex-guard button, .cortex-inbox button {
-  min-height: 44px;
-  padding: 0 14px;
-  border-radius: 15px;
-  border: 1px solid #666;
-  background: #1b1b1b;
+.cortex-guard-halo i {
+  position: absolute;
+  inset: 11px;
+  border: 1px solid #ffffff39;
+  border-radius: 50%;
+  transform: rotate(-34deg) scaleY(.6);
+}
+.cortex-guard-halo img { position: relative; width: 46px; }
+.cortex-guard h1 { font-size: clamp(1.68rem, 7vw, 2.45rem); line-height: 1.08; letter-spacing: -.05em; }
+.cortex-guard-copy { max-width: 34ch; color: rgb(255 255 255 / .78); line-height: 1.55; }
+.cortex-guard-actions { width: 100%; display: grid; gap: 7px; margin-top: 8px; }
+.cortex-guard-actions button {
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid #ffffff37;
+  background: #000;
   color: #fff;
 }
-.cortex-guard button:first-child { background: #eee; color: #111; }
+.cortex-guard[data-mode="maintenance"] [data-gate-retry],
+.cortex-guard[data-mode="update"] [data-gate-update] { background: #fff; color: #000; border-color: #fff; font-weight: 650; }
+.cortex-guard [data-gate-admin] { border-color: transparent; color: #ffffffa9; font-size: .84rem; }
+.cortex-guard button:active { scale: .97; }
+
 .cortex-inbox {
-  width: min(92vw, 34rem);
-  max-height: 80vh;
-  padding: 16px;
-  background: #121212;
+  position: fixed;
+  inset: 0;
+  width: min(100%, 490px);
+  height: min(100dvh, 840px);
+  max-width: 100vw;
+  max-height: 100dvh;
+  padding: 0;
+  margin: auto;
   color: #fff;
-  border: 1px solid #444;
-  border-radius: 24px;
+  background: #000;
+  border: 1px solid #ffffff25;
+  border-radius: 0;
+  overflow: hidden;
 }
-.cortex-inbox::backdrop { background: #000c; }
-.cortex-inbox > header, .cortex-inbox article header { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
-.cortex-inbox > header { margin-bottom: 12px; }
-.cortex-inbox-main { display: grid; gap: 10px; }
-.cortex-inbox article { border: 1px solid #373737; border-radius: 17px; padding: 12px; background: #191919; }
-.cortex-inbox article p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cortex-inbox article small, .ticket-status { font-size: .75rem; color: #bfbfbf; }
-.ticket-status { padding: 3px 8px; border: 1px solid #555; border-radius: 100px; }
-.cortex-inbox aside { margin-top: 10px; padding-inline-start: 10px; border-inline-start: 1px solid #6b6b6b; }
+.cortex-inbox[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.cortex-inbox::backdrop { background: #000c; backdrop-filter: blur(6px); }
+@media (min-width: 630px) {
+  .cortex-inbox { height: min(calc(100dvh - 36px), 840px); border-radius: 26px; }
+}
+.inbox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: max(12px, env(safe-area-inset-top)) 16px 12px;
+  border-bottom: 1px solid #ffffff23;
+}
+.inbox-header > div { flex: 1; min-width: 0; }
+.inbox-header h2 { font-size: 1.25rem; letter-spacing: -.035em; }
+.inbox-header small, .thread-meta, .ticket-date, .ticket-bubble small, .ticket-bubble time { color: #ffffffa9; font-size: .76rem; }
+.inbox-header button {
+  display: grid;
+  place-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border: 1px solid #ffffff30;
+  border-radius: 14px;
+  background: #000;
+  color: #fff;
+}
+.cortex-inbox-main { overflow: auto; overscroll-behavior: contain; padding: 7px 16px 18px; }
+.inbox-empty {
+  min-height: 210px;
+  display: grid;
+  gap: 7px;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  color: #ffffffc2;
+}
+.inbox-empty strong { color: #fff; }
+.thread-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  text-align: left;
+  padding: 13px 3px;
+  border: 0;
+  border-bottom: 1px solid #ffffff24;
+  color: #fff;
+  background: #000;
+}
+.thread-row:active { background: #ffffff0d; }
+.inbox-avatar {
+  display: grid;
+  place-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+  border: 1px solid #ffffff35;
+  background: linear-gradient(145deg, #ffffff12, transparent 70%);
+}
+.inbox-preview { min-width: 0; display: grid; gap: 2px; }
+.inbox-preview span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #ffffffb7; font-size: .84rem; }
+.thread-meta { display: grid; gap: 3px; justify-items: end; }
+.thread-meta small { font-size: .74rem; }
+.in-thread .cortex-inbox-main { display: flex; flex-direction: column; gap: 12px; padding-block: 17px 24px; }
+.ticket-date { align-self: center; }
+.ticket-bubble {
+  display: grid;
+  gap: 4px;
+  padding: 10px 13px;
+  max-width: 88%;
+  min-width: 105px;
+  border: 1px solid #ffffff47;
+  align-self: flex-start;
+  border-radius: 5px 17px 17px;
+  background: #000;
+}
+.ticket-bubble.mine { align-self: flex-end; border-radius: 18px 18px 5px 18px; color: #000; background: #fff; }
+.ticket-bubble.mine :is(small, time) { color: #000a; }
+.ticket-bubble time { justify-self: end; }
+.ticket-bubble p { white-space: pre-wrap; overflow-wrap: anywhere; }

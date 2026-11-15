@@ -19,9 +19,10 @@
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
   const filters = { search: "" };
-  const connection = { yandex: false, email: false, profiles: false, checked: false, visualPrivacy: false,
+  const connection = { yandex: false, email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
     status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
+  let phoneInfo = {};
   const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
   let accountMode = "password", accountEmail = "";
@@ -223,18 +224,7 @@
   }
 
   const box = node => node ? localRect(node.getBoundingClientRect()) : null;
-  const dockCore = () => nav.querySelector(".dock-emblem");
   const permissionsPage = () => ["phone-tools", "permissions", "notifications"].includes(route);
-
-  function playCore(from) {
-    if (reduced()) return;
-    const mark = screen.querySelector("[data-chat-logo] .brand-mark");
-    clearMorph?.();
-    clearMorph = Motion.core(app, from, box(mark));
-    if (mark && clearMorph) headingMotion = mark.animate(
-      [{ opacity: 0, transform: "scale(.87)" }, { opacity: 0, offset: .70 }, { opacity: 1, transform: "none" }],
-      { duration: Motion.coreDuration, easing: "linear" });
-  }
 
   function moveComposer(from, to, cinematic) {
     if (!from || !to || !to.w || !to.h) return;
@@ -259,7 +249,6 @@
     closeHistory(true);
     clearVisuals();
     const before = !composition.hidden ? box(form) : null;
-    const source = cinematic ? box(dockCore()) : null;
     const tabDirection = U.tabs.findIndex(([key]) => key === rootTab(next, id)) >=
       U.tabs.findIndex(([key]) => key === rootTab(previous)) ? 1 : -1;
     const title = box(screen.querySelector(".hero-copy h1"));
@@ -286,9 +275,9 @@
           { transform: `translate(${x}px,${y}px) scale(${title.w / to.w})` }, { transform: "none" }
         ], { duration: 460, easing: "cubic-bezier(.22,.74,.21,1)" });
       }
-      pageMotion = cinematic ? Motion.revealChat(screen.querySelector(".conversation")) : Motion.page(screen, tabDirection, switchesTab);
-      if (cinematic) playCore(source);
-      if (switchesTab) Motion.dock(nav.querySelector("[aria-current=page]"));
+      pageMotion = cinematic ? Motion.revealChat(screen) : Motion.page(screen, tabDirection, switchesTab);
+      if (cinematic) clearMorph = Motion.core(app);
+      if (switchesTab && !cinematic) Motion.dock(nav.querySelector("[aria-current=page]"));
       if (newChat && origin) {
         const point = box(origin);
         Wave.pulse(point.x + point.w / 2, point.y + point.h / 2);
@@ -539,7 +528,8 @@
       connection.checked = true;
       connection.status = "ready";
       connection.yandex = data.yandex === true;
-      connection.email = data.email_auth === true;
+      connection.emailRegistration = data.email_auth === true;
+      connection.email = data.email_login === true || connection.emailRegistration;
       connection.guest = data.guest === true;
       connection.profiles = data.device_profiles === true;
       if (!login) setAccount(data.account);
@@ -552,7 +542,7 @@
     if (route === "account") {
       const status = screen.querySelector("[data-auth-status]");
       if (status) {
-        status.textContent = U.accountAvailability(connection);
+        status.textContent = U.accountAvailability(connection, accountMode);
         status.hidden = !status.textContent;
       }
       const yandexStatus = screen.querySelector("[data-yandex-status]");
@@ -704,10 +694,11 @@
         if (new TextEncoder().encode(values.password).length > 72) throw Api.failure("invalid_password");
       }
       if (!Api.available) throw Api.failure(Api.android ? "webview" : "preview");
-      if (!connection.email || connection.status === "offline") await refreshConnection();
+      const available = () => mode === "password" ? connection.email : connection.emailRegistration;
+      if (!available() || connection.status === "offline") await refreshConnection();
       if (!form.isConnected) return;
       if (connection.status === "offline") throw Api.failure("offline");
-      if (!connection.email) throw new Error(U.accountAvailability(connection));
+      if (!available()) throw new Error(U.accountAvailability(connection, mode));
       const result = await Api.request("auth-" + mode, { payload: {
         name: values.name, email: values.email, password: values.password, code: values.code
       } });
@@ -806,17 +797,15 @@
   }
 
   const activeChat = job => route === "chat" && chatId === job.chatId;
-  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const clock = new Intl.DateTimeFormat("ru-RU", { dateStyle: "full", timeStyle: "short" });
 
   async function respond(chat, job) {
     const request = chat.messages.at(-1)?.text || "";
     const native = await nativeAction(job, request);
     if (native || pending !== job) return native || {};
-    if (device && !connection.checked && connectionLoad) await Promise.race([connectionLoad, wait(2000)]);
     const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
     const deviceContext = {
-      surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
+      ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
@@ -827,7 +816,7 @@
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
     const result = await Api.request("chat", {
       payload: { messages: M.turns(chat, policy), style: M.profile().style,
-        ...(connection.profiles && { profile: S.preferences.model }) },
+        ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }) },
       notify: S.preferences.notifyReplies
     }, {
       signal: job.controller.signal,
@@ -1259,6 +1248,9 @@
     if (message.type === "permissions") {
       if (typeof message.versionName === "string") U.setVersion(message.versionName);
       if (Number.isInteger(message.versionCode)) androidVersionCode = message.versionCode;
+      if (device && typeof message.phoneModel === "string") phoneInfo = {
+        manufacturer: message.manufacturer, model: message.phoneModel, android_version: message.androidRelease
+      };
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1322,24 +1314,21 @@
     render();
   }
 
-  function filterFaq(category) {
+  function filterFaq() {
     const faq = screen.querySelector("[data-faq]");
     if (!faq) return;
-    const selected = category || faq.querySelector('[aria-pressed="true"]')?.dataset.value || "Все";
     const query = faq.querySelector("#faq-search").value.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
-    for (const button of faq.querySelectorAll("[data-action=faq-category]")) {
-      button.setAttribute("aria-pressed", String(button.dataset.value === selected));
-    }
     let found = false;
     for (const row of faq.querySelectorAll("[data-faq-category]")) {
-      const text = row.textContent.toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
-      row.hidden = (selected !== "Все" && row.dataset.faqCategory !== selected) || !text.includes(query);
+      const text = (row.dataset.faqCategory + " " + row.textContent).toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
+      row.hidden = !text.includes(query);
       if (!row.hidden) found = true;
     }
     faq.querySelector("[data-faq-empty]").hidden = found;
   }
 
   const actions = {
+    "support-inbox": () => window.CortexControl?.openInbox(),
     tab(value, control) {
       if (value === "home") {
         if (route === "chat" && !current()?.saved) return;
@@ -1442,7 +1431,6 @@
       control.setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
       control.setAttribute("aria-pressed", String(show));
     },
-    "faq-category": filterFaq,
     logout,
     export: exportChats,
     "open-settings": () => { if (!sendDevice("open-settings")) flash("Этот экран доступен в Android."); },
@@ -1508,7 +1496,7 @@
 
   document.addEventListener("click", event => {
     const control = event.target.closest?.("button, summary");
-    if (control?.matches('.dock-core[aria-current="page"]')) return;
+    if (control?.matches(".dock-core")) return;
     if (control && !reduced()) Motion.press(control);
   }, { capture: true });
 

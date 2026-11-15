@@ -23,9 +23,9 @@ const CortexPlanner = (() => {
   };
   const directions = { down: "Вниз", up: "Вверх", left: "Влево", right: "Вправо" };
   const islandDefaults = {
-    background: "#080808", text: "#ffffff", border: "#afafaf", accent: "#ffffff", faceColor: "#e5e5e5",
-    opacity: 100, size: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .9, motion: "liquid",
-    face: true, status: true, progress: true, quick: true, results: true
+    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
+    opacity: 82, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .9, motion: "liquid",
+    face: true, status: true, progress: true, quick: true, results: true, music: true, battery: false
   };
   const islandPresets = {
     "Монохром": islandDefaults,
@@ -273,6 +273,10 @@ const CortexPlanner = (() => {
       if (typeof fallback === "boolean" || typeof fallback === "number" && Number.isFinite(current) ||
           typeof fallback === "string" && (key === "motion" ? ["liquid", "soft", "none"].includes(current) : /^#[0-9a-f]{6}$/i.test(current))) value[key] = current;
     }
+    if (!Object.hasOwn(given, "widthScale") && value.background.toLowerCase() === "#080808" && value.opacity === 100) {
+      value.background = islandDefaults.background;
+      value.opacity = islandDefaults.opacity;
+    }
     return value;
   }
 
@@ -281,11 +285,12 @@ const CortexPlanner = (() => {
     const size = Math.max(80, Math.min(125, data.size));
     return `<span class="plan-camera"></span>
       <div class="plan-island-wrap" style="transform:translate(${clamp(data.offsetX, -75, 75) / 2}px,${clamp(data.offsetY, 0, 80) / 3}px)">
-        ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}"><i></i><i></i><b></b></span>` : ""}
         <div class="plan-island-sample" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
-          --island-accent:${data.accent};--island-opacity:${Math.max(40, Math.min(100, data.opacity))}%;--island-size:${size}%;
-          --island-radius:${Math.max(12, Math.min(32, data.corner))}px;--island-weight:${Math.max(0, Math.min(3, data.borderWidth))}px">
-          <span class="plan-logo" aria-hidden="true"></span>${data.status ? "<span>Слушаю…</span>" : ""}
+          --island-accent:${data.accent};--island-opacity:${clamp(data.opacity, 40, 100)}%;
+          --island-width:${132 * size * clamp(data.widthScale, 80, 125) / 10000}px;--island-height:${40 * size * clamp(data.heightScale, 90, 125) / 10000}px;
+          --island-radius:${clamp(data.corner, 12, 32)}px;--island-weight:${clamp(data.borderWidth, 0, 3)}px">
+          ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}"><i></i><i></i><b></b></span>` : '<span class="plan-logo" aria-hidden="true"></span>'}
+          ${data.status ? "<span>Слушаю…</span>" : ""}
           ${data.progress ? '<i aria-hidden="true"></i>' : ""}</div>
         <span class="plan-size-grip" aria-hidden="true"></span>
       </div>`;
@@ -303,7 +308,8 @@ const CortexPlanner = (() => {
     return detail("Островок", "Оформление", `<div class="plan-island-preview glass-card" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
       <p class="muted plan-hint">Перетащите островок. Потяните за угол, чтобы изменить размер.</p>
       <div class="actions">${Object.keys(islandPresets).map(title => action(title, "island-preset", title)).join("")}</div>
-      <section class="panel stack"><h2>Положение и форма</h2>${slider("size", "Размер", 80, 125)}
+      <section class="panel stack"><h2>Положение и форма</h2>${slider("size", "Общий масштаб", 80, 125)}
+        ${slider("widthScale", "Ширина", 80, 125)}${slider("heightScale", "Высота", 90, 125)}
         ${slider("offsetX", "Сдвиг влево и вправо", -75, 75)}${slider("offsetY", "Сдвиг вниз", 0, 80)}
         ${slider("corner", "Скругление", 12, 32)}${slider("borderWidth", "Толщина границы", 0, 3, .1)}
         ${slider("opacity", "Непрозрачность", 40, 100)}
@@ -312,7 +318,8 @@ const CortexPlanner = (() => {
         `<button type="button" class="plan-swatch" data-plan="palette" data-value="${key}">
           <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></section>
       <section class="panel stack"><h2>Виджеты</h2>${widget("face", "Смайлик со статусом")}${widget("status", "Статус")}
-        ${widget("progress", "Полоса прогресса")}${widget("quick", "Быстрые команды")}${widget("results", "Результат действий")}</section>`);
+        ${widget("progress", "Полоса прогресса")}${widget("quick", "Быстрые команды")}${widget("results", "Результат действий")}
+        ${widget("music", "Индикатор воспроизведения") }${widget("battery", "Заряд устройства")}</section>`);
   }
 
   function hsvFromHex(hex) {

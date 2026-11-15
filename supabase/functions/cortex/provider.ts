@@ -23,7 +23,7 @@ const CORTEX_IDENTITY = "Ты CORTEX, встроенный помощник пр
   "Соблюдай формат, указанный для задачи, включая ответы JSON для планировщика.";
 const SUPPORT_KINDS = new Set(["contact", "bug", "idea", "complaint"]);
 const TICKET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const RETRYABLE_MODEL_ERRORS = new Set(["empty", "model", "provider", "provider_access", "provider_limit", "provider_limit_unknown", "timeout"]);
+const RETRYABLE_MODEL_ERRORS = new Set(["empty", "invalid_plan", "model", "provider", "provider_access", "provider_limit", "provider_limit_unknown", "timeout"]);
 export const retryableModelError = (code: unknown) => typeof code === "string" && RETRYABLE_MODEL_ERRORS.has(code);
 
 export async function body(request: Request, limit = 770_000): Promise<Record<string, unknown>> {
@@ -53,11 +53,12 @@ export async function body(request: Request, limit = 770_000): Promise<Record<st
 }
 
 export type ModelProfile = "auto" | "fast" | "deep";
-export function chatInput(input: Record<string, unknown>): { messages: Turn[]; limit: number; device: boolean; repair: boolean; plan: boolean; profile?: ModelProfile } {
-  const { messages, style = "balanced", device_tools = false, repair_tools = false, action_plan = false, profile } = input;
-  if (Object.keys(input).some(key => !["messages", "style", "device_tools", "repair_tools", "action_plan", "profile"].includes(key)) ||
+export function chatInput(input: Record<string, unknown>): { messages: Turn[]; limit: number; device: boolean; repair: boolean; plan: boolean; visual: boolean; profile?: ModelProfile } {
+  const { messages, style = "balanced", device_tools = false, repair_tools = false, action_plan = false, visual_plan = false, profile } = input;
+  if (Object.keys(input).some(key => !["messages", "style", "device_tools", "repair_tools", "action_plan", "visual_plan", "profile"].includes(key)) ||
     profile !== undefined && profile !== "auto" && profile !== "fast" && profile !== "deep" ||
     typeof device_tools !== "boolean" || typeof repair_tools !== "boolean" || typeof action_plan !== "boolean" ||
+    typeof visual_plan !== "boolean" || visual_plan && device_tools ||
     (repair_tools || action_plan) && !device_tools || typeof style !== "string" || !Object.hasOwn(LIMITS, style) || !Array.isArray(messages) ||
     messages.length < 1 || messages.length > 29) throw new Failure("invalid", 400);
   let length = 0;
@@ -69,7 +70,8 @@ export function chatInput(input: Record<string, unknown>): { messages: Turn[]; l
     return { role: turn.role, content: turn.content };
   });
   if (length > 51_000 || turns.at(-1)?.role !== "user") throw new Failure("invalid", 400);
-  return { messages: turns, limit: LIMITS[style as keyof typeof LIMITS], device: device_tools, repair: repair_tools, plan: action_plan, profile };
+  return { messages: turns, limit: LIMITS[style as keyof typeof LIMITS], device: device_tools, repair: repair_tools,
+    plan: action_plan, visual: visual_plan, profile };
 }
 
 function retrySeconds(headers: Headers): number {
@@ -177,6 +179,7 @@ export async function completion(
   network: Network, key: string, models: string[], messages: Turn[], stream: boolean, limit: number,
   signal: AbortSignal, device = false, repair = false, firstTokenMs = 18_000, quick = false, plan = false,
   hold?: (estimatedInput: number, output: number) => Promise<Reservation>,
+  visualOutput?: Record<string, unknown>,
 ): Promise<ModelResponse> {
   if (!key || !models.length || models.some(model => !/^[a-z0-9._-]+\/[a-z0-9._-]+:free$/.test(model))) {
     throw new Failure("unconfigured", 503);
@@ -191,9 +194,9 @@ export async function completion(
     ? [{ role: "system", content: CORTEX_IDENTITY + "\n\n" + first.content + guide }, ...messages.slice(1)]
     : [{ role: "system", content: CORTEX_IDENTITY + guide }, ...messages];
   const toolInput = device ? { tools, tool_choice: repair ? "required" : "auto" } : {};
-  const requested = plan ? Math.max(limit, 1600) : limit;
+  const requested = visualOutput ? 740 : plan ? Math.max(limit, 1600) : limit;
   // Only provider-reported usage is charged. The estimate protects concurrent in-flight calls.
-  const estimatedInput = Math.ceil(new TextEncoder().encode(JSON.stringify({ messages, ...toolInput })).length / 3) + 128;
+  const estimatedInput = Math.ceil(new TextEncoder().encode(JSON.stringify({ messages, ...toolInput, visualOutput })).length / 3) + 128;
   const reservation = await hold?.(estimatedInput, requested);
   let usage: MeasuredUsage | null = null;
   let generationId = "";
@@ -231,11 +234,13 @@ export async function completion(
       },
       body: JSON.stringify({
         ...(models.length === 1 ? { model: models[0] } : { models }), messages, stream,
-        max_tokens: reservation?.maxOutput ?? requested, temperature: plan ? .18 : .42, top_p: .9,
+        max_tokens: reservation?.maxOutput ?? requested, temperature: plan || visualOutput ? .12 : .42, top_p: .9,
         usage: { include: true }, ...toolInput,
+        ...visualOutput,
+        ...(quick && !visualOutput ? { reasoning: { effort: "none", exclude: true } } : {}),
         provider: {
           max_price: { prompt: 0, completion: 0 },
-          ...(device ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),
+          ...(device || visualOutput ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),
         },
       }),
     });
@@ -253,17 +258,30 @@ export async function completion(
 }
 
 export async function verifyCompletion(model: ModelResponse): Promise<Record<string, unknown> | null> {
+  await completeText(model);
+  return await model.finish();
+}
+
+export async function completeText(model: ModelResponse, toolName?: string): Promise<string> {
   try {
     const data: unknown = await model.response.json();
     model.observe(data);
-    if (!output(data, "message").trim()) throw new Failure("empty", 502);
+    const message = (data as { choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: unknown; arguments?: unknown } }> } }> })?.choices?.[0]?.message;
+    const calls = message?.tool_calls;
+    if (toolName && calls?.length) {
+      const call = calls[0].function;
+      if (calls.length !== 1 || call?.name !== toolName || typeof call.arguments !== "string") throw new Failure("invalid_plan", 502);
+      return call.arguments;
+    }
+    const text = output(data, "message").trim();
+    if (!text) throw new Failure("empty", 502);
+    return text;
   } catch (error) {
     throw connectionFailure(error);
   } finally {
     model.releaseDeadline();
     await model.finish();
   }
-  return await model.finish();
 }
 
 type RelayControl = { reader?: ReadableStreamDefaultReader<Uint8Array> };

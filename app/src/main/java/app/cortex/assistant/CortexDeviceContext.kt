@@ -38,7 +38,10 @@ internal object CortexDeviceContext {
     }
 
     fun runtime(context: Context, screen: CortexScreenService?, actionsEnabled: Boolean): JSONObject =
-        JSONObject().put("android_api", Build.VERSION.SDK_INT)
+        JSONObject().put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
+            .put("android_version", Build.VERSION.RELEASE).put("android_api", Build.VERSION.SDK_INT)
+            .put("display", CortexDisplaySettings.info(context))
+            .put("power_saving", context.getSystemService(android.os.PowerManager::class.java).isPowerSaveMode)
             .put("cortex_version", BuildConfig.VERSION_NAME)
             .put("version_code", BuildConfig.VERSION_CODE)
             .put("screen_unlocked", CortexSchedule.screenReady(context))

@@ -371,6 +371,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         nextAnimation = Runnable {
             nextAnimation = null
             if (island !== view || generation != layoutGeneration || exiting) return@Runnable
+            view.conversation.updateDeviceWidgets()
             view.expand(open) {
                 if (island === view && generation == layoutGeneration && !exiting) {
                     moving = false
@@ -398,8 +399,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         params.width = box.width().coerceAtLeast(1)
         params.height = box.height().coerceAtLeast(1)
         params.flags = flags
-        if (changed && view.isAttachedToWindow) runCatching { manager.updateViewLayout(view, params) }
         view.place(geometry, box)
+        if (changed && view.isAttachedToWindow) runCatching { manager.updateViewLayout(view, params) }
     }
 
     private fun submit(raw: String, fromVoice: Boolean = false) {

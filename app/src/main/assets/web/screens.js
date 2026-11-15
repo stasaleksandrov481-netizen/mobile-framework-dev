@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.9";
+  let version = "1.0.10";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
@@ -240,11 +240,12 @@ const CortexUI = (() => {
     reset: ["Задайте новый пароль", "Введите код из письма и новый пароль.", "Сменить пароль"]
   };
 
-  function accountAvailability(connection) {
+  function accountAvailability(connection, mode = "password") {
     if (connection.status === "preview") return "Вход доступен в Android-приложении.";
     if (connection.status === "offline") return "Проверьте подключение к интернету и повторите попытку.";
     if (connection.status === "loading") return "Проверяем доступность входа…";
-    return connection.email ? "" : "Сервер CORTEX пока не принимает вход по почте.";
+    if (mode === "password") return connection.email ? "" : "Вход по почте пока недоступен.";
+    return connection.emailRegistration ? "" : "Подтверждение по почте станет доступно после подключения отправки писем.";
   }
 
   function account(ctx) {
@@ -272,7 +273,7 @@ const CortexUI = (() => {
           ${code ? '<label class="field"><span>Код из письма</span><input name="code" type="text" inputmode="numeric" required autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10"></label>' : ""}
           ${accountMode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : ""}
           ${newPassword ? password("confirmation", "Повторите пароль") + '<small class="muted">Минимум 10 символов.</small>' : ""}
-          <p class="account-availability" data-auth-status role="status" ${accountAvailability(connection) ? "" : "hidden"}>${accountAvailability(connection)}</p>
+          <p class="account-availability" data-auth-status role="status" ${accountAvailability(connection, accountMode) ? "" : "hidden"}>${accountAvailability(connection, accountMode)}</p>
           <p class="form-error" role="alert" hidden></p>
           <button class="action primary account-submit" type="submit"><span>${submit}</span>${icon("chevron", 18)}</button>
           ${accountMode === "password" ? `<div class="account-links">${button("Забыли пароль?", "", "email-auth", "recover", "quiet")}
@@ -472,6 +473,7 @@ const CortexUI = (() => {
   }
   function support() {
     return detail("Помощь и поддержка", "Связь с разработчиком", group(
+      (CortexApi.available ? tile("Мои обращения", "Переписка с поддержкой", "message", "support-inbox") : "") +
       tile("Написать разработчику", "Вопрос о работе CORTEX", "message", "support-form", "contact") +
       tile("Сообщить об ошибке", "Опишите, что произошло, и приложите скриншот", "alert", "support-form", "bug") +
       tile("Предложить функцию", "Расскажите, чего не хватает", "spark", "support-form", "idea") +
@@ -480,11 +482,11 @@ const CortexUI = (() => {
   }
 
   const questions = [
-    ["Команды", "Что работает без интернета?", "Открытие приложений, проверка заряда, громкость, напоминания и сохранённые сценарии выполняются на устройстве. Для сложного диалога и облачного планирования нужно подключение."],
+    ["Команды", "Что работает без интернета?", "Открытие приложений и разделов Android, проверка заряда и частоты экрана, громкость, напоминания и сценарии выполняются на устройстве. Для сложного диалога и облачного планирования нужно подключение."],
     ["Команды", "Чем отличаются диктовка и разговор?", "Диктовка вставляет распознанный текст в поле ввода. Голосовой разговор отправляет реплику после паузы. Доступность распознавания без сети зависит от службы Android."],
     ["Разрешения", "Как включить управление экраном?", "Откройте «Вызов», затем «Управление экраном». В специальных возможностях Android включите службу CORTEX. На защищённых экранах завершите действие вручную."],
     ["Разрешения", "Почему островок пропал?", "Проверьте разрешение «Поверх других окон» и режим островка в разделе «Вызов». При режиме «По вызову» островок появляется после команды или запуска."],
-    ["Токены", "Что расходует токены ИИ?", "Сервер считает входные и выходные токены облачной модели. Локальные команды и обычный запуск сценария токенов не расходуют."],
+    ["Токены", "Что расходует токены ИИ?", "В гостевом режиме доступно 5 000 токенов в день, после входа — 20 000. Локальные команды, напоминания и сценарии выполняются без расхода токенов."],
     ["Токены", "Почему ИИ временно недоступен при наличии токенов?", "У OpenRouter есть общий дневной и минутный бюджет. Пока облако недоступно, локальные команды остаются доступны."],
     ["Сценарии", "Как запустить сценарий голосом?", "Сохраните сценарий и скажите «Запусти сценарий» и его название. Можно также указать свою фразу в конструкторе."],
     ["Сценарии", "Когда сработает отложенное действие?", "Срок и статус видны в «Расписании». Android может задержать запуск. Если экран заблокирован или Android ограничил запуск в фоне, нажмите уведомление после разблокировки."],
@@ -492,11 +494,8 @@ const CortexUI = (() => {
     ["Аккаунт", "Как вернуться в старый аккаунт?", "Выберите «Вход по почте», затем «Забыли пароль?», и укажите прежнюю почту. После кода из письма установите пароль для этого аккаунта."]
   ];
   function faq() {
-    const categories = [...new Set(questions.map(([category]) => category))];
     return `<section class="panel stack faq" data-faq><h2>Частые вопросы</h2>
       <label class="field"><span>Поиск</span><input type="search" id="faq-search" placeholder="Например, токены" maxlength="80"></label>
-      <div class="faq-filters" aria-label="Категории">${["Все", ...categories].map(category =>
-        pill(category, "faq-category", category, category === "Все")).join("")}</div>
       ${questions.map(([category, question, answer]) => `<details data-faq-category="${esc(category)}">
         <summary>${esc(question)}${icon("chevron", 15)}</summary><p>${esc(answer)}</p></details>`).join("")}
       <p class="muted" data-faq-empty hidden>Совпадений нет.</p></section>`;

@@ -35,18 +35,16 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float, appeara
     init {
         val display = screen.bounds
         val safe = screen.safeArea(density)
-        val faceSpace = if (appearance.face) minOf(26f * density, safe.width() * .15f).coerceAtLeast(0f) else 0f
-        val contentLeft = safe.left + faceSpace
         val center = display.exactCenterX()
         val camera = screen.cutouts.filter { it.edge == Gravity.TOP }.minByOrNull {
             abs(it.bounds.exactCenterX() - center)
         } ?: screen.cutouts.firstOrNull { it.edge == Gravity.LEFT || it.edge == Gravity.RIGHT }
             ?: screen.cutouts.firstOrNull { it.edge == Gravity.BOTTOM }
 
-        val panelWidth = minOf(352 * density * appearance.size, safe.right - contentLeft).coerceAtLeast(1f)
-        val panelHeight = minOf(246 * density * appearance.size, safe.height() * .62f).coerceAtLeast(1f)
-        val width = minOf(132 * density * appearance.size, panelWidth)
-        val height = minOf(40 * density * appearance.size, panelHeight)
+        val panelWidth = minOf(352 * density * appearance.size * appearance.widthScale, safe.width()).coerceAtLeast(1f)
+        val panelHeight = minOf(258 * density * appearance.size * appearance.heightScale, safe.height() * .62f).coerceAtLeast(1f)
+        val width = minOf(136 * density * appearance.size * appearance.widthScale, panelWidth)
+        val height = minOf(40 * density * appearance.size * appearance.heightScale, panelHeight)
         val desiredX = when (camera?.edge) {
             Gravity.LEFT -> safe.left
             Gravity.RIGHT -> safe.right - width
@@ -57,30 +55,32 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float, appeara
             Gravity.BOTTOM -> safe.bottom - height
             else -> safe.top
         }
-        val left = (desiredX + appearance.offsetX * density).coerceIn(contentLeft, maxOf(contentLeft, safe.right - width))
+        val left = (desiredX + appearance.offsetX * density).coerceIn(safe.left, maxOf(safe.left, safe.right - width))
         val top = (desiredY + appearance.offsetY * density).coerceIn(safe.top, maxOf(safe.top, safe.bottom - height))
         compact = RectF(left, top, left + width, top + height)
 
-        val panelLeft = (compact.centerX() - panelWidth / 2).coerceIn(contentLeft, maxOf(contentLeft, safe.right - panelWidth))
+        val room = 2 * minOf(compact.centerX() - safe.left, safe.right - compact.centerX())
+        val centered = room >= minOf(panelWidth, 248 * density)
+        val buildFromLeft = compact.centerX() <= safe.centerX()
+        val available = if (centered) room else if (buildFromLeft) safe.right - compact.left else compact.right - safe.left
+        val expandedWidth = panelWidth.coerceAtMost(available).coerceAtLeast(width)
+        val panelLeft = if (centered) compact.centerX() - expandedWidth / 2
+            else if (buildFromLeft) compact.left else compact.right - expandedWidth
         val panelTop = when (camera?.edge) {
             Gravity.BOTTOM -> compact.bottom - panelHeight
             Gravity.LEFT, Gravity.RIGHT -> compact.centerY() - panelHeight / 2
             else -> compact.top
         }.coerceIn(safe.top, maxOf(safe.top, safe.bottom - panelHeight))
-        panel = RectF(panelLeft, panelTop, panelLeft + panelWidth, panelTop + panelHeight)
+        panel = RectF(panelLeft, panelTop, panelLeft + expandedWidth, panelTop + panelHeight)
 
-        anchorX = when {
-            compact.left <= safe.left + density -> compact.left
-            compact.right >= safe.right - density -> compact.right
-            else -> compact.centerX()
-        }
+        anchorX = if (centered) compact.centerX() else if (buildFromLeft) compact.left else compact.right
         anchorY = when (camera?.edge) {
             Gravity.BOTTOM -> compact.bottom
             Gravity.LEFT, Gravity.RIGHT -> compact.centerY()
             else -> compact.top
         }
-        closedWindow = frame(RectF(compact).apply { this.left -= faceSpace }, density)
-        openWindow = Rect(closedWindow).apply { union(frame(RectF(panel).apply { this.left -= faceSpace }, density)) }
+        closedWindow = frame(compact, density)
+        openWindow = Rect(closedWindow).apply { union(frame(panel, density)) }
     }
 
     fun window(open: Boolean) = Rect(if (open) openWindow else closedWindow)

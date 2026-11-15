@@ -1,6 +1,7 @@
 package app.cortex.assistant
 
 import org.json.JSONObject
+import java.net.URI
 import java.util.Locale
 
 internal object CortexLocalCommands {
@@ -9,11 +10,16 @@ internal object CortexLocalCommands {
         "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи"
     private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)\b))\s*""", RegexOption.IGNORE_CASE)
     private val unpunctuated = Regex("""\s+(?=(?:$verbs)\b)""", RegexOption.IGNORE_CASE)
-    private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
+    private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|бро|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
     private val infinitives = mapOf("включить" to "включи", "выключить" to "выключи", "отключить" to "отключи",
         "погасить" to "погаси", "открыть" to "открой", "закрыть" to "закрой", "запустить" to "запусти",
         "свернуть" to "сверни", "заблокировать" to "заблокируй", "сфотографировать" to "сфотографируй")
     private val volume = Regex("""(?:установи|поставь|сделай|измени) громкость (?:на )?(\d{1,3})(?:\s*(?:%|процент(?:а|ов)?))?""")
+    private val website = Regex(
+        """(?:открой|открыть|зайди на|перейди на|open) (?:сайт |страницу )?(?:[«"])?((?:https?://)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d{1,5})?(?:[/?#][^\s"»]*)?)[»"]?""",
+        RegexOption.IGNORE_CASE
+    )
+    private val appInfo = Regex("""(?:открой|покажи) (?:настройки|сведения о) приложени[ия] (.+)""")
     private val store = Regex("""(?:найди|поищи|покажи|установи|скачай|открой)\s+(.+?)\s+в\s+(?:google play|play market|play маркет(?:е)?|плей маркет(?:е)?|гугл плее)""", RegexOption.IGNORE_CASE)
     private val launch = Regex("""(?:открой|запусти|включи приложение|перейди в|зайди в|open|launch) (?:мне )?(?:приложение )?(.{2,65})""")
     private val launchReversed = Regex("""(.{2,65}) (?:открой|открыть|запусти|запустить)""")
@@ -29,6 +35,13 @@ internal object CortexLocalCommands {
             .replace(Regex("""^пожалуйста,?\s+|,?\s+пожалуйста$""", RegexOption.IGNORE_CASE), "")
         val request = normalized(original)
         if (request.isBlank() || instruction.containsMatchIn(request)) return null
+        website.matchEntire(original)?.groupValues?.get(1)?.let { address ->
+            val url = if ("://" in address) address else "https://$address"
+            val parsed = runCatching { URI(url) }.getOrNull()
+            if (parsed?.host != null && parsed.userInfo == null && url.length <= 1500) {
+                return listOf(command("open_web", "target" to url))
+            }
+        }
         val parts = request.split(separator)
         if (parts.size == 1) {
             store.matchEntire(original)?.groupValues?.get(1)?.trim()?.takeIf { it.length in 1..100 }?.let {
@@ -55,6 +68,10 @@ internal object CortexLocalCommands {
                 "$1 яркость")
         val first = words.substringBefore(' ')
         val plain = (infinitives[first] ?: first) + words.substring(first.length)
+        CortexSystemRequests.parse(plain)?.let { return it }
+        appInfo.matchEntire(plain)?.groupValues?.get(1)?.trim('«', '»', '"')?.let { name ->
+            return resolveApp(name)?.let { command("app_info", "target" to it) }
+        }
         return when (plain) {
             "включи фонарик", "зажги фонарик" -> command("torch", "mode" to "on")
             "выключи фонарик", "погаси фонарик", "отключи фонарик" -> command("torch", "mode" to "off")

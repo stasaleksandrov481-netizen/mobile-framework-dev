@@ -237,10 +237,11 @@ internal class LiquidIslandView(
         val panel = geometry.panel
         val t = expansion
         val fade = 1f - ease(.25f, 1f, disappearance)
-        val scale = (1f - (if (powerDown) .87f else .19f) * ease(.31f, 1f, disappearance)) *
-            (if (press && moving) .965f else 1f)
-        val x = geometry.anchorX - box.left
-        val y = geometry.anchorY - box.top
+        val scale = 1f - (if (powerDown) .87f else .19f) * ease(.31f, 1f, disappearance)
+        getLocationOnScreen(location)
+        val x = geometry.anchorX - location[0]
+        val y = geometry.anchorY - location[1]
+        conversation.translationX = (box.left - location[0]).toFloat()
         body.set(
             x + (mix(compact.left, panel.left, t) - geometry.anchorX) * scale,
             y + (mix(compact.top, panel.top, t) - geometry.anchorY) * scale,
@@ -252,6 +253,11 @@ internal class LiquidIslandView(
         ink.color = style.background
         ink.alpha = (255 * fade * style.opacity).roundToInt()
         canvas.drawRoundRect(body, radius, radius, ink)
+        if (press) {
+            ink.color = Color.WHITE
+            ink.alpha = (25 * fade).roundToInt()
+            canvas.drawRoundRect(body, radius, radius, ink)
+        }
         if (style.borderWidth > 0f) {
             ink.style = Paint.Style.STROKE
             ink.strokeWidth = style.borderWidth * density
@@ -262,8 +268,8 @@ internal class LiquidIslandView(
         }
         val idleFace = moving && style.face && phase == "idle" && disappearance == 0f
         val idleTime = if (idleFace) elapsed % 10_800L else 0L
-        if (style.face) drawFace(canvas, body.left - 13f * density, mix(body.centerY(), body.top + dp(27), t),
-            fade * scale, idleTime, if (moving) elapsed else -1)
+        if (style.face && t < .68f) drawFace(canvas, body.left + dp(21), body.centerY(),
+            fade * scale * (1f - ease(.14f, .68f, t)), idleTime, if (moving) elapsed else -1)
         if (style.progress && phase in setOf("thinking", "executing")) {
             val width = body.width() * .28f
             val start = body.left + body.width() * if (moving) (.36f + .20f * kotlin.math.sin(time * 4f)) else .36f
@@ -276,7 +282,7 @@ internal class LiquidIslandView(
         val compactAlpha = (1f - ease(.05f, .50f, t)) * (1f - ease(0f, .76f, disappearance))
         if (compactAlpha > .02f) {
             val cy = body.centerY()
-            signal.mark(canvas, body.left + body.width() * .23f, cy, compactAlpha)
+            if (!style.face) signal.mark(canvas, body.left + body.width() * .23f, cy, compactAlpha)
             val sx = body.left + body.width() * .65f
             when (phase) {
                 "done" -> signal.check(canvas, sx, cy, compactAlpha, if (moving) (elapsed / 250f).coerceIn(0f, 1f) else 1f)
@@ -411,7 +417,7 @@ internal class LiquidIslandView(
     }
 
     private companion object {
-        val OPEN_CURVE = PathInterpolator(.18f, .82f, .22f, 1f)
-        val CLOSE_CURVE = PathInterpolator(.32f, 0f, .29f, 1f)
+        val OPEN_CURVE = PathInterpolator(.12f, .78f, .22f, 1f)
+        val CLOSE_CURVE = PathInterpolator(.38f, .02f, .2f, 1f)
     }
 }

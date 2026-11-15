@@ -1,9 +1,10 @@
 import {
-  type Account, type Network, type ModelProfile, type ModelResponse, Failure, body, chatInput, completion,
+  type Account, type Network, type ModelProfile, type ModelResponse, Failure, body, chatInput, completeText, completion,
   confirmedQuota, failureBody, relay, retryableModelError,
   supportInput, verifyCompletion,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
+import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
 
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
 const ANDROID_SCHEME = "app.cortex.assistant";
@@ -118,17 +119,23 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const yandexSecret = env.YANDEX_CLIENT_SECRET?.trim() || "";
   const yandex = Boolean(publicApi && /^[a-zA-Z0-9_-]{8,128}$/.test(yandexId) && yandexSecret);
   const yandexRedirect = publicApi + "/functions/v1/cortex" + YANDEX_CALLBACK;
-  const emailReady = Boolean(api && publicKey && env.CORTEX_EMAIL_AUTH === "true");
+  const emailLogin = Boolean(api && publicKey && env.CORTEX_EMAIL_AUTH !== "false");
+  const emailReady = emailLogin && env.CORTEX_EMAIL_AUTH === "true";
   const models = [...new Set([
-    (env.OPENROUTER_MODEL ?? "google/gemma-4-26b-a4b-it:free").trim(),
+    (env.OPENROUTER_MODEL ?? "nvidia/nemotron-3.5-lightning:free").trim(),
     (env.OPENROUTER_FALLBACK_MODEL ?? "nvidia/nemotron-3.5-super-vl:free").trim(),
     "cohere/north-mini-code:free",
   ].filter(model => FREE_MODEL.test(model)))];
   const profiles: Record<ModelProfile, string[]> = {
-    auto: ["google/gemma-4-26b-a4b-it:free", "cohere/north-mini-code:free", "nvidia/nemotron-3.5-super-vl:free", "nvidia/nemotron-3-ultra-550b-a55b:free"],
-    fast: ["nvidia/nemotron-3.5-lightning:free", "google/gemma-4-26b-a4b-it:free", "cohere/north-mini-code:free"],
+    auto: ["nvidia/nemotron-3.5-lightning:free", "inclusionai/ling-3.2-flash:free", "cohere/north-mini-code:free"],
+    fast: ["nvidia/nemotron-3.5-lightning:free", "inclusionai/ling-3.2-flash:free", "cohere/north-mini-code:free"],
     deep: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "cohere/north-mini-code:free", "nvidia/nemotron-3.5-super-vl:free"],
   };
+  const visualSchemas = [
+    "inclusionai/ling-3.2-flash:free", "baidu/ernie-5.5-flash-preview:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+  ];
+  const visualTools = ["nvidia/nemotron-3.5-lightning:free", "cohere/north-mini-code:free"];
   const dayCap = Math.max(1, Math.min(1000, Math.floor(Number(env.CORTEX_DAILY_REQUEST_LIMIT) || 50)));
   const minuteCap = Math.max(1, Math.min(20, Math.floor(Number(env.CORTEX_MINUTE_REQUEST_LIMIT) || 20)));
   const allow = new Set((env.CORTEX_ALLOWED_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
@@ -216,7 +223,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      if ([429, 503].includes(response.status) || response.status >= 500) throw new Failure("auth_busy", 503);
+      if (["email_address_not_authorized", "email_provider_disabled", "signup_disabled"].includes(error?.code)) {
+        throw new Failure("account_config", 503);
+      }
+      if (response.status === 429 || response.status >= 500) throw new Failure("auth_busy", 503);
       if (error?.code === "email_not_confirmed") throw new Failure("auth_unconfirmed", 403);
       if (error?.code === "weak_password") throw new Failure("invalid_password", 400);
       throw new Failure("auth_credentials", 403);
@@ -235,7 +245,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function emailAuth(request: Request, operation: string): Promise<Response> {
-    if (!emailReady || !await ready()) throw new Failure("account_config", 503);
+    if (!(operation === "password" ? emailLogin : emailReady) || !await ready()) throw new Failure("account_config", 503);
     if (!await installIdentity(request)) throw new Failure("client_version", 400);
     const input = await body(request, 4096);
     const email = checkedEmail(input.email);
@@ -461,8 +471,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const quota = storage ? await usage(request, account).catch(() => null) : null;
         return json({
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
-          yandex, email_auth: emailReady, account, guest: guests, support: storage, device_tools: true,
-          device_profiles: true, device_repair: true, device_action_plan: true, model_fallback: true,
+          yandex, email_login: emailLogin, email_auth: emailReady, account, guest: guests, support: storage, device_tools: true,
+          device_profiles: true, device_repair: true, device_action_plan: true, visual_plan: true, model_fallback: true,
           ...(storage ? { gate: await control.gate(request, account?.id), quota } : { fault: "storage_config" }),
         });
       }
@@ -497,7 +507,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const caller = await actor(request);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
-          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, profile: undefined,
+          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
         };
         const gate = await control.gate(request, caller.account?.id);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
@@ -510,7 +520,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
         }
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
-        const candidates = [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
+        const candidates = input.visual ? [...visualTools, ...visualSchemas]
+          : [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
         await budget(caller);
         let quota: Quota | undefined;
         const hold = async (estimatedInput: number, output: number) => {
@@ -542,17 +553,27 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           };
         };
         const upstream = new AbortController();
-        const quick = input.profile === "fast";
-        const firstTokenMs = input.profile === "deep" ? 18_000 : quick ? 9_000 : 12_000;
-        const signal = AbortSignal.any([request.signal, upstream.signal, AbortSignal.timeout(quick ? 60_000 : 87_000)]);
-        const scope = (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
+        const quick = input.visual || input.profile !== "deep";
+        const firstTokenMs = input.visual ? 5_200 : quick ? 5_500 : 15_000;
+        const signal = AbortSignal.any([request.signal, upstream.signal,
+          AbortSignal.timeout(input.visual ? 12_500 : quick ? 29_000 : 69_000)]);
+        const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
-        const ordered = ready.length ? ready : choices.slice(0, 1);
-        const maxAttempts = 3;
+        const ordered = input.visual ? [
+          ...ready.filter(model => visualTools.includes(model)).slice(0, 1),
+          ...ready.filter(model => visualSchemas.includes(model)).slice(0, 1),
+        ] : ready;
+        if (!ordered.length) ordered.push(choices[0]);
+        const maxAttempts = input.visual ? 2 : 3;
+        const messages = [...input.messages];
+        if (input.visual) {
+          if (messages[0]?.role === "system") messages[0] = { role: "system", content: visualGuide + "\n" + messages[0].content };
+          else messages.unshift({ role: "system", content: visualGuide });
+        }
         let catalogChecked = false;
         const restModel = (model: string, failure: Failure) => {
-          if (!["timeout", "provider_limit", "provider_quota", "provider_quota_daily", "provider", "empty", "model", "provider_key", "provider_access"].includes(failure.code)) return;
+          if (!["timeout", "provider_limit", "invalid_plan", "provider_quota", "provider_quota_daily", "provider", "empty", "model", "provider_key", "provider_access"].includes(failure.code)) return;
           const seconds = failure.code === "model" ? 90 : Math.min(60, Math.max(18, failure.retryAfter));
           modelCooldown.set(scope + model, Date.now() + seconds * 1000);
         };
@@ -574,7 +595,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           if (failure && lastModel) restModel(lastModel, failure);
           while (!signal.aborted && next < maxAttempts) {
             if (next >= ordered.length) {
-              if (catalogChecked) break;
+              if (catalogChecked || input.visual) break;
               catalogChecked = true;
               const live = await freeCatalog();
               ordered.push(...live.filter(model => !choices.includes(model) &&
@@ -588,8 +609,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 const { failure, until } = quotaBlock;
                 throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
               }
-              const result = await completion(network, key, [model], [...input.messages], isChat, input.limit, signal,
-                input.device, input.repair, firstTokenMs, quick, input.plan, hold);
+              const format = !input.visual ? undefined : visualTools.includes(model)
+                ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
+              const result = await completion(network, key, [model], messages, isChat && !input.visual, input.limit, signal,
+                input.device, input.repair, firstTokenMs, quick, input.plan, hold, format);
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {
@@ -605,6 +628,19 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         let response = await getResponse();
         if (!response) throw new Failure("model", 502);
+        if (input.visual) {
+          while (response) {
+            try {
+              const plan = checkedVisualPlan(await completeText(response, visualToolName));
+              return json({ text: JSON.stringify(plan), quota: await response.finish() ?? quota });
+            } catch (error) {
+              if (!(error instanceof Failure)) throw error;
+              console.warn("CORTEX visual plan rejected:", lastModel, error.code);
+              response = await getResponse(error);
+            }
+          }
+          throw new Failure("invalid_plan", 502);
+        }
         if (!isChat) {
           while (response) {
             try { return json({ connected: true, quota: await verifyCompletion(response) ?? quota }); }

@@ -97,4 +97,19 @@ class LocalIntentTest {
         assertEquals(15, brightness.getInt("level"))
         assertNull(CortexLocalCommands.parse("Как открыть настройки телефона?", resolve))
     }
+    @Test fun localDiagnosticsAndSettingsUseTypedAndroidActions() {
+        fun step(text: String) = requireNotNull(CortexLocalCommands.parse(text) { null }).single()
+        assertEquals("display", step("Кортекс, открой настройки и раздел «Дисплей»").getString("target"))
+        assertEquals("bluetooth", step("Перейди в настройки Bluetooth").getString("target"))
+        assertEquals("phone", step("Скажи какая версия Андроида").getString("target"))
+        assertEquals("refresh", step("Сколько сейчас герц на экране?").getString("target"))
+        assertEquals("network", step("Проверь подключение").getString("target"))
+        assertEquals("display_refresh", step("Бро, включи 90 герц на телефоне").getString("kind"))
+        assertEquals(120, step("Поставь частоту экрана на 120 Hz").getInt("level"))
+        assertEquals("off", step("Выключи автоповорот").getString("mode"))
+        assertEquals("auto", step("Включи адаптивную яркость").getString("mode"))
+        assertEquals("https://example.org/News", step("Открой сайт example.org/News").getString("target"))
+        assertNull(CortexLocalCommands.parse("Как включить 90 Гц?") { null })
+    }
+
 }

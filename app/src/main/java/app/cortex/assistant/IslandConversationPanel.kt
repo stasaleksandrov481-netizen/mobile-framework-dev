@@ -52,6 +52,12 @@ internal class IslandConversationPanel(
     private val entry = Entry()
     private val sendButton = Glyph("send", "Отправить", true)
     private val widgets = LinearLayout(context)
+    private val deviceWidgets = label(11f, Color.WHITE).apply {
+        setPadding(dp(8), dp(4), dp(8), dp(5))
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        visibility = GONE
+    }
     private var appearance = IslandAppearance.parse()
     private var reminderActions: ((String) -> Unit)? = null
     private var busy = false
@@ -110,15 +116,16 @@ internal class IslandConversationPanel(
         }
         decorateReply()
         addView(answerScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6) })
+        addView(deviceWidgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(widgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
 
         editor.apply {
-            hint = "Сообщение или команда"
+            hint = "Написать Кортексу…"
             isSoundEffectsEnabled = false
             contentDescription = "Сообщение Кортексу"
             setHintTextColor(0xFFAAAAAA.toInt())
             setTextColor(Color.WHITE)
-            highlightColor = 0x66777777
+            highlightColor = 0x55FFFFFF
             if (Build.VERSION.SDK_INT >= 29) {
                 textCursorDrawable = GradientDrawable().apply {
                     setColor(Color.WHITE)
@@ -134,7 +141,7 @@ internal class IslandConversationPanel(
             minHeight = dp(44)
             maxLines = 2
             filters = arrayOf(InputFilter.LengthFilter(600))
-            setPadding(dp(4), dp(5), dp(4), dp(5))
+            setPadding(dp(11), dp(5), dp(5), dp(5))
             setOnFocusChangeListener { _, focused ->
                 entry.focused = focused
                 entry.invalidate()
@@ -275,6 +282,7 @@ internal class IslandConversationPanel(
         answerScroll.translationY = (1f - progress) * 8 * density
         entry.alpha = ((progress - .28f) / .72f).coerceIn(0f, 1f)
         entry.translationY = (1f - progress) * 9 * density
+        deviceWidgets.alpha = entry.alpha
         widgets.alpha = entry.alpha
     }
 
@@ -288,6 +296,8 @@ internal class IslandConversationPanel(
         editor.setTextColor(value.text)
         editor.setHintTextColor((value.text and 0x00FFFFFF) or 0xA0000000.toInt())
         signal.tint(value.accent)
+        deviceWidgets.setTextColor(value.text)
+        updateDeviceWidgets()
         entry.invalidate()
         sendButton.invalidate()
         for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
@@ -330,6 +340,15 @@ internal class IslandConversationPanel(
             }
             widgets.addView(chip, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
         }
+    }
+
+    fun updateDeviceWidgets() {
+        val playing = appearance.music && context.getSystemService(android.media.AudioManager::class.java)?.isMusicActive == true
+        val battery = if (appearance.battery) context.getSystemService(android.os.BatteryManager::class.java)
+            ?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 } else null
+        deviceWidgets.text = listOfNotNull(if (playing) "♪  Сейчас играет аудио" else null, battery?.let { "Заряд $it%" })
+            .joinToString("   ·   ")
+        deviceWidgets.visibility = if (deviceWidgets.text.isEmpty()) GONE else VISIBLE
     }
 
     fun hideKeyboard() {
@@ -403,9 +422,10 @@ internal class IslandConversationPanel(
 
         override fun onDraw(canvas: Canvas) {
             val inset = .65f * density
-            val radius = (height / 2f).coerceAtMost(29 * density)
+            val radius = (height / 2f).coerceAtMost(19 * density)
             ink.style = Paint.Style.FILL
             ink.color = appearance.background
+            ink.alpha = 224
             canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, ink)
             ink.style = Paint.Style.STROKE
             ink.strokeWidth = density * .8f
@@ -456,7 +476,7 @@ internal class IslandConversationPanel(
                 pen.style = Paint.Style.FILL
                 pen.color = appearance.text
                 pen.alpha = if (isEnabled) 255 else 58
-                canvas.drawCircle(0f, 0f, 16.3f, pen)
+                canvas.drawRoundRect(-16f, -16f, 16f, 16f, 11f, 11f, pen)
                 pen.color = if (isEnabled) appearance.background else appearance.text
             } else {
                 pen.color = appearance.text

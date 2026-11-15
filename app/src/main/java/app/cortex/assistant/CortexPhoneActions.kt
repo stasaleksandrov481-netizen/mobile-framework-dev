@@ -49,6 +49,12 @@ internal class CortexPhoneActions(private val context: Context) {
                 val sent = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                 return status(if (sent) "opened" else "unavailable").put("name", app.name).put("package", app.pkg).put("verified", false)
             }
+            "open_web" -> {
+                val url = Uri.parse(target)
+                if (url.scheme?.lowercase(Locale.ROOT) !in setOf("https", "http") || url.host.isNullOrEmpty() || url.userInfo != null) return status("invalid")
+                return started(Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE))
+                    .put("host", url.host.orEmpty())
+            }
             "play_store" -> {
                 val query = command.optString("query").trim().take(100)
                 if (query.isBlank()) return status("invalid")
@@ -147,7 +153,16 @@ internal class CortexPhoneActions(private val context: Context) {
                 }
                 val actualMode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
                 val actualLevel = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
-                return status(if (wanted == actualMode) "done" else "requested").put("level", (actualLevel * 100 + 127) / 255)
+                return status(if (wanted == actualMode) "done" else "requested")
+                    .put("level", (actualLevel * 100 + 127) / 255).put("automatic", actualMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
+            }
+            "rotate" -> {
+                if (!Settings.System.canWrite(context)) return status("needs_brightness")
+                val key = Settings.System.ACCELEROMETER_ROTATION
+                val wanted = if (mode == "on") 1 else 0
+                val saved = Settings.System.putInt(context.contentResolver, key, wanted)
+                val enabled = Settings.System.getInt(context.contentResolver, key, 0) != 0
+                return status(if (saved && enabled == (wanted == 1)) "done" else "requested").put("enabled", enabled)
             }
             "ringer" -> {
                 audio.ringerMode = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
@@ -363,6 +378,8 @@ internal class CortexPhoneActions(private val context: Context) {
                 AudioManager.RINGER_MODE_VIBRATE -> "vibrate"; else -> "sound" })
             "time" -> done().put("value", java.time.ZonedDateTime.now().toString())
             "locale" -> done().put("value", Locale.getDefault().toLanguageTag())
+            "refresh" -> CortexDisplaySettings.info(context).put("status", "done")
+            "rotate" -> done().put("enabled", Settings.System.getInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) != 0)
             "wifi" -> done().put("enabled", (context.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager).isWifiEnabled)
             "network" -> { val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
                 val active = cm.activeNetwork; val cap = cm.getNetworkCapabilities(active)
