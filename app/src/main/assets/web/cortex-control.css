@@ -150,3 +150,13 @@
 .ticket-bubble.mine :is(small, time) { color: #000a; }
 .ticket-bubble time { justify-self: end; }
 .ticket-bubble p { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.cortex-inbox[open] { animation: cortex-inbox-enter .29s cubic-bezier(.2,.8,.2,1) both; }
+.cortex-inbox button { -webkit-tap-highlight-color: transparent; transition: transform .18s ease; }
+.cortex-inbox button:active { transform: scale(.96); }
+.cortex-inbox.in-thread .ticket-bubble { animation: cortex-inbox-enter .24s ease both; }
+@keyframes cortex-inbox-enter { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) {
+  .cortex-inbox[open], .cortex-inbox.in-thread .ticket-bubble { animation: none; }
+  .cortex-inbox button { transition: none; }
+}

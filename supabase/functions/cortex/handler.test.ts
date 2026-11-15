@@ -434,3 +434,24 @@ test("verified password login is available during SMTP configuration", async () 
   const signedIn = await call("auth/password", credentials);
   assert.equal((await signedIn.json()).state, "signed_in");
 });
+
+test("maintenance access does not bypass closed beta admission", async () => {
+  let allowed = false;
+  const requests: string[] = [];
+  const control = createControl(async <T>(path: string) => {
+    requests.push(path);
+    if (path.startsWith("cortex_control_config")) return [{
+      maintenance_enabled: true, block_old_versions: false, beta_enabled: true, beta_message: "Закрытый тест"
+    }] as T;
+    if (path.startsWith("cortex_public_accounts")) return [{ maintenance_until: "2999-01-01T00:00:00Z" }] as T;
+    if (path === "rpc/cortex_beta_admit") return allowed as T;
+    return [] as T;
+  });
+  const request = new Request("https://example.test", { headers: { "x-cortex-install": install } });
+  assert.equal((await control.gate(request)).mode, "maintenance");
+  const account = { id: accountId, email: "tester@example.test" };
+  assert.equal((await control.gate(request, account)).mode, "beta");
+  assert.ok(requests.includes("rpc/cortex_beta_admit"));
+  allowed = true;
+  assert.equal((await control.gate(request, account)).mode, "open");
+});

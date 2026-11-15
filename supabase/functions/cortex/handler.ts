@@ -1,5 +1,5 @@
 import {
-  type Account, type Network, type ModelProfile, type ModelResponse, Failure, body, chatInput, completeText, completion,
+  type Account, type Network, type ModelProfile, type ModelResponse, type MeasuredUsage, Failure, body, chatInput, completeText, completion,
   confirmedQuota, failureBody, relay, retryableModelError,
   supportInput, verifyCompletion,
 } from "./provider.ts";
@@ -31,6 +31,9 @@ type Quota = {
   reset_at: string;
   time_zone: string;
   allowed: boolean;
+  plan?: string;
+  context_chars?: number;
+  advanced_tokens?: number;
 };
 
 class BudgetFailure extends Failure {
@@ -115,6 +118,14 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const publicKey = configuredKey(env, "SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
+  const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
+  const paidFast = env.CORTEX_PAID_FAST_MODEL?.trim() || "";
+  const paidDeep = env.CORTEX_PAID_DEEP_MODEL?.trim() || "";
+  const paidModelId = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
+  const billingOrigin = origin(env.CORTEX_BILLING_ORIGIN);
+  const billingToken = env.CORTEX_BILLING_TOKEN?.trim() || "";
+  const checkoutReady = Boolean(env.CORTEX_BILLING_CHECKOUT === "true" && billingOrigin && billingToken &&
+    paidKey && paidModelId.test(paidFast) && paidModelId.test(paidDeep));
   const yandexId = env.YANDEX_CLIENT_ID?.trim() || "";
   const yandexSecret = env.YANDEX_CLIENT_SECRET?.trim() || "";
   const yandex = Boolean(publicApi && /^[a-zA-Z0-9_-]{8,128}$/.test(yandexId) && yandexSecret);
@@ -468,13 +479,42 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const [account, key] = storage
           ? await Promise.all([lookup(request), providerKey().catch(() => "")])
           : [null, ""];
-        const quota = storage ? await usage(request, account).catch(() => null) : null;
+        const [quota, publicId] = storage ? await Promise.all([
+          usage(request, account).catch(() => null),
+          account ? database<string>("rpc/cortex_public_account", "POST", { p_subject: account.id }).catch(() => null) : null,
+        ]) : [null, null];
         return json({
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
-          yandex, email_login: emailLogin, email_auth: emailReady, account, guest: guests, support: storage, device_tools: true,
+          yandex, email_login: emailLogin, email_auth: emailReady, account: account ? { ...account, public_id: publicId } : null, guest: guests, support: storage, device_tools: true,
           device_profiles: true, device_repair: true, device_action_plan: true, visual_plan: true, model_fallback: true,
-          ...(storage ? { gate: await control.gate(request, account?.id), quota } : { fault: "storage_config" }),
+          ...(storage ? { gate: await control.gate(request, account), quota } : { fault: "storage_config" }),
         });
+      }
+      if (path === "/v1/subscription" && method === "GET") {
+        const caller = await actor(request);
+        const id = await subject(request, caller.account);
+        if (!id) throw new Failure("sign_in", 401);
+        await reserve({ bucket: "subscription:" + caller.bucket, seconds: 60, maximum: 20 });
+        const result = await database<Record<string, unknown>>("rpc/cortex_subscription", "POST", { p_subject: id });
+        return json({ ...result, checkout: Boolean(caller.account && result.checkout && checkoutReady) });
+      }
+      if (path === "/v1/subscription/payment" && method === "POST") {
+        const caller = await actor(request);
+        if (!caller.account) throw new Failure("sign_in", 401);
+        const gate = await control.gate(request, caller.account);
+        if (gate.mode !== "open") throw new Failure(gate.mode, 403);
+        if (!billingOrigin || !billingToken) throw new Failure("payments_disabled", 503);
+        await reserve({ bucket: "billing:" + caller.bucket, seconds: 60, maximum: 6 });
+        const input = await body(request, 2048);
+        if (!["checkout", "renew", "status"].includes(String(input.operation))) throw new Failure("invalid", 400);
+        if (input.operation !== "status" && !checkoutReady) throw new Failure("payments_disabled", 503);
+        const response = await network(billingOrigin + "/api/billing", {
+          method: "POST", redirect: "error", signal: AbortSignal.timeout(20_000),
+          headers: { Authorization: "Bearer " + billingToken, "Content-Type": "application/json" },
+          body: JSON.stringify({ subject: caller.account.id, email: caller.account.email, operation: input.operation, plan: input.plan, id: input.id }),
+        });
+        const result = await response.json();
+        return json(result, response.status);
       }
       if (method === "GET" && path === "/v1/support/inbox") {
         const { account } = await actor(request);
@@ -488,8 +528,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const account = await lookup(request);
         await reserve({ bucket: "presence:" + install, seconds: 60, maximum: 4 });
         const version = request.headers.get("x-cortex-version-name") || "";
-        await control.presence(install, input, /^[A-Za-z0-9.+-]{1,24}$/.test(version) ? version : "unknown");
-        return json({ gate: await control.gate(request, account?.id) });
+        const device = request.headers.get("x-cortex-device") || "";
+        const stable = /^[a-f0-9]{16}$/.test(device) ? await hash("cortex-device-v1:" + device) : null;
+        await control.presence(install, input, /^[A-Za-z0-9.+-]{1,24}$/.test(version) ? version : "unknown", stable, account?.id);
+        return json({ gate: await control.gate(request, account) });
       }
       if (method === "POST" && path === "/v1/auth/start") {
         return await begin(request, url.searchParams.get("return") === "android", url.searchParams.get("scheme"));
@@ -509,25 +551,30 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const input = isChat ? chatInput(await body(request, 260_000)) : {
           messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
         };
-        const gate = await control.gate(request, caller.account?.id);
+        const gate = await control.gate(request, caller.account);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
         const id = await subject(request, caller.account);
         if (!id) throw new Failure("sign_in", 401);
-        const [key, modelOverride] = await Promise.all([providerKey().catch(() => ""), configuredModel()]);
-        if (!key) throw new Failure("unconfigured", 503);
-        if (quotaBlock?.key === key && quotaBlock.until > Date.now()) {
-          const { failure, until } = quotaBlock;
-          throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
-        }
+        const [key, modelOverride, access] = await Promise.all([
+          providerKey().catch(() => ""), configuredModel(), caller.account ? usage(request, caller.account) : null,
+        ]);
+        const hasPaidPlan = ["start", "pro", "ultra"].includes(access?.plan || "");
+        if (!key && !(paidKey && hasPaidPlan)) throw new Failure("unconfigured", 503);
+        const wantsAdvanced = isChat && (input.profile === "deep" ||
+          (input.visual || input.plan) && ["pro", "ultra"].includes(access?.plan || ""));
+        const premium = Boolean(hasPaidPlan && paidKey && wantsAdvanced && access?.advanced_tokens && paidModelId.test(paidDeep));
+        const basic = Boolean(hasPaidPlan && paidKey && paidModelId.test(paidFast));
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
         const candidates = input.visual ? [...visualTools, ...visualSchemas]
           : [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
         await budget(caller);
         let quota: Quota | undefined;
-        const hold = async (estimatedInput: number, output: number) => {
+        const hold = (model?: string, advanced = false) => async (estimatedInput: number, output: number) => {
+          const amounts = { p_subject: id, p_input: estimatedInput, p_output: output };
           const result = await database<{ attempt?: string; max_output?: number; quota: Quota; error?: string; retry_after?: number }>(
-            "rpc/cortex_ai_reserve", "POST", { p_subject: id, p_input: estimatedInput,
-              p_output: output, p_day_cap: dayCap, p_minute_cap: minuteCap });
+            model ? "rpc/cortex_paid_reserve" : "rpc/cortex_ai_reserve", "POST",
+            model ? { ...amounts, p_model: model, p_advanced: advanced }
+              : { ...amounts, p_day_cap: dayCap, p_minute_cap: minuteCap });
           if (!result?.quota || result.quota.id !== id || result.quota.unit !== "tokens") {
             throw new Failure("storage_config", 503);
           }
@@ -539,11 +586,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           if (!result.attempt || !result.max_output) throw new Failure("storage_config", 503);
           return {
             maxOutput: result.max_output,
-            async finish(usage: { input: number; output: number } | null) {
+            async finish(usage: MeasuredUsage | null) {
               const payload = { p_attempt: result.attempt, p_input: usage?.input ?? null, p_output: usage?.output ?? null };
               for (let retry = 0; retry < 2; retry++) {
                 try {
-                  return await database<Record<string, unknown>>("rpc/cortex_ai_finish", "POST", payload);
+                  return await database<Record<string, unknown>>(
+                    model ? "rpc/cortex_paid_finish" : "rpc/cortex_ai_finish", "POST",
+                    model ? { ...payload, p_cost: usage?.costMicros ?? null } : payload);
                 } catch {
                   if (retry === 1) console.warn("CORTEX could not record model usage");
                 }
@@ -564,9 +613,21 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           ...ready.filter(model => visualTools.includes(model)).slice(0, 1),
           ...ready.filter(model => visualSchemas.includes(model)).slice(0, 1),
         ] : ready;
-        if (!ordered.length) ordered.push(choices[0]);
-        const maxAttempts = input.visual ? 2 : 3;
+        if (!ordered.length && choices[0]) ordered.push(choices[0]);
+        // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
+        const paidCandidates = [ ...(premium ? [{ model: paidDeep, advanced: true }] : []),
+          ...(basic && (!premium || paidFast !== paidDeep) ? [{ model: paidFast, advanced: false }] : []) ];
+        const routeModels = [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
+        const maxAttempts = paidCandidates.length + (input.visual ? 2 : 3);
         const messages = [...input.messages];
+        if (access?.context_chars) {
+          let chars = messages.reduce((total, turn) => total + turn.content.length, 0);
+          while (chars > access.context_chars && messages.length > 2) {
+            const oldest = messages[0].role === "system" ? 1 : 0;
+            chars -= messages.splice(oldest, 1)[0].content.length;
+          }
+          if (chars > access.context_chars) throw new Failure("context_limit", 400);
+        }
         if (input.visual) {
           if (messages[0]?.role === "system") messages[0] = { role: "system", content: visualGuide + "\n" + messages[0].content };
           else messages.unshift({ role: "system", content: visualGuide });
@@ -591,34 +652,38 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const canTryNext = (failure: Failure) => retryableModelError(failure.code);
         const getResponse = async (previous?: Failure): Promise<ModelResponse | undefined> => {
           let failure = previous && await examine(previous);
-          if (failure && !canTryNext(failure)) throw failure;
+          if (failure && !canTryNext(failure) && !["advanced_limit", "paid_unavailable"].includes(failure.code)) throw failure;
           if (failure && lastModel) restModel(lastModel, failure);
           while (!signal.aborted && next < maxAttempts) {
-            if (next >= ordered.length) {
+            if (next >= routeModels.length) {
               if (catalogChecked || input.visual) break;
               catalogChecked = true;
               const live = await freeCatalog();
-              ordered.push(...live.filter(model => !choices.includes(model) &&
-                (modelCooldown.get(scope + model) || 0) <= Date.now()).slice(0, 3));
-              if (next >= ordered.length) break;
+              routeModels.push(...live.filter(model => !choices.includes(model) &&
+                (modelCooldown.get(scope + model) || 0) <= Date.now()).slice(0, 3).map(model => ({ model, advanced: false })));
+              if (next >= routeModels.length) break;
             }
-            const model = ordered[next++];
+            const { model, advanced } = routeModels[next++];
+            const paid = next <= paidCandidates.length;
             lastModel = model;
             try {
-              if (quotaBlock?.key === key && quotaBlock.until > Date.now()) {
+              if (!paid && !key) throw new Failure("unconfigured", 503);
+              if (!paid && quotaBlock?.key === key && quotaBlock.until > Date.now()) {
                 const { failure, until } = quotaBlock;
                 throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
               }
               const format = !input.visual ? undefined : visualTools.includes(model)
                 ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
-              const result = await completion(network, key, [model], messages, isChat && !input.visual, input.limit, signal,
-                input.device, input.repair, firstTokenMs, quick, input.plan, hold, format);
+              const result = await completion(network, paid ? paidKey : key, [model], messages, isChat && !input.visual,
+                input.limit, signal, input.device, input.repair, firstTokenMs, quick, input.plan,
+                hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {
               if (!(error instanceof Failure)) throw error;
-              failure = await examine(error);
-              if (!canTryNext(failure)) throw failure;
+              failure = paid ? error : await examine(error);
+              if (!canTryNext(failure) && !(paid && ["advanced_limit", "paid_unavailable", "provider_key",
+                "provider_budget", "provider_balance", "provider_quota", "provider_quota_daily"].includes(failure.code))) throw failure;
               restModel(model, failure);
               console.warn("CORTEX provider candidate rejected:", model, failure.code);
             }

@@ -3,13 +3,13 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.10";
+  let version = "1.0.11";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
   ];
   const parent = {
-    settings: "profile", motion: "settings", models: "settings", language: "settings",
+    settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
     support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
     chat: "home", schedule: "phone-tools", scenarios: "phone-tools", "island-editor": "phone-tools", energy: "settings",
@@ -217,6 +217,7 @@ const CortexUI = (() => {
             <p>${esc(account?.email || "Данные хранятся на устройстве")}</p>
             ${type ? `<small class="muted">${esc(type)}</small>` : ""}
           </div>
+          ${account?.public_id ? `<p class="muted">ID аккаунта · <strong>${esc(account.public_id)}</strong></p>` : ""}
           ${!account && ctx.native ? `<div class="profile-signin actions">
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
@@ -290,7 +291,8 @@ const CortexUI = (() => {
       tile("Способ вызова CORTEX", "Островок, голос или без плавающего окна", "focus", "go", "phone-tools") +
       tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
       tile("Энергопотребление", "", "bolt", "go", "energy") +
-      tile("Модели ИИ", "Бесплатные профили OpenRouter", "spark", "go", "models") +
+      tile("Подписка", "Тарифы, лимиты и платежи", "spark", "go", "subscription") +
+      tile("Модели ИИ", "Профили моделей", "spark", "go", "models") +
       tile("Язык", "Язык ответа и распознавания", "globe", "go", "language") +
       tile("Анимации и отклик", "Движение интерфейса и вибрация", "wave", "go", "motion") +
       tile("Уведомления", "Оповещения о готовом ответе", "bell", "go", "notifications")
@@ -519,7 +521,7 @@ const CortexUI = (() => {
   }
 
   function page(route, ctx) {
-    const pages = { home, chat, chats, profile, account, settings, motion, "phone-tools": phoneTools, language, notifications,
+    const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
       data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }

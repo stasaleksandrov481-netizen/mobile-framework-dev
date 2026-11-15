@@ -34,6 +34,7 @@ const Cortex = (() => {
     if (typeof data.id !== "string" || !data.id || !["Google", "Email", "Yandex"].includes(data.provider)) return null;
     return {
       id: string(data.id, 200), name: string(data.name, 100), email: string(data.email, 254), provider: data.provider,
+      public_id: /^@id[0-9]{6,17}$/.test(data.public_id || "") ? data.public_id : "",
       avatar: avatarPattern.test(data.avatar || "") ? data.avatar : ""
     };
   }

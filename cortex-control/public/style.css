@@ -59,3 +59,11 @@ dialog::backdrop { background: #000c; }
   .support-layout { grid-template-columns: 1fr; }
   .ticket-list { max-height: 235px; }
 }
+
+.ticket-filters { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 16px; }
+.ticket-filters button[aria-pressed=true] { background:#fff; color:#000; }
+.ticket-messages { display:flex; flex-direction:column; gap:10px; max-height:45vh; overflow:auto; padding:8px 2px; }
+.ticket-message { max-width:85%; align-self:flex-start; padding:10px 13px; border:1px solid #555; border-radius:15px 15px 15px 4px; }
+.ticket-message.from-control { align-self:flex-end; background:#eee; color:#111; border-radius:15px 15px 4px 15px; }
+.ticket-message.from-control small { color:#444; }
+.ticket-message p { white-space:pre-wrap; overflow-wrap:anywhere; margin:4px 0 0; }
