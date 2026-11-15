@@ -59,7 +59,7 @@ const CortexMotion = (() => {
     const tx = to.x + to.w / 2, ty = to.y + to.h / 2;
     const duration = 580;
     const dist = Math.hypot(tx - x, ty - y);
-    const count = 74;
+    const count = { simple: 20, balanced: 45, full: 74 }[document.documentElement.dataset.quality] || 45;
     const particles = Array.from({ length: count }, (_, i) => ({
       angle: i * 2.39996322973, orbit: 11 + (i * 17 % 51), radius: .58 + (i * 19 % 17) / 18,
       lane: i % 6, trail: (i * 13 % 25) / 100

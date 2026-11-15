@@ -43,6 +43,8 @@ internal class LiquidIslandView(
     private var disappearance = 0f
     private var motion = true
     private var phase = "idle"
+    private var statusText = ""
+    private var style = IslandAppearance.parse()
     private var level = 0f
     private var levelAt = 0L
     private var reactionAt = 0L
@@ -89,10 +91,19 @@ internal class LiquidIslandView(
     fun phase(value: String, message: String, canStop: Boolean) {
         if (phase != value) reactionAt = SystemClock.uptimeMillis()
         phase = value
+        statusText = message
         activeStop = canStop
         val description = if (message.isBlank()) "Островок CORTEX. Ввести команду." else "CORTEX. $message"
         if (contentDescription != description) contentDescription = description
         setContents()
+    }
+
+    fun appearance(value: IslandAppearance) {
+        if (style == value) return
+        style = value
+        signal.tint = value.text
+        conversation.appearance(value)
+        invalidate()
     }
 
     fun audioLevel(value: Float) {
@@ -125,7 +136,8 @@ internal class LiquidIslandView(
         val start = expansion
         val faded = disappearance
         val end = if (open) 1f else 0f
-        val duration = ((if (open) 490 else 370) * abs(start - end)).toLong().coerceAtLeast(110L)
+        val duration = ((if (style.motion == "soft") 220 else if (open) 490 else 370) * abs(start - end))
+            .toLong().coerceAtLeast(90L)
         powerDown = false
         animate(duration, if (open) OPEN_CURVE else CLOSE_CURVE, {
             expansion = mix(start, end, it)
@@ -235,40 +247,86 @@ internal class LiquidIslandView(
             x + (mix(compact.right, panel.right, t) - geometry.anchorX) * scale,
             y + (mix(compact.bottom, panel.bottom, t) - geometry.anchorY) * scale
         )
-        val radius = minOf(mix(20f, 22f, t) * density * scale, body.height() / 2f)
+        val radius = minOf(style.corner * density * scale, body.height() / 2f)
         ink.style = Paint.Style.FILL
-        ink.color = if (t > .30f) 0xFF0A0A0A.toInt() else Color.BLACK
-        ink.alpha = (255 * fade).roundToInt()
+        ink.color = style.background
+        ink.alpha = (255 * fade * style.opacity).roundToInt()
         canvas.drawRoundRect(body, radius, radius, ink)
-        ink.style = Paint.Style.STROKE
-        ink.strokeWidth = .9f * density
-        ink.color = Color.WHITE
-        val pulse = if (moving && phase == "done" && elapsed in 0..550) (1f - elapsed / 550f) * 115 else 0f
-        ink.alpha = ((mix(69f, 151f, t) + pulse) * fade).roundToInt().coerceIn(0, 255)
-        canvas.drawRoundRect(body, radius, radius, ink)
+        if (style.borderWidth > 0f) {
+            ink.style = Paint.Style.STROKE
+            ink.strokeWidth = style.borderWidth * density
+            ink.color = style.border
+            val pulse = if (moving && phase == "done" && elapsed in 0..550) (1f - elapsed / 550f) * 105 else 0f
+            ink.alpha = ((mix(80f, 164f, t) + pulse) * fade).roundToInt().coerceIn(0, 255)
+            canvas.drawRoundRect(body, radius, radius, ink)
+        }
+        if (style.face) drawFace(canvas, body.left - 13f * density, mix(body.centerY(), body.top + dp(27), t), fade * scale)
+        if (style.progress && phase in setOf("thinking", "executing")) {
+            val width = body.width() * .28f
+            val start = body.left + body.width() * if (moving) (.36f + .20f * kotlin.math.sin(time * 4f)) else .36f
+            ink.style = Paint.Style.FILL
+            ink.color = style.accent
+            ink.alpha = (180 * fade).roundToInt()
+            canvas.drawRoundRect(start, body.bottom - dp(4), start + width, body.bottom - dp(2), density, density, ink)
+        }
 
         val compactAlpha = (1f - ease(.05f, .50f, t)) * (1f - ease(0f, .76f, disappearance))
         if (compactAlpha > .02f) {
             val cy = body.centerY()
-            signal.mark(canvas, body.left + body.width() * .27f, cy, compactAlpha)
+            signal.mark(canvas, body.left + body.width() * .23f, cy, compactAlpha)
             val sx = body.left + body.width() * .65f
             when (phase) {
                 "done" -> signal.check(canvas, sx, cy, compactAlpha, if (moving) (elapsed / 250f).coerceIn(0f, 1f) else 1f)
-                "listening", "executing" -> signal.wave(canvas, if (activeStop) sx - dp(8) else sx, cy,
+                "listening", "thinking", "executing" -> signal.wave(canvas, if (activeStop) sx - dp(8) else sx, cy,
                     phase, time, level * exp((levelAt - now) / 240f), compactAlpha)
-                else -> signal.dot(canvas, sx, cy, compactAlpha)
+                else -> if (style.status && statusText.isNotBlank() && body.width() > dp(102)) {
+                    ink.style = Paint.Style.FILL
+                    ink.color = style.text
+                    ink.alpha = (230 * compactAlpha).roundToInt()
+                    ink.textSize = 10.5f * density
+                    val caption = when (phase) {
+                        "reminder" -> "Напоминание"
+                        "error" -> "Ошибка"
+                        "stopped" -> "Остановлено"
+                        else -> statusText.take(10)
+                    }
+                    canvas.drawText(caption, body.left + body.width() * .39f, cy - (ink.ascent() + ink.descent()) / 2, ink)
+                } else signal.dot(canvas, sx, cy, compactAlpha)
             }
             if (activeStop) {
                 val stopX = body.right - dp(17)
                 val r = 3.5f * density
                 ink.style = Paint.Style.FILL
+                ink.color = style.accent
                 ink.alpha = (230 * compactAlpha).roundToInt()
                 canvas.drawRoundRect(stopX - r, cy - r, stopX + r, cy + r, density, density, ink)
             }
         }
-        if (moving && (phase == "listening" || phase == "executing" || phase == "done" && elapsed < 550L)) {
+        if (moving && (phase in setOf("listening", "thinking", "executing") || phase == "done" && elapsed < 550L)) {
             postInvalidateDelayed(33L)
         }
+    }
+
+    private fun drawFace(canvas: Canvas, x: Float, y: Float, alpha: Float) {
+        val unit = density * alpha.coerceAtLeast(.2f)
+        ink.style = Paint.Style.FILL
+        ink.color = style.faceColor
+        ink.alpha = (230 * alpha).roundToInt()
+        canvas.drawCircle(x, y, 8.4f * unit, ink)
+        ink.color = style.background
+        ink.alpha = (255 * alpha).roundToInt()
+        canvas.drawCircle(x - 2.8f * unit, y - 1.9f * unit, .9f * unit, ink)
+        canvas.drawCircle(x + 2.8f * unit, y - 1.9f * unit, .9f * unit, ink)
+        ink.style = Paint.Style.STROKE
+        ink.strokeWidth = 1.1f * unit
+        ink.strokeCap = Paint.Cap.ROUND
+        when (phase) {
+            "listening", "thinking" -> canvas.drawOval(x - 1.3f * unit, y + .6f * unit, x + 1.3f * unit, y + 3.5f * unit, ink)
+            "error" -> canvas.drawArc(x - 3f * unit, y + 1.2f * unit, x + 3f * unit, y + 6f * unit, 207f, 126f, false, ink)
+            "executing", "stopped" -> canvas.drawLine(x - 2.2f * unit, y + 2.5f * unit, x + 2.2f * unit, y + 2.5f * unit, ink)
+            else -> canvas.drawArc(x - 3.2f * unit, y - 1f * unit, x + 3.2f * unit, y + 4.6f * unit, 20f, 140f, false, ink)
+        }
+        ink.strokeCap = Paint.Cap.BUTT
     }
 
     override fun dispatchDraw(canvas: Canvas) {

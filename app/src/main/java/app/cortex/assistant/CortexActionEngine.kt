@@ -41,19 +41,29 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         source: String = "island",
         beforeScreen: () -> Unit = {},
         progress: (String) -> Unit = {},
+        scheduled: Boolean = false,
+        explicitConversation: ConversationRequest? = null,
+        explicitScenario: CortexScenarios.Scenario? = null,
         finished: (Result) -> Unit
     ): Boolean {
         val text = raw.trim().take(2400)
-        CortexIslandService.handleControl(context, text)?.let {
-            finished(Result(it, true))
-            return true
+        if (!scheduled) {
+            CortexIslandService.handleControl(context, text)?.let {
+                finished(Result(it, true))
+                return true
+            }
+            CortexSchedule.command(context, text, source)?.let {
+                finished(it)
+                return true
+            }
         }
         val resumeText = VisualRequest.isResume(text)
         val network = NetworkRequest.parse(text)
         val command = VisualRequest.goal(text)
         val action = VisualRequest.isAction(text)
+        val scenario = explicitScenario ?: CortexScenarios.find(context, text)
         if (!allowPhone) {
-            if (!action && network == null && !force) return false
+            if (!action && scenario == null && network == null && !force) return false
             finished(Result("Управление телефоном выключено. Его можно включить в разделе «Вызов».", false))
             return true
         }
@@ -61,7 +71,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val reply = saved?.takeIf { !resumeText && it.source == source && it.question.isNotBlank() &&
             SystemClock.uptimeMillis() - it.pausedAt < 180_000L && text.length <= 2_000 &&
             (text.startsWith('«') || text.startsWith('"') || (!action && network == null && !text.endsWith('?'))) }
-        if (!force && !resumeText && reply == null && network == null && direct == null && !action) return false
+        if (!force && !resumeText && reply == null && scenario == null && network == null && direct == null && !action) return false
         if (job?.isActive == true || !CortexActionState.acquire(::cancel)) {
             finished(Result(if (CortexActionState.gate == "open") "Сначала остановите текущую задачу CORTEX."
                 else "Управление недоступно во время обновления или обслуживания.", false))
@@ -72,7 +82,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val state = if (resumeText || reply != null) saved?.takeIf { paused ->
             paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null
         } else null
-        val task = state?.copy(plans = 0, failures = linkedSetOf()) ?: Task(command, profile, source)
+        val task = state?.copy(plans = 0, failures = linkedSetOf())
+            ?: Task(command, profile, source, conversation = explicitConversation, scheduled = scheduled)
         if (reply != null) {
             task.conversation = task.conversation?.withAnswer(text)
             if (task.conversation == null) {
@@ -102,8 +113,17 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             try {
                 result = withTimeout(232_000L) {
                     when {
+                        scheduled && !CortexSchedule.screenReady(context) ->
+                            Result("Разблокируйте телефон, чтобы начать поручение.", false, true)
                         resumeText && state == null ->
                             Result("Нет приостановленной задачи. Скажите, что нужно сделать.", false)
+                        scenario != null && service != null -> {
+                            beforeScreen()
+                            task.scenario = true
+                            executeScenario(scenario, task, service, ::report)
+                        }
+                        scenario != null ->
+                            Result("Сценарию нужен доступ CORTEX в специальных возможностях Android.", false)
                         network != null && reply == null ->
                             PhoneNetwork(context).run(network, service, beforeScreen, ::report)
                         service?.locked() == true && direct?.all { it.optString("kind") in READ_ONLY } != true ->
@@ -158,6 +178,88 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         }
         job?.start()
         return true
+    }
+
+    private suspend fun executeScenario(
+        scenario: CortexScenarios.Scenario, task: Task, service: CortexScreenService, report: (String) -> Unit
+    ): Result {
+        val navigation = VisualNavigation(context, service)
+        val variables = mutableMapOf<String, String>()
+        val stack = linkedSetOf(scenario.id)
+        var processed = 0
+        fun expand(value: String): String = SCENARIO_VARIABLE.replace(value) { match ->
+            variables[match.groupValues[1]] ?: throw IllegalArgumentException("Не задана переменная «${match.groupValues[1]}».")
+        }.take(2000)
+
+        suspend fun run(steps: JSONArray): String? {
+            for (index in 0 until steps.length()) {
+                if (service.locked()) return "Экран выключен или заблокирован. Запуск сценария остановлен."
+                if (++processed > 80) return "Сценарий остановлен после 80 шагов."
+                val input = steps.getJSONObject(index)
+                val kind = input.optString("kind")
+                val target = if (kind == "variable") input.optString("target") else expand(input.optString("target")).take(180)
+                val value = expand(input.optString("value"))
+                report("Сценарий «${scenario.name}» · шаг $processed")
+                CortexActionState.log(context, "Сценарий · шаг $processed · ${SCENARIO_LABELS.getValue(kind)}")
+                when (kind) {
+                    "variable" -> variables[target] = value
+                    "pause" -> delay(input.optLong("seconds") * 1000)
+                    "if" -> {
+                        val frame = service.frame() ?: return "Android не предоставил экран для проверки условия."
+                        if (frame.secure || frame.hasPrivateFields) return manual().text
+                        val branch = if (frame.has(target)) input.getJSONArray("steps") else input.optJSONArray("else")
+                        branch?.let { run(it)?.let { failure -> return failure } }
+                    }
+                    "repeat" -> repeat(input.optInt("count")) { run(input.getJSONArray("steps"))?.let { return it } }
+                    "run" -> {
+                        val other = CortexScenarios.get(context, target) ?: return "Вложенный сценарий удалён или отсутствует."
+                        if (stack.size >= 5 || !stack.add(other.id)) return "Проверьте цепочку вызовов вложенных сценариев."
+                        val failure = run(other.steps)
+                        stack.remove(other.id)
+                        if (failure != null) return failure
+                    }
+                    "wait" -> {
+                        val frame = navigation.await(12_000L) { !it.secure && !it.hasPrivateFields && it.has(target) }
+                        if (frame == null) return "Элемент «$target» не появился за 12 секунд."
+                    }
+                    "point" -> {
+                        val before = service.frame()?.takeIf { it.pkg == input.optString("package") && !it.secure &&
+                            !it.hasPrivateFields && it.pkg != context.packageName } ?: return "Откройте экран, на котором записали точку."
+                        if (target.isNotBlank() && before.target(target) { it.clickable } != null) {
+                            val result = perform(task, service, navigation,
+                                VisualStep(VisualAction.TAP, target, confirm = true), before, report)
+                            if (!result.ok) return result.message.ifBlank { "Android не подтвердил нажатие." }
+                        } else {
+                            if (!confirm("Нажать записанную точку?", "Приложение «${before.pkg}». Проверьте элемент под точкой.", "Нажать")) {
+                                return "Нажатие отменено."
+                            }
+                            val fresh = navigation.await { it.pkg == before.pkg && it.window == before.window &&
+                                it.structure() == before.structure() && !it.secure && !it.hasPrivateFields }
+                                ?: return "Экран изменился после подтверждения."
+                            if (!service.tapRelative(fresh, input.optDouble("x"), input.optDouble("y"))) return "Android отклонил касание."
+                        }
+                    }
+                    else -> {
+                        val action = when (kind) {
+                            "open" -> VisualAction.OPEN
+                            "tap" -> VisualAction.TAP
+                            "swipe" -> VisualAction.SWIPE
+                            else -> VisualAction.TYPE
+                        }
+                        val frame = service.frame()
+                        if (frame?.hasPrivateFields == true || frame?.secure == true) return manual().text
+                        val outcome = perform(task, service, navigation, VisualStep(action, target, value,
+                            expect = expand(input.optString("expect")).take(180), confirm = input.optBoolean("confirm")), null, report)
+                        if (!outcome.ok) return outcome.message.ifBlank { "Android не подтвердил шаг $processed." }
+                    }
+                }
+                task.completed++
+            }
+            return null
+        }
+        val failure = try { run(scenario.steps) } catch (error: IllegalArgumentException) { error.message ?: "Проверьте параметры сценария." }
+        return if (failure == null) Result("Сценарий «${scenario.name}» завершён. Выполненных шагов — $processed.", true)
+        else Result(failure, false)
     }
 
     private fun parseSystem(command: String): List<JSONObject>? {
@@ -224,6 +326,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var feedback = task.lastIssue
         var runSteps = 0
         while (runSteps < 40) {
+            if (task.scheduled && !CortexSchedule.screenReady(context)) {
+                return Result("Экран выключился или заблокирован. Продолжите после разблокировки.", false, true)
+            }
             if (task.queue.isEmpty()) {
                 if (task.completed > 0 && feedback.isBlank()) {
                     if (!task.modelUsed || task.planDone) return Result(task.answer.ifBlank { "Задача выполнена." }, true)
@@ -463,7 +568,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         }
         val target = node ?: return StepOutcome(false, "Элемент «${step.target}» не найден на текущем экране.")
         val label = target.label.ifBlank { target.description }.ifBlank { step.target }
-        val risk = VisualSafety.risk(task.request, step, label, target.resource, target.role)
+        val needsReview = (task.scenario || task.scheduled) && step.action == VisualAction.TAP &&
+            (target.label.isBlank() && target.description.isBlank() || target.ocr)
+        val risk = VisualSafety.risk(task.request, if (needsReview) step.copy(confirm = true) else step, label, target.resource, target.role)
         if (risk == VisualRisk.MANUAL) return StepOutcome(false,
             "Оставил задание на экране. Проверьте ответы и сдайте работу самостоятельно.", stop = true)
         val requested = if (step.action == VisualAction.SET) step.value == "on" else null
@@ -662,6 +769,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val error = result.optString("error")
         if (error.isNotEmpty()) {
             val text = when (error) {
+                "daily_limit" -> "Суточный лимит CORTEX исчерпан. Запросы обновятся в 03:00 по Москве."
                 "sign_in" -> "Для сложной задачи нужен вход в профиль CORTEX."
                 "provider_quota_daily", "provider_quota", "provider_limit", "rate_limit" -> "Сейчас исчерпана квота ИИ."
                 "offline" -> "Связь с ИИ потеряна."
@@ -710,12 +818,20 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var planDone: Boolean = false,
         var deferred: List<VisualStep> = emptyList(),
         var boundScreen: VisualFrame? = null,
-        var inFlight: VisualStep? = null
+        var inFlight: VisualStep? = null,
+        val scheduled: Boolean = false,
+        var scenario: Boolean = false
     )
 
     companion object {
         private var saved: Task? = null
+        private val SCENARIO_VARIABLE = Regex("""\$\{([a-zA-Z_][a-zA-Z0-9_]{0,31})}""")
+        private val SCENARIO_LABELS = mapOf("open" to "приложение", "tap" to "элемент", "point" to "точка",
+            "type" to "ввод", "swipe" to "свайп", "wait" to "ожидание", "pause" to "пауза", "if" to "условие",
+            "repeat" to "повторение", "run" to "вложенный сценарий", "variable" to "переменная")
         fun clearPaused() { saved = null }
+        fun clearPaused(source: String) { if (saved?.source == source) saved = null }
+        fun canResume(source: String) = saved?.source == source
         private const val MAX_PLANS = 2
         private val READ_ONLY = setOf("read_device")
         private val SYSTEM_NAVIGATION = setOf("app", "close_app", "home", "recents", "settings", "play_store")

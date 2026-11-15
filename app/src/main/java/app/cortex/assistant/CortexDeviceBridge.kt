@@ -27,8 +27,13 @@ internal class CortexDeviceBridge(
     private val engine by engineDelegate
     private var pendingImage = false
     private var pendingExport: String? = null
+    private var scenarioExport: String? = null
+    private var pointRecorder: CortexPointRecorder? = null
+    private val scheduleListener: () -> Unit = ::scheduleList
+    init { CortexRuntime.scheduleChanged = scheduleListener }
 
     fun handle(raw: String) {
+        if (raw.length > 2_200_000) return
         val body = runCatching { JSONObject(raw) }.getOrNull() ?: return
         when (body.optString("operation")) {
             "permissions" -> refreshPermissions()
@@ -36,8 +41,61 @@ internal class CortexDeviceBridge(
             "assistant-permission" -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
+            "schedule-exact" -> if (Build.VERSION.SDK_INT >= 31) sendAction("schedule-exact") {
+                open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
+            }
+            "schedule-list" -> scheduleList()
+            "schedule-save" -> scheduleResult(CortexSchedule.save(context, body.optJSONObject("task") ?: JSONObject()))
+            "schedule-action" -> scheduleResult(CortexSchedule.handle(context, body.optString("id"), body.optString("action")) {
+                activity.moveTaskToBack(true)
+            })
+            "scenario-list" -> scenarioList()
+            "scenario-save" -> {
+                val error = CortexScenarios.save(context, body.optJSONObject("scenario") ?: JSONObject())
+                if (error == null) scenarioList()
+                scenarioStatus(if (error == null) "Сценарий сохранён." else error, error == null, "save")
+            }
+            "scenario-delete" -> {
+                val ok = CortexScenarios.delete(context, body.optString("id"))
+                if (ok) scenarioList()
+                scenarioStatus(if (ok) "Сценарий удалён." else "Не удалось удалить сценарий.", ok, "delete")
+            }
+            "scenario-run" -> {
+                val item = CortexScenarios.get(context, body.optString("id"))
+                if (item == null) scenarioStatus("Сначала сохраните сценарий.", false, "run")
+                else engine.start(item.name, "fast", force = true, explicitScenario = item,
+                    beforeScreen = { activity.moveTaskToBack(true) },
+                    allowPhone = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("phoneActions", true)) {
+                    scenarioStatus(it.text, it.ok, "run")
+                }
+            }
+            "scenario-point" -> recordScenarioPoint()
+            "scenario-import" -> runCatching {
+                @Suppress("DEPRECATION")
+                activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "application/json"
+                }, 503)
+            }.onFailure { scenarioStatus("Android не открыл выбор файла.", false, "file") }
+            "scenario-export" -> {
+                val item = CortexScenarios.get(context, body.optString("id"))
+                if (item != null) runCatching {
+                    scenarioExport = item.json().toString(2)
+                    @Suppress("DEPRECATION")
+                    activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, "cortex-scenario.json")
+                    }, 504)
+                }.onFailure { scenarioStatus("Android не открыл сохранение файла.", false, "file") }
+            }
             "microphone-permission" -> requestPermission(Manifest.permission.RECORD_AUDIO)
             "tap" -> vibrate()
+            "conversation-clear" -> {
+                val source = body.optString("source").take(100)
+                CortexSchedule.clearDraft(source)
+                CortexActionEngine.clearPaused(source)
+            }
             "action-start" -> {
                 val id = body.optString("id")
                 fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false) =
@@ -118,7 +176,44 @@ internal class CortexDeviceBridge(
     }
 
     override fun close() {
+        val recorder = pointRecorder
+        pointRecorder = null
+        recorder?.cancel()
+        if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (engineDelegate.isInitialized()) engine.close()
+    }
+
+    fun scheduleEntry(id: String) = emit(JSONObject().put("type", "schedule-open").put("id", id))
+
+    private fun scheduleList() = emit(JSONObject().put("type", "schedule-list")
+        .put("tasks", CortexSchedule.list(context)).put("exact", CortexSchedule.exactAllowed(context))
+        .put("notifications", CortexSchedule.notificationsAllowed(context)))
+
+    private fun scheduleResult(result: CortexActionEngine.Result) =
+        emit(JSONObject().put("type", "schedule-result").put("ok", result.ok).put("text", result.text))
+
+    private fun scenarioList() = emit(JSONObject().put("type", "scenario-list").put("items", CortexScenarios.list(context)))
+
+    private fun scenarioStatus(text: String, ok: Boolean, operation: String) = emit(JSONObject()
+        .put("type", "scenario-result").put("text", text).put("ok", ok).put("operation", operation))
+
+    private fun recordScenarioPoint() {
+        val service = CortexScreenService.connected
+        if (service == null || service.locked() || CortexActionState.busy) {
+            scenarioStatus("Для записи точки разблокируйте телефон и включите управление экраном CORTEX.", false, "point")
+            return
+        }
+        if (pointRecorder != null) return
+        activity.moveTaskToBack(true)
+        pointRecorder = CortexPointRecorder(service).also { recorder ->
+            recorder.start { value ->
+                if (pointRecorder !== recorder) return@start
+                pointRecorder = null
+                runCatching { service.startActivity(Intent(service, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                if (value == null) scenarioStatus("Запись точки завершилась. Откройте нужное приложение и повторите.", false, "point")
+                else emit(JSONObject().put("type", "scenario-point").put("point", value))
+            }
+        }
     }
 
     private fun requestPermission(name: String) {
@@ -129,6 +224,9 @@ internal class CortexDeviceBridge(
     }
     fun refreshPermissions() {
         val obj = JSONObject().put("type", "permissions")
+            .put("versionName", BuildConfig.VERSION_NAME)
+            .put("versionCode", BuildConfig.VERSION_CODE)
+            .put("guestId", CortexServerBridge.guestId(context))
             .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
             .put("screenLock", Build.VERSION.SDK_INT >= 28 && CortexScreenService.connected != null)
@@ -180,6 +278,37 @@ internal class CortexDeviceBridge(
                 }.isSuccess)
             } else e.put("cancelled", true)
             emit(e)
+        }
+        if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) {
+            val item = runCatching {
+                val input = requireNotNull(context.contentResolver.openInputStream(data.data!!))
+                val bytes = input.use { stream ->
+                    val buffer = ByteArray(153_601)
+                    var length = 0
+                    while (length < buffer.size) {
+                        val count = stream.read(buffer, length, buffer.size - length)
+                        if (count <= 0) break
+                        length += count
+                    }
+                    require(length < buffer.size)
+                    String(buffer, 0, length, Charsets.UTF_8)
+                }
+                JSONObject(bytes).apply { remove("id") }
+            }.getOrNull()
+            if (item == null) scenarioStatus("Не удалось прочитать JSON сценария.", false, "file")
+            else emit(JSONObject().put("type", "scenario-import").put("item", item))
+        }
+        if (requestCode == 504) {
+            val value = scenarioExport
+            scenarioExport = null
+            if (resultCode == Activity.RESULT_OK && data?.data != null && value != null) {
+                val ok = runCatching {
+                    requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use {
+                        it.write(value.toByteArray(Charsets.UTF_8))
+                    }
+                }.isSuccess
+                scenarioStatus(if (ok) "Сценарий экспортирован." else "Не удалось сохранить сценарий.", ok, "file")
+            }
         }
     }
     private fun open(intent: Intent): Boolean = launch(intent)

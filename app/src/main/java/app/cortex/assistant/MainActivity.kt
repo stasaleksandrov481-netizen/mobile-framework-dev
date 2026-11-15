@@ -38,6 +38,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var container: FrameLayout
     private var rendererFailed = false
     private var nativeReady = false
+    private var pendingSchedule: String? = null
+    private val leaveForAction: () -> Unit = { moveTaskToBack(true) }
     private val wakeCommand: (String) -> Boolean = { command ->
         val available = !rendererFailed && nativeReady && CortexRuntime.appVisible
         if (available) deviceEvent(JSONObject().put("type", "wake-command").put("text", command))
@@ -51,6 +53,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingSchedule = intent.getStringExtra(CortexSchedule.EXTRA_TASK)
+        CortexSchedule.initialize(applicationContext)
         if (cleanupStarted.compareAndSet(false, true)) {
             val context = applicationContext
             Thread({
@@ -76,6 +80,7 @@ class MainActivity : ComponentActivity() {
         nativeReady = false
         val loader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         webView = WebView(this).apply {
             setBackgroundColor(Color.BLACK)
             isSoundEffectsEnabled = false
@@ -121,10 +126,12 @@ class MainActivity : ComponentActivity() {
                         nativeReady = true
                     }
                     device.handle(data)
+                    showPendingSchedule()
                 }
             }
         }
         CortexRuntime.wakeCommand = wakeCommand
+        CortexRuntime.leaveForAction = leaveForAction
         island = CortexIslandBridge(this, webView, "https://$ASSET_HOST")
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
             webView.loadUrl("https://$ASSET_HOST/assets/web/index.html?android=1")
@@ -183,6 +190,16 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.data?.let(::authReturned)
+        pendingSchedule = intent.getStringExtra(CortexSchedule.EXTRA_TASK)
+        showPendingSchedule()
+    }
+
+    private fun showPendingSchedule() {
+        if (!nativeReady || rendererFailed) return
+        val id = pendingSchedule ?: return
+        pendingSchedule = null
+        intent.removeExtra(CortexSchedule.EXTRA_TASK)
+        if (id.length == 36) device.scheduleEntry(id)
     }
 
     private fun authReturned(uri: Uri) {
@@ -250,6 +267,7 @@ class MainActivity : ComponentActivity() {
 
     private fun closeWebView() {
         if (CortexRuntime.wakeCommand === wakeCommand) CortexRuntime.wakeCommand = null
+        if (CortexRuntime.leaveForAction === leaveForAction) CortexRuntime.leaveForAction = null
         nativeReady = false
         if (::speech.isInitialized) speech.close()
         if (::device.isInitialized) device.close()

@@ -39,6 +39,7 @@ internal class IslandConversationPanel(
 ) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private val status = label(10.5f, 0xFFC6C6C6.toInt())
+    private val brand = label(12f, Color.WHITE)
     private val signal = Signal()
     private val response = label(14.5f, 0xFFF0F0F0.toInt())
     private val answerScroll = ScrollView(context)
@@ -46,6 +47,9 @@ internal class IslandConversationPanel(
     private val editor = EditText(context)
     private val entry = Entry()
     private val sendButton = Glyph("send", "Отправить", true)
+    private val widgets = LinearLayout(context)
+    private var appearance = IslandAppearance.parse()
+    private var reminderActions: ((String) -> Unit)? = null
     private var busy = false
     private var answer = ""
     private var motion = ValueAnimator.areAnimatorsEnabled()
@@ -66,7 +70,7 @@ internal class IslandConversationPanel(
             gravity = Gravity.CENTER_VERTICAL
         }
         val wordmark = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        wordmark.addView(label(12f, Color.WHITE).apply {
+        wordmark.addView(brand.apply {
             text = "CORTEX"
             letterSpacing = .18f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -100,6 +104,7 @@ internal class IslandConversationPanel(
             setTextIsSelectable(true)
         }
         addView(answerScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6) })
+        addView(widgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
 
         editor.apply {
             hint = "Сообщение или команда"
@@ -156,6 +161,7 @@ internal class IslandConversationPanel(
         sendButton.setOnClickListener { if (busy) stopMessage() else submit() }
         addView(entry, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         refreshSend()
+        renderWidgets()
     }
 
     fun status(phase: String, label: String) {
@@ -164,6 +170,7 @@ internal class IslandConversationPanel(
             signal.invalidate()
         }
         val message = label.ifBlank { "На связи" }
+        status.visibility = if (appearance.status || phase == "reminder") VISIBLE else GONE
         if (status.text.toString() == message) return
         status.text = message
     }
@@ -187,6 +194,7 @@ internal class IslandConversationPanel(
         sendButton.contentDescription = if (active) "Остановить задачу" else "Отправить"
         sendButton.invalidate()
         refreshSend()
+        renderWidgets()
     }
 
     fun answer(value: String) {
@@ -196,6 +204,7 @@ internal class IslandConversationPanel(
         val hasAnswer = value.isNotBlank()
         response.text = value
         answerScroll.visibility = if (hasAnswer) VISIBLE else INVISIBLE
+        if (wasEmpty == hasAnswer) renderWidgets()
         if (wasEmpty && hasAnswer) {
             answerScroll.scrollTo(0, 0)
             if (motion) {
@@ -215,6 +224,54 @@ internal class IslandConversationPanel(
         answerScroll.translationY = (1f - progress) * 8 * density
         entry.alpha = ((progress - .28f) / .72f).coerceIn(0f, 1f)
         entry.translationY = (1f - progress) * 9 * density
+        widgets.alpha = entry.alpha
+    }
+
+    fun appearance(value: IslandAppearance) {
+        if (appearance == value) return
+        appearance = value
+        response.setTextColor(value.text)
+        brand.setTextColor(value.text)
+        status.setTextColor(value.text)
+        editor.setTextColor(value.text)
+        editor.setHintTextColor((value.text and 0x00FFFFFF) or 0xA0000000.toInt())
+        signal.tint(value.accent)
+        entry.invalidate()
+        sendButton.invalidate()
+        for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
+        renderWidgets()
+    }
+
+    fun reminder(action: ((String) -> Unit)?) {
+        if (action === reminderActions) return
+        reminderActions = action
+        if (action != null) hideKeyboard()
+        entry.visibility = if (action == null) VISIBLE else GONE
+        renderWidgets()
+    }
+
+    private fun renderWidgets() {
+        widgets.removeAllViews()
+        val reminder = reminderActions
+        val options = if (reminder != null) listOf("Готово" to "done", "Отложить" to "snooze", "Открыть" to "open")
+            else if (appearance.quick && !busy && answer.isBlank()) listOf("Заряд" to "Сколько заряда?", "Время" to "Сколько времени?")
+            else emptyList()
+        widgets.visibility = if (options.isEmpty()) GONE else VISIBLE
+        options.forEach { (name, command) ->
+            val chip = label(11.5f, appearance.text).apply {
+                text = name
+                gravity = Gravity.CENTER
+                minHeight = dp(42)
+                isFocusable = true
+                isSoundEffectsEnabled = false
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(13).toFloat()
+                    setStroke(dp(1), (appearance.border and 0x00FFFFFF) or 0x50000000)
+                }
+                setOnClickListener { if (reminder == null) sendMessage(command) else reminder(command) }
+            }
+            widgets.addView(chip, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
+        }
     }
 
     fun hideKeyboard() {
@@ -257,12 +314,16 @@ internal class IslandConversationPanel(
         var phase = "idle"
         var levelAt = 0L
         var level = 0f
+        fun tint(color: Int) {
+            drawing.tint = color
+            invalidate()
+        }
 
         init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
         override fun onDraw(canvas: Canvas) {
             val moving = motion && isShown && windowVisibility == VISIBLE &&
-                (phase == "listening" || phase == "executing")
+                (phase == "listening" || phase == "thinking" || phase == "executing")
             val now = SystemClock.uptimeMillis()
             val time = if (moving) (now % 720_000L) / 1000f else 0f
             drawing.mark(canvas, 13 * density, height / 2f, 1f)
@@ -286,11 +347,12 @@ internal class IslandConversationPanel(
             val inset = .65f * density
             val radius = (height / 2f).coerceAtMost(29 * density)
             ink.style = Paint.Style.FILL
-            ink.color = if (focused) 0xFF101010.toInt() else Color.BLACK
+            ink.color = appearance.background
             canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, ink)
             ink.style = Paint.Style.STROKE
             ink.strokeWidth = density * .8f
-            ink.color = if (focused) 0xFFA0A0A0.toInt() else 0xFF333333.toInt()
+            ink.color = if (focused) appearance.accent else appearance.border
+            ink.alpha = if (focused) 150 else 84
             canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, ink)
         }
     }
@@ -334,10 +396,14 @@ internal class IslandConversationPanel(
             canvas.scale(density, density)
             if (prominent) {
                 pen.style = Paint.Style.FILL
-                pen.color = if (isEnabled) Color.WHITE else 0xFF303030.toInt()
+                pen.color = appearance.text
+                pen.alpha = if (isEnabled) 255 else 58
                 canvas.drawCircle(0f, 0f, 16.3f, pen)
-                pen.color = if (isEnabled) 0xFF080808.toInt() else 0xFF8C8C8C.toInt()
-            } else pen.color = if (isPressed) Color.WHITE else 0xFFC8C8C8.toInt()
+                pen.color = if (isEnabled) appearance.background else appearance.text
+            } else {
+                pen.color = appearance.text
+                pen.alpha = if (isPressed) 255 else 200
+            }
             pen.style = Paint.Style.STROKE
             symbol.rewind()
             when (kind) {

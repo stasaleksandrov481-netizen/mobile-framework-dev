@@ -28,6 +28,7 @@ const CortexApi = (() => {
     provider_balance: "На стороне провайдера исчерпан баланс.",
     provider_limit: "Бесплатные модели сейчас недоступны. Попробуйте чуть позже.",
     rate_limit: "Слишком много запросов. Попробуйте чуть позже.",
+    daily_limit: "Дневной лимит CORTEX исчерпан. Новые запросы будут доступны в 03:00 по Москве.",
     model: "Бесплатные модели сейчас заняты. Попробуйте чуть позже.",
     provider: "Провайдер прервал ответ. Попробуйте ещё раз.",
     timeout: "Ответ занял слишком много времени. Попробуйте ещё раз.",
@@ -57,6 +58,8 @@ const CortexApi = (() => {
     try { message = JSON.parse(event.data); } catch { return; }
     const entry = requests.get(message.id);
     if (!entry) return;
+    if (message.quota) dispatchEvent(new CustomEvent("cortex-quota", { detail: message.quota }));
+    if (message.status === "quota") return;
     if (typeof message.delta === "string") { entry.onDelta?.(message.delta); return; }
     if (message.status === "fallback") { entry.onStatus?.(message.status); return; }
     entry.cleanup();

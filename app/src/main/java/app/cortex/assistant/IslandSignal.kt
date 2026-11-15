@@ -15,6 +15,11 @@ internal class IslandSignal(private val density: Float) {
         strokeJoin = Paint.Join.ROUND
     }
     private val line = Path()
+    var tint: Int = Color.WHITE
+        set(value) {
+            field = value
+            ink.color = value
+        }
 
     fun mark(canvas: Canvas, x: Float, y: Float, alpha: Float) {
         canvas.save()

@@ -21,8 +21,8 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 106
-        versionName = "1.0.6"
+        versionCode = 107
+        versionName = "1.0.7"
     }
     buildFeatures { buildConfig = true }
     signingConfigs {
@@ -56,9 +56,6 @@ android {
 dependencies {
     implementation("androidx.activity:activity:1.10.1")
     implementation("androidx.browser:browser:1.9.0")
-    implementation("androidx.camera:camera-camera2:1.4.2")
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
-    implementation("androidx.camera:camera-view:1.4.2")
     implementation("androidx.core:core:1.16.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

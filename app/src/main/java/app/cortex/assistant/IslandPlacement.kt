@@ -24,7 +24,7 @@ internal data class IslandScreen(val bounds: Rect, val bars: Rect, val cutouts: 
         cutouts.filter { it.edge == edge }.maxOfOrNull { size(it.bounds) } ?: 0
 }
 
-internal class IslandPlacement(val screen: IslandScreen, density: Float) {
+internal class IslandPlacement(val screen: IslandScreen, density: Float, appearance: IslandAppearance) {
     val compact: RectF
     val panel: RectF
     val anchorX: Float
@@ -35,16 +35,18 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float) {
     init {
         val display = screen.bounds
         val safe = screen.safeArea(density)
+        val faceSpace = if (appearance.face) minOf(26f * density, safe.width() * .15f).coerceAtLeast(0f) else 0f
+        val contentLeft = safe.left + faceSpace
         val center = display.exactCenterX()
         val camera = screen.cutouts.filter { it.edge == Gravity.TOP }.minByOrNull {
             abs(it.bounds.exactCenterX() - center)
         } ?: screen.cutouts.firstOrNull { it.edge == Gravity.LEFT || it.edge == Gravity.RIGHT }
             ?: screen.cutouts.firstOrNull { it.edge == Gravity.BOTTOM }
 
-        val panelWidth = minOf(344 * density, safe.width()).coerceAtLeast(1f)
-        val panelHeight = minOf(240 * density, safe.height() * .57f).coerceAtLeast(1f)
-        val width = minOf(108 * density, panelWidth)
-        val height = minOf(40 * density, panelHeight)
+        val panelWidth = minOf(352 * density * appearance.size, safe.right - contentLeft).coerceAtLeast(1f)
+        val panelHeight = minOf(246 * density * appearance.size, safe.height() * .62f).coerceAtLeast(1f)
+        val width = minOf(132 * density * appearance.size, panelWidth)
+        val height = minOf(40 * density * appearance.size, panelHeight)
         val desiredX = when (camera?.edge) {
             Gravity.LEFT -> safe.left
             Gravity.RIGHT -> safe.right - width
@@ -55,11 +57,11 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float) {
             Gravity.BOTTOM -> safe.bottom - height
             else -> safe.top
         }
-        val left = desiredX.coerceIn(safe.left, maxOf(safe.left, safe.right - width))
-        val top = desiredY.coerceIn(safe.top, maxOf(safe.top, safe.bottom - height))
+        val left = (desiredX + appearance.offsetX * density).coerceIn(contentLeft, maxOf(contentLeft, safe.right - width))
+        val top = (desiredY + appearance.offsetY * density).coerceIn(safe.top, maxOf(safe.top, safe.bottom - height))
         compact = RectF(left, top, left + width, top + height)
 
-        val panelLeft = (compact.centerX() - panelWidth / 2).coerceIn(safe.left, maxOf(safe.left, safe.right - panelWidth))
+        val panelLeft = (compact.centerX() - panelWidth / 2).coerceIn(contentLeft, maxOf(contentLeft, safe.right - panelWidth))
         val panelTop = when (camera?.edge) {
             Gravity.BOTTOM -> compact.bottom - panelHeight
             Gravity.LEFT, Gravity.RIGHT -> compact.centerY() - panelHeight / 2
@@ -77,8 +79,8 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float) {
             Gravity.LEFT, Gravity.RIGHT -> compact.centerY()
             else -> compact.top
         }
-        closedWindow = frame(compact, density)
-        openWindow = Rect(closedWindow).apply { union(frame(panel, density)) }
+        closedWindow = frame(RectF(compact).apply { this.left -= faceSpace }, density)
+        openWindow = Rect(closedWindow).apply { union(frame(RectF(panel).apply { this.left -= faceSpace }, density)) }
     }
 
     fun window(open: Boolean) = Rect(if (open) openWindow else closedWindow)

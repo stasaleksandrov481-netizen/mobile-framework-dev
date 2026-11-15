@@ -1,0 +1,412 @@
+package app.cortex.assistant
+
+import android.app.AlarmManager
+import android.app.KeyguardManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.os.SystemClock
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import java.util.UUID
+
+internal object CortexSchedule {
+    const val EXTRA_TASK = "cortex.scheduled.task"
+    private const val ALARM = "cortex.scheduled.alarm"
+    private const val COMPLETE = "cortex.scheduled.complete"
+    private const val SNOOZE = "cortex.scheduled.snooze"
+    private const val CHANNEL = "cortex-reminders"
+    private const val NOTIFICATION = 1410
+    private const val DAY = 86_400_000L
+    private val repeats = setOf("none", "daily", "weekly")
+    private val format = DateTimeFormatter.ofPattern("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
+    private val drafts = linkedMapOf<String, Draft>()
+    private var initialized = false
+
+    private data class Draft(
+        val reminder: Boolean, val text: String, val time: CortexScheduleIntent.Time?,
+        val message: ConversationRequest? = null, val until: Long = SystemClock.elapsedRealtime() + 180_000
+    )
+
+    private data class Task(
+        val id: String, val kind: String, val text: String, val at: Long, val local: String = "",
+        val repeat: String = "none", val status: String = "scheduled", val detail: String = "",
+        val message: ConversationRequest? = null, val resume: Boolean = false
+    ) {
+        fun json(): JSONObject = JSONObject().put("id", id).put("kind", kind).put("text", text).put("at", at)
+            .put("local", local).put("repeat", repeat).put("status", status).put("detail", detail)
+            .put("resume", resume).apply {
+                message?.let { put("message", JSONObject().put("app", it.app).put("recipient", it.recipient)
+                    .put("text", it.message).put("send", it.send)) }
+            }
+    }
+
+    private fun store(context: Context) = context.getSharedPreferences("cortex-schedule", Context.MODE_PRIVATE)
+    private fun all(context: Context): List<Task> = runCatching {
+        val items = JSONArray(store(context).getString("tasks", "[]"))
+        (0 until items.length()).map { i ->
+            val item = items.getJSONObject(i)
+            val message = item.optJSONObject("message")?.let {
+                ConversationRequest(it.getString("app"), it.getString("recipient"), it.getString("text"), it.getBoolean("send"))
+            }
+            Task(item.getString("id"), item.getString("kind"), item.getString("text"), item.getLong("at"),
+                item.optString("local"), item.optString("repeat", "none"), item.optString("status", "scheduled"),
+                item.optString("detail"), message, item.optBoolean("resume"))
+        }
+    }.getOrDefault(emptyList())
+
+    private fun write(context: Context, items: List<Task>): Boolean {
+        val (active, history) = items.partition { it.status in setOf("scheduled", "due", "blocked", "running") }
+        val retained = active + history.sortedByDescending { it.at }.take(80)
+        val ok = store(context).edit().putString("tasks", JSONArray(retained.map(Task::json)).toString()).commit()
+        if (ok) CortexRuntime.scheduleChanged?.invoke()
+        return ok
+    }
+
+    private fun replace(context: Context, task: Task, next: Task? = null): Boolean {
+        val items = all(context)
+        val nextItems = items.filterNot { it.id == task.id } + task + listOfNotNull(next)
+        return write(context, nextItems)
+    }
+
+    fun list(context: Context): JSONArray = JSONArray(all(context)
+        .sortedWith(compareBy<Task> { it.status != "scheduled" }.thenBy {
+            if (it.status == "scheduled") it.at else -it.at
+        }).map(Task::json))
+
+    fun screenReady(context: Context) = context.getSystemService(PowerManager::class.java).isInteractive &&
+        !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+
+    fun exactAllowed(context: Context) = Build.VERSION.SDK_INT < 31 ||
+        context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+
+    fun notificationsAllowed(context: Context) =
+        context.getSystemService(NotificationManager::class.java).let {
+            it.areNotificationsEnabled() && it.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+        }
+
+    fun clearDraft(source: String) { drafts.remove(source) }
+
+    fun initialize(context: Context) {
+        if (initialized) return
+        initialized = true
+        restore(context, restarting = true)
+    }
+
+    fun command(context: Context, raw: String, source: String): CortexActionEngine.Result? {
+        val parsed = CortexScheduleIntent.parse(raw)
+        val previous = drafts.remove(source)?.takeIf { it.until > SystemClock.elapsedRealtime() }
+        if (parsed == null && previous == null) return null
+        if (raw.trim().lowercase(Locale.ROOT) in setOf("отмена", "не надо", "отмени")) {
+            return CortexActionEngine.Result("Планирование отменено.", true)
+        }
+        val draft = when {
+            previous != null && previous.time == null && CortexScheduleIntent.time(raw) != null ->
+                previous.copy(time = CortexScheduleIntent.time(raw))
+            parsed != null -> Draft(parsed.reminder, parsed.text, parsed.time,
+                if (parsed.reminder) null else message(context, parsed.text))
+            previous?.time == null -> previous ?: return null
+            previous.text.isBlank() -> previous.copy(text = raw.trim().take(2400),
+                message = if (previous.reminder) null else message(context, raw))
+            previous.message?.app?.isBlank() == true -> {
+                val name = raw.trim().removePrefix("в ").removePrefix("В ").trim('«', '»', '"', '.', ' ')
+                val app = CortexPhoneActions(context).resolveApp(name)
+                previous.copy(message = previous.message.copy(app = app?.pkg.orEmpty()))
+            }
+            previous.message?.question?.isNotBlank() == true -> previous.copy(message = previous.message.withAnswer(raw))
+            else -> previous
+        }
+        val prompt = question(draft)
+        if (prompt != null) {
+            drafts[source] = draft
+            if (drafts.size > 8) drafts.remove(drafts.keys.first())
+            return CortexActionEngine.Result(prompt, false)
+        }
+        return saveDraft(context, draft, "none")
+    }
+
+    private fun question(draft: Draft): String? = when {
+        draft.time == null -> "Когда запланировать? Например, через 10 минут или завтра в 8:00."
+        draft.text.isBlank() -> if (draft.reminder) "О чём напомнить?" else "Какое действие запланировать?"
+        draft.message?.app?.isBlank() == true -> "В каком приложении написать сообщение? Назовите установленное приложение."
+        draft.message?.question?.isNotBlank() == true -> draft.message.question
+        else -> null
+    }
+
+    private fun message(context: Context, text: String): ConversationRequest? {
+        val phone = CortexPhoneActions(context)
+        val send = SIMPLE_MESSAGE.matchEntire(text.trim()) ?: return ConversationRequest.parse(text) { phone.resolveApp(it) != null }
+        val (name, app, body) = send.destructured
+        val exact = name.trim().trim('«', '»', '"')
+        val recipient = when (exact.lowercase(Locale.ROOT)) {
+            "папе", "маме", "брату", "сестре", "другу", "подруге" -> ""
+            else -> exact
+        }
+        return ConversationRequest(app.trim().takeIf(String::isNotBlank)?.let { phone.resolveApp(it)?.pkg }.orEmpty(), recipient.take(90),
+            body.trim().trim('«', '»', '"').take(2000), true)
+    }
+
+    fun save(context: Context, input: JSONObject): CortexActionEngine.Result {
+        val text = input.optString("text").trim().take(2400)
+        val reminder = input.optString("kind") == "reminder"
+        val local = runCatching { LocalDateTime.parse(input.optString("local")) }.getOrNull()
+        val time = local?.let { CortexScheduleIntent.Time(it.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), it) }
+        val old = all(context).firstOrNull { it.id == input.optString("id") && it.status == "scheduled" }
+        if (input.optString("id").isNotBlank() && old == null) return failure("Это поручение уже изменилось.")
+        val message = if (reminder) null else old?.message?.takeIf { old.text == text } ?: message(context, text)
+        return saveDraft(context, Draft(reminder, text, time, message), input.optString("repeat", "none"), old)
+    }
+
+    private fun saveDraft(context: Context, draft: Draft, repeat: String, old: Task? = null): CortexActionEngine.Result {
+        question(draft)?.let { return failure(it) }
+        val time = requireNotNull(draft.time)
+        val now = System.currentTimeMillis()
+        if (time.epoch <= now || time.epoch > now + 366 * DAY) return failure("Выберите время в пределах ближайшего года.")
+        if (repeat !in repeats) return failure("Выберите период повторения.")
+        if (old == null && all(context).count { it.status in setOf("scheduled", "due", "blocked", "running") } >= 100) {
+            return failure("В списке уже 100 активных поручений. Завершите или отмените одно из них.")
+        }
+        val task = Task(old?.id ?: UUID.randomUUID().toString(), if (draft.reminder) "reminder" else "action",
+            draft.text, time.epoch, time.local?.toString().orEmpty(), repeat, message = draft.message)
+        if (!replace(context, task)) return failure("Android не сохранил поручение.")
+        alarm(context, task)
+        val kind = if (draft.reminder) "Напомню" else "Запланировал действие"
+        val timeLabel = format.format(Instant.ofEpochMilli(task.at).atZone(ZoneId.systemDefault()))
+        val delivery = when {
+            !notificationsAllowed(context) -> " Включите уведомления, чтобы увидеть поручение при выключенном экране."
+            !exactAllowed(context) -> " Android может доставить его позже указанного времени."
+            else -> ""
+        }
+        return CortexActionEngine.Result("$kind $timeLabel. «${task.text}».$delivery", true)
+    }
+
+    private fun failure(text: String) = CortexActionEngine.Result(text, false)
+
+    fun restore(context: Context, rebase: Boolean = false, restarting: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val tasks = all(context)
+        val revised = tasks.map { task ->
+            when {
+                (task.status == "running" || task.resume) && restarting -> task.copy(status = "failed", resume = false,
+                    detail = "Предыдущий запуск прервался. Проверьте результат перед созданием нового поручения.")
+                task.status == "scheduled" && rebase && task.local.isNotBlank() -> {
+                    val at = runCatching { LocalDateTime.parse(task.local).atZone(ZoneId.systemDefault())
+                        .toInstant().toEpochMilli() }.getOrDefault(task.at)
+                    task.copy(at = at)
+                }
+                else -> task
+            }
+        }
+        if (tasks != revised && !write(context, revised)) return
+        revised.filter { it.status == "scheduled" }.forEach {
+            if (it.at <= now) deliver(context, it.id, it.at, recovered = restarting || rebase)
+            else alarm(context, it)
+        }
+    }
+
+    private fun alarm(context: Context, task: Task) {
+        val manager = context.getSystemService(AlarmManager::class.java)
+        val target = pending(context, task, ALARM)
+        val due = task.at.coerceAtLeast(System.currentTimeMillis())
+        if (exactAllowed(context)) {
+            try {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target)
+                return
+            } catch (_: SecurityException) { /* Access can change between checking and scheduling. */ }
+        }
+        manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target)
+    }
+
+    private fun next(task: Task): Task? {
+        if (task.repeat == "none") return null
+        val zone = ZoneId.systemDefault()
+        val previous = if (task.local.isNotBlank()) LocalDateTime.parse(task.local)
+            else Instant.ofEpochMilli(task.at).atZone(zone).toLocalDateTime()
+        val step = if (task.repeat == "daily") 1L else 7L
+        val now = Instant.now()
+        var next = previous.plusDays(step)
+        while (!next.atZone(zone).toInstant().isAfter(now)) next = next.plusDays(step)
+        return task.copy(id = UUID.randomUUID().toString(), at = next.atZone(zone).toInstant().toEpochMilli(),
+            local = next.toString(), status = "scheduled", detail = "")
+    }
+
+    fun deliver(context: Context, id: String, at: Long, recovered: Boolean = false) {
+        val task = all(context).firstOrNull { it.id == id && it.at == at && it.status == "scheduled" } ?: return
+        if (task.at > System.currentTimeMillis()) { alarm(context, task); return }
+        val next = next(task)
+        val state = task.copy(status = if (task.kind == "reminder") "due" else "blocked", repeat = "none")
+        if (!replace(context, state, next)) return
+        next?.let { alarm(context, it) }
+        if (task.kind == "reminder") {
+            if (!screenReady(context) || CortexRuntime.reminder?.invoke(task.id, task.text) != true) notify(context, state)
+        } else if (recovered || System.currentTimeMillis() - task.at > 15 * 60_000L) {
+            block(context, state, "Назначенное время прошло. Запустите поручение после проверки.")
+        } else run(context, id, background = true)
+    }
+
+    fun handle(context: Context, id: String, action: String, beforeScreen: () -> Unit = {}): CortexActionEngine.Result {
+        val task = all(context).firstOrNull { it.id == id } ?: return failure("Поручение больше недоступно.")
+        val updated = when (action) {
+            "run" -> return run(context, id, background = false, beforeScreen)
+            "done" -> task.takeIf { it.status == "due" }?.copy(status = "done")
+            "snooze" -> task.takeIf { it.status == "due" }?.copy(
+                status = "scheduled", at = System.currentTimeMillis() + 5 * 60_000L, local = "", detail = "")
+            "cancel" -> task.takeIf { it.status in setOf("scheduled", "due", "blocked") }?.copy(status = "cancelled")
+            else -> null
+        } ?: return failure("Действие уже недоступно для этого поручения.")
+        if (!replace(context, updated)) return failure("Не удалось сохранить состояние поручения.")
+        context.getSystemService(NotificationManager::class.java).cancel(id, NOTIFICATION)
+        if (updated.status == "scheduled") alarm(context, updated)
+        else context.getSystemService(AlarmManager::class.java).cancel(pending(context, task, ALARM))
+        return CortexActionEngine.Result(when (action) {
+            "snooze" -> "Отложено на 5 минут."
+            "cancel" -> "Поручение отменено."
+            else -> "Отмечено выполненным."
+        }, true)
+    }
+
+    private fun run(context: Context, id: String, background: Boolean, beforeScreen: () -> Unit = {}): CortexActionEngine.Result {
+        val task = all(context).firstOrNull { it.id == id && it.kind == "action" && it.status == "blocked" }
+            ?: return failure("Поручение уже завершено или запущено.")
+        val prefs = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
+        val source = "schedule:$id"
+        if (task.resume && !CortexActionEngine.canResume(source)) {
+            val reason = "Поручение прервалось после запуска. Проверьте результат перед повтором."
+            replace(context, task.copy(status = "failed", detail = reason, resume = false))
+            return failure(reason)
+        }
+        val reason = when {
+            !screenReady(context) -> "Не могу выполнить поручение: экран выключен или заблокирован."
+            !prefs.getBoolean("phoneActions", true) -> "Управление телефоном CORTEX выключено."
+            CortexActionState.gate != "open" -> "CORTEX ожидает обновления или завершения техработ."
+            CortexActionState.busy -> "CORTEX выполняет другое действие."
+            CortexScreenService.connected == null && !canRunLocally(task) ->
+                "Разрешите CORTEX управление экраном в специальных возможностях."
+            else -> null
+        }
+        if (reason != null) { block(context, task, reason); return failure(reason) }
+        if (!replace(context, task.copy(status = "running", detail = ""))) return failure("Не удалось сохранить запуск.")
+        context.getSystemService(NotificationManager::class.java).cancel(id, NOTIFICATION)
+        val engine = CortexActionEngine(context)
+        val text = if (CortexActionEngine.canResume(source)) "Продолжи" else task.text
+        val handled = engine.start(text, "fast", force = true, source = source,
+            beforeScreen = if (background) ({ if (CortexRuntime.appVisible) CortexRuntime.leaveForAction?.invoke() }) else beforeScreen,
+            scheduled = true, explicitConversation = task.message) { result ->
+            when {
+                result.ok -> replace(context, task.copy(status = "done", detail = result.text, resume = false))
+                result.resumable && CortexActionEngine.canResume(source) -> block(context, task.copy(resume = true), result.text)
+                else -> {
+                    val failed = task.copy(status = "failed", detail = result.text)
+                    if (replace(context, failed) && background) notify(context, failed)
+                }
+            }
+            engine.close()
+        }
+        if (!handled) {
+            engine.close()
+            val reasonText = "Уточните действие CORTEX."
+            block(context, task, reasonText)
+            return failure(reasonText)
+        }
+        return CortexActionEngine.Result("Поручение запущено.", true)
+    }
+
+    private fun block(context: Context, task: Task, reason: String) {
+        val blocked = task.copy(status = "blocked", detail = reason)
+        if (replace(context, blocked)) notify(context, blocked)
+    }
+
+    private fun canRunLocally(task: Task): Boolean = task.message == null &&
+        CortexLocalCommands.parse(VisualRequest.goal(task.text)) { null }?.all {
+            it.optString("kind") in setOf("read_device", "volume", "torch")
+        } == true
+
+    fun openIntent(context: Context, id: String) = Intent(context, MainActivity::class.java)
+        .putExtra(EXTRA_TASK, id).setData(Uri.parse("cortex-schedule://open/$id"))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+    fun showNotification(context: Context, id: String) {
+        all(context).firstOrNull { it.id == id && it.status == "due" }?.let { notify(context, it) }
+    }
+
+    private fun pending(context: Context, task: Task, action: String): PendingIntent =
+        PendingIntent.getBroadcast(context, 0, Intent(context, CortexScheduleReceiver::class.java)
+            .setAction(action).setData(Uri.parse("cortex-schedule://task/${task.id}")).putExtra("at", task.at),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    private fun notify(context: Context, task: Task) {
+        if (!notificationsAllowed(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Напоминания и поручения CORTEX", NotificationManager.IMPORTANCE_HIGH))
+        val open = PendingIntent.getActivity(context, 0, openIntent(context, task.id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val text = if (task.status == "due") task.text else task.detail
+        val builder = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_cortex)
+            .setContentTitle(when (task.status) {
+                "due" -> "Напоминание CORTEX"
+                "failed" -> "Поручение завершилось с ошибкой"
+                else -> "Поручение ожидает продолжения"
+            })
+            .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open)
+            .setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE)
+        if (task.status == "due") {
+            builder.addAction(Notification.Action.Builder(null, "Готово", pending(context, task, COMPLETE)).build())
+                .addAction(Notification.Action.Builder(null, "Отложить на 5 мин", pending(context, task, SNOOZE)).build())
+        } else if (task.status == "blocked") {
+            builder.addAction(Notification.Action.Builder(null, "Продолжить", open).build())
+        }
+        runCatching { manager.notify(task.id, NOTIFICATION, builder.build()) }
+    }
+
+    fun receive(context: Context, intent: Intent) {
+        val id = intent.data?.lastPathSegment.orEmpty()
+        val at = intent.getLongExtra("at", 0)
+        when (intent.action) {
+            ALARM -> {
+                if (!initialized) {
+                    initialized = true
+                    val tasks = all(context)
+                    if (tasks.any { it.status == "running" || it.resume }) {
+                        write(context, tasks.map {
+                            if (it.status == "running" || it.resume) it.copy(status = "failed", resume = false,
+                                detail = "Предыдущий запуск прервался. Проверьте результат перед повтором.") else it
+                        })
+                    }
+                }
+                deliver(context, id, at)
+            }
+            COMPLETE, SNOOZE -> if (all(context).any { it.id == id && it.at == at }) {
+                handle(context, id, if (intent.action == COMPLETE) "done" else "snooze")
+            }
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                initialized = true
+                restore(context, restarting = true)
+            }
+            Intent.ACTION_TIMEZONE_CHANGED -> restore(context, rebase = true)
+            Intent.ACTION_TIME_CHANGED, AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED -> restore(context)
+        }
+    }
+
+    private val SIMPLE_MESSAGE = Regex(
+        """^(?:напиши|отправь)(?:\s+(?:сообщение|текст))?\s+([^,:]+?)(?:\s+в\s+([^,:]+))?(?:\s*,\s*что\s+|\s*:\s*|\s*[,—]\s*)(.+)$""",
+        RegexOption.IGNORE_CASE
+    )
+}
+
+class CortexScheduleReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        CortexSchedule.receive(context.applicationContext, intent)
+    }
+}

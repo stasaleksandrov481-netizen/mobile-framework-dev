@@ -9,11 +9,12 @@ const accountId = "98d87a12-240b-4a57-95e0-7bc0bbbd0f42";
 const ticketId = "2f343286-09bb-4e8e-9aa3-21ecc664219b";
 const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
-function fixture(maintenance = false, streamedReply?: () => Response) {
+function fixture(maintenance = false, streamedReply?: () => Response, remaining = 80) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
   const requests: string[] = [];
+  const usage = new Map<string, number>();
   const app = createHandler({
     SUPABASE_URL: "https://examplecortex.supabase.co",
     SUPABASE_ANON_KEY: "test-publishable",
@@ -68,6 +69,17 @@ function fixture(maintenance = false, streamedReply?: () => Response) {
       case "/rest/v1/rpc/cortex_reserve":
       case "/rest/v1/cortex_installs":
       case "/rest/v1/cortex_app_sessions": return Response.json(null);
+      case "/rest/v1/rpc/cortex_beta_quota": {
+        const id = String(body.p_id);
+        let used = usage.get(id) ?? 80 - remaining;
+        const allowed = used < 80;
+        if (allowed && body.p_consume) {
+          used++;
+          usage.set(id, used);
+        }
+        return Response.json({ id, used, allowed, remaining: 80 - used, limit: 80,
+          time_zone: "Europe/Moscow", reset_at: new Date(Date.now() + 3600000).toISOString() });
+      }
       case "/rest/v1/cortex_support":
         if (method === "POST") {
           if (!ticket) ticket = body;
@@ -93,6 +105,23 @@ function fixture(maintenance = false, streamedReply?: () => Response) {
   }
   return { call, models, requests };
 }
+
+test("uses a stable guest ID and rejects the next AI call at the daily limit", async () => {
+  const { call, models } = fixture(false, undefined, 1);
+  const read = async (headers: Record<string, string> = {}) => (await (await call("status", undefined, headers)).json()).quota;
+  const before = await read();
+  assert.match(before.id, /^guest_[A-Za-z0-9_-]{43}$/);
+  assert.equal((await read()).id, before.id);
+  assert.notEqual((await read({ "x-cortex-install": otherInstall })).id, before.id);
+  const last = await call("check", {});
+  assert.equal(last.status, 200);
+  assert.equal((await last.json()).quota.remaining, 0);
+  const attempts = models.length;
+  const rejected = await call("check", {});
+  assert.equal(rejected.status, 429);
+  assert.equal((await rejected.json()).error, "daily_limit");
+  assert.equal(models.length, attempts);
+});
 
 test("Android Google callback uses PKCE and returns to the app without a bearer token in the URL", async () => {
   const { call } = fixture();
@@ -130,7 +159,9 @@ test("retries a rate-limited provider with a different :free model", async () =>
   const { call, models } = fixture();
   const response = await call("check", {});
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { connected: true });
+  const result = await response.json();
+  assert.equal(result.connected, true);
+  assert.equal(result.quota.used, 1);
   assert.deepEqual(models, ["example/unavailable:free", "example/working:free"]);
 });
 

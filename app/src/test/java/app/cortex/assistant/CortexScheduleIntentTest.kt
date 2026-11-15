@@ -1,0 +1,38 @@
+package app.cortex.assistant
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.time.ZonedDateTime
+
+class CortexScheduleIntentTest {
+    private val now = ZonedDateTime.parse("2026-11-15T01:00:00+03:00[Europe/Moscow]")
+
+    @Test fun reminderKeepsTheTextAndUsesTheSpokenDelay() {
+        val result = CortexScheduleIntent.parse("Кортекс, через десять минут напомни достать курицу", now)!!
+        assertTrue(result.reminder)
+        assertEquals("достать курицу", result.text)
+        assertEquals(now.plusMinutes(10).toInstant().toEpochMilli(), result.time?.epoch)
+    }
+
+    @Test fun delayedMessageKeepsTheCommandForClarification() {
+        val result = CortexScheduleIntent.parse("через полчаса напиши папе, что я буду дома", now)!!
+        assertFalse(result.reminder)
+        assertEquals("напиши папе, что я буду дома", result.text)
+        assertEquals(now.plusMinutes(30).toInstant().toEpochMilli(), result.time?.epoch)
+    }
+
+    @Test fun tomorrowKeepsLocalTimeAndLetsTheUserFillInTheReminder() {
+        val result = CortexScheduleIntent.parse("завтра в восемь утра напомни", now)!!
+        assertEquals("", result.text)
+        assertEquals(now.toLocalDate().plusDays(1).atTime(8, 0), result.time?.local)
+    }
+
+    @Test fun planningNeedsAnExplicitCommandAndFutureTime() {
+        assertNull(CortexScheduleIntent.parse("Почему завтра в 8 выключится свет?", now))
+        assertNull(CortexScheduleIntent.parse("Напомни через 0 минут проверить курицу", now)?.time)
+        assertNull(CortexScheduleIntent.parse("Открой настройки", now))
+    }
+}

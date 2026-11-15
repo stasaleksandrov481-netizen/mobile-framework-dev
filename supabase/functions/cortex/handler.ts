@@ -18,6 +18,16 @@ const JSON_HEADERS = {
 type Env = Record<string, string | undefined>;
 type Limit = { bucket: string; seconds: number; maximum: number };
 type Login = { state: string; account?: Account };
+type Quota = {
+  id: string;
+  used: number;
+  limit: number;
+  unlimited: boolean;
+  remaining: number | null;
+  reset_at: string;
+  time_zone: string;
+  allowed: boolean;
+};
 
 function configuredKey(env: Env, dictionary: string, legacy: string): string {
   try {
@@ -240,6 +250,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   async function actor(request: Request): Promise<{ account: Account | null; bucket: string; ip: string }> {
     const account = await lookup(request);
     if (account) return { account, bucket: "account:" + account.id, ip: "" };
+    if (request.headers.has("authorization")) throw new Failure("sign_in", 401);
     if (!guests) throw new Failure("sign_in", 401);
     const install = request.headers.get("x-cortex-install") || "";
     if (!CAPABILITY.test(install)) throw new Failure("client_version", 400);
@@ -259,13 +270,35 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     return owners;
   }
 
+  async function usage(request: Request, account: Account | null, consume = false): Promise<Quota | null> {
+    const install = await installIdentity(request);
+    const guest = install ? "guest_" + install : null;
+    const id = account?.id ?? (guests ? guest : null);
+    if (!id) return null;
+    const quota = await database<Quota>("rpc/cortex_beta_quota", "POST", {
+      p_id: id,
+      p_guest_id: account ? guest : null,
+      p_guest_owner: account && install ? "install_" + install : null,
+      p_account_owner: account && install ? "account_" + await hash(account.id) : null,
+      p_consume: consume,
+    });
+    if (!quota || quota.id !== id || typeof quota.allowed !== "boolean") throw new Failure("storage_config", 503);
+    return quota;
+  }
+
+  function exhausted(quota: Quota): Response {
+    const seconds = Math.max(1, Math.ceil((Date.parse(quota.reset_at) - Date.now()) / 1000));
+    return Response.json({ error: "daily_limit", retry_after: seconds, quota }, {
+      status: 429, headers: { ...JSON_HEADERS, "Retry-After": String(seconds) },
+    });
+  }
+
   function budget(caller: Awaited<ReturnType<typeof actor>>): Promise<unknown> {
     return reserve(
       { bucket: "chat:" + caller.bucket, seconds: 60, maximum: caller.account ? 16 : 12 },
       { bucket: "chat:all", seconds: 86_400, maximum: daily },
       ...(caller.account ? [] : [
         { bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 },
-        { bucket: "chat:guest-day:" + caller.bucket, seconds: 86_400, maximum: 200 },
         { bucket: "chat:guest-all", seconds: 86_400, maximum: Math.min(daily, 900) },
       ]),
     );
@@ -369,15 +402,17 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const [account, googleReady, key] = storage
           ? await Promise.all([lookup(request), google(), providerKey().catch(() => "")])
           : [null, false, ""];
+        const quota = storage ? await usage(request, account).catch(() => null) : null;
         return json({
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
           google: googleReady, account, guest: guests, support: storage, device_tools: true,
           device_profiles: true, device_repair: true, device_action_plan: true, model_fallback: true,
-          ...(storage ? { gate: await control.gate(request, account?.id) } : { fault: "storage_config" }),
+          ...(storage ? { gate: await control.gate(request, account?.id), quota } : { fault: "storage_config" }),
         });
       }
       if (method === "GET" && path === "/v1/support/inbox") {
         const account = await lookup(request);
+        if (account) await usage(request, account);
         return json(await control.inbox(await ticketOwners(request, account)));
       }
       if (method === "POST" && path === "/v1/presence") {
@@ -408,6 +443,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const gate = await control.gate(request, caller.account?.id);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
+        const snapshot = await usage(request, caller.account);
+        if (!snapshot) throw new Failure("sign_in", 401);
+        if (!snapshot.allowed) return exhausted(snapshot);
         const key = await providerKey().catch(() => "");
         if (!key) throw new Failure("unconfigured", 503);
         if (quotaBlock?.key === key && quotaBlock.until > Date.now()) {
@@ -417,6 +455,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
         const candidates = [...new Set([...preferred, ...models])];
         await budget(caller);
+        const quota = await usage(request, caller.account, true);
+        if (!quota) throw new Failure("sign_in", 401);
+        if (!quota.allowed) return exhausted(quota);
         const upstream = new AbortController();
         const quick = input.profile === "fast";
         const firstTokenMs = input.profile === "deep" ? 18_000 : quick ? 9_000 : 12_000;
@@ -482,7 +523,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (!response) throw new Failure("model", 502);
         if (!isChat) {
           while (response) {
-            try { await verifyCompletion(response); return json({ connected: true }); }
+            try { await verifyCompletion(response); return json({ connected: true, quota }); }
             catch (error) {
               if (!(error instanceof Failure)) throw error;
               response = await getResponse(error);
@@ -491,7 +532,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           throw new Failure("model", 502);
         }
         return new Response(relay(response, getResponse, input.device, input.repair, next > 1, () => upstream.abort(), input.plan), {
-          headers: { ...JSON_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" },
+          headers: { ...JSON_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no",
+            "X-Cortex-Quota": JSON.stringify(quota) },
         });
       }
       if (method === "POST" && path === "/v1/support") {

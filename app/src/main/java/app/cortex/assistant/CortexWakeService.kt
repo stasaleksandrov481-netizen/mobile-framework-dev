@@ -6,7 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -14,6 +17,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.speech.RecognitionListener
@@ -21,9 +25,16 @@ import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import androidx.core.content.ContextCompat
 
 class CortexWakeService : Service() {
     private val ui = Handler(Looper.getMainLooper())
+    private val power by lazy { getSystemService(PowerManager::class.java) }
+    private val energy by lazy { getSharedPreferences("cortex-display", MODE_PRIVATE) }
+    private var screenReceiverRegistered = false
+    private val screenEvents = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = updateAudio()
+    }
     private var recognizer: SpeechRecognizer? = null
     private var feed: WakeAudioFeed? = null
     private var feedGeneration = 0
@@ -77,6 +88,11 @@ class CortexWakeService : Service() {
             return
         }
         enabled = true
+        ContextCompat.registerReceiver(this, screenEvents, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
+        screenReceiverRegistered = true
         CortexRuntime.wakeHook = ::updateAudio
         CortexRuntime.reportWake("Подключаю микрофон…")
         listen()
@@ -97,18 +113,23 @@ class CortexWakeService : Service() {
     }
 
     private fun updateAudio() {
-        if (CortexRuntime.recording) {
+        if (CortexRuntime.recording || !canListenInMode()) {
             ui.removeCallbacks(rearm)
             ui.removeCallbacks(expire)
             turn.reset()
             closeFeed()
             destroyRecognizer()
-            CortexRuntime.reportWake("Пауза на время голосового ввода в приложении.")
+            CortexRuntime.reportWake(if (CortexRuntime.recording) "Пауза на время голосового ввода в приложении."
+                else "Микрофон в паузе по настройкам энергопотребления.")
         } else schedule(110)
     }
 
     private fun listen() {
         if (!enabled || CortexRuntime.recording || running || checkingLanguage || Build.VERSION.SDK_INT < 31) return
+        if (!canListenInMode()) {
+            CortexRuntime.reportWake("Микрофон в паузе по настройкам энергопотребления.")
+            return
+        }
         if (!Settings.canDrawOverlays(this) || checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             CortexRuntime.reportWake("Разрешите показ островка и доступ к микрофону.")
             stopSelf()
@@ -312,6 +333,12 @@ class CortexWakeService : Service() {
         if (enabled && !CortexRuntime.recording) ui.postDelayed(rearm, delay)
     }
 
+    private fun canListenInMode() = when (energy.getString("energy", "balanced")) {
+        "economy" -> false
+        "maximum" -> true
+        else -> power.isInteractive
+    }
+
     private fun closeFeed() {
         ++feedGeneration
         feed?.close()
@@ -328,6 +355,7 @@ class CortexWakeService : Service() {
 
     override fun onDestroy() {
         enabled = false
+        if (screenReceiverRegistered) unregisterReceiver(screenEvents)
         CortexRuntime.wakeHook = null
         ui.removeCallbacksAndMessages(null)
         turn.reset()

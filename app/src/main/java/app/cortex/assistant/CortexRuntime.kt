@@ -10,6 +10,9 @@ internal object CortexRuntime {
     var wakeLevel: ((Float) -> Unit)? = null
     var wakeCommand: ((String) -> Boolean)? = null
     var shutdownListener: (() -> Unit)? = null
+    var scheduleChanged: (() -> Unit)? = null
+    var reminder: ((String, String) -> Boolean)? = null
+    var leaveForAction: (() -> Unit)? = null
 
     fun setAppVisible(value: Boolean) {
         appVisible = value

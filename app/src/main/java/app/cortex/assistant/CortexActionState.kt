@@ -21,6 +21,7 @@ internal object CortexActionState {
     data class Status(val phase: String, val message: String, val answer: String = "", val at: Long = android.os.SystemClock.uptimeMillis())
 
     private var cancel: (() -> Unit)? = null
+    val busy: Boolean get() = cancel != null
     var status: Status? = null
         private set
     var listener: ((Status) -> Unit)? = null

@@ -354,7 +354,7 @@ export function relay(
         if (closed) return;
         if (next.done) throw new Failure("provider", 502);
         const event = next.value;
-        if (event.done === true) finish(controller, "[DONE]");
+        if ("done" in event && event.done === true) finish(controller, "[DONE]");
         else if (typeof event.error === "string") finish(controller, JSON.stringify(event));
         else controller.enqueue(encoder.encode("data: " + JSON.stringify(event) + "\n\n"));
       } catch (error) {

@@ -12,6 +12,11 @@ internal object CortexDeviceContext {
 
     fun runtime(context: Context, screen: CortexScreenService?, actionsEnabled: Boolean): JSONObject =
         JSONObject().put("android_api", Build.VERSION.SDK_INT)
+            .put("cortex_version", BuildConfig.VERSION_NAME)
+            .put("version_code", BuildConfig.VERSION_CODE)
+            .put("screen_unlocked", CortexSchedule.screenReady(context))
+            .put("notification_access", CortexSchedule.notificationsAllowed(context))
+            .put("exact_alarm_access", CortexSchedule.exactAllowed(context))
             .put("screen_control", actionsEnabled && screen != null && !screen.locked())
             .put("offline_ocr", actionsEnabled && screen != null && Build.VERSION.SDK_INT >= 30)
             .put("surface", if (CortexRuntime.appVisible) "chat" else "island")

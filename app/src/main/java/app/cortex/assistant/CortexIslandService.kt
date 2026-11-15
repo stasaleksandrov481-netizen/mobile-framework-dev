@@ -47,6 +47,11 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var poweringOff = false
     private var layoutGeneration = 0
     private var mode = "off"
+    private var style = IslandAppearance.parse()
+    private var reminder: Pair<String, String>? = null
+    private var reminderActions: ((String) -> Unit)? = null
+    private val showReminder: (String, String) -> Boolean = ::presentReminder
+    private val reminderTimeout = Runnable { closeReminder(true) }
     private var phase = "idle"
     private var message = ""
     private var draft = ""
@@ -83,6 +88,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         CortexActionState.listener = actionStatus
         CortexRuntime.islandVisibility = visibilityChanged
         CortexRuntime.wakeLevel = wakeLevel
+        CortexRuntime.reminder = showReminder
         CortexRuntime.islandTouchPassThrough = passThrough
         displays = getSystemService(DisplayManager::class.java)
         val primary = displays.getDisplay(Display.DEFAULT_DISPLAY)
@@ -127,6 +133,11 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             }
         }
         mode = preferences.getString("mode", "off") ?: "off"
+        val appearance = IslandAppearance.read(preferences)
+        if (style != appearance) {
+            style = appearance
+            placement = null
+        }
         if (mode != "off" && intent?.getBooleanExtra(EXTRA_RESUME, false) == true) {
             if (hiddenByVoice && exiting) {
                 exiting = false
@@ -175,8 +186,43 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         (!preferences.getBoolean(EXTRA_HIDE_LANDSCAPE, true) ||
             resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE)
 
+    private fun presentReminder(id: String, text: String): Boolean {
+        if (mode == "off" || hiddenByVoice || poweringOff || exiting || busy || actionBusy ||
+            reminder != null || !canShow() || !CortexSchedule.screenReady(this)) return false
+        reminder = id to text
+        reminderActions = { action ->
+            if (action == "open") {
+                val opened = runCatching { startActivity(CortexSchedule.openIntent(this, id)) }.isSuccess
+                closeReminder(!opened)
+            } else {
+                val result = CortexSchedule.handle(this, id, action)
+                closeReminder(!result.ok)
+            }
+        }
+        render()
+        if (island == null) {
+            reminder = null
+            reminderActions = null
+            return false
+        }
+        setExpanded(true)
+        ui.postDelayed(reminderTimeout, 20_000L)
+        return true
+    }
+
+    private fun closeReminder(notify: Boolean) {
+        val id = reminder?.first ?: return
+        ui.removeCallbacks(reminderTimeout)
+        reminder = null
+        reminderActions = null
+        if (notify) CortexSchedule.showNotification(this, id)
+        setExpanded(false)
+        render()
+    }
+
     private fun updateTask(status: CortexActionState.Status) {
         if (poweringOff) return
+        if (status.phase == "executing") closeReminder(true)
         task = status
         ui.removeCallbacks(clearTask)
         if (actionBusy) {
@@ -199,6 +245,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun dismissIsland(power: Boolean) {
+        closeReminder(true)
         if (power) {
             if (poweringOff) return
             poweringOff = true
@@ -252,37 +299,46 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun render() {
         if (exiting || poweringOff) return
-        if (mode == "off" || hiddenByVoice || CortexRuntime.appVisible || !canShow() ||
-            (mode == "wake" && phase == "idle" && task == null && !opening && !moving)) {
+        if (mode == "off" || hiddenByVoice || CortexRuntime.appVisible && reminder == null && !moving || !canShow() ||
+            (mode == "wake" && phase == "idle" && task == null && reminder == null && !opening && !moving)) {
             removeIsland()
             return
         }
-        if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density)
+        if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density, style)
         val visible = island ?: createIsland() ?: return
-        val state = if (busy && !actionBusy) phase else task?.phase ?: phase
+        val state = if (reminder != null) "reminder" else if (busy && !actionBusy) phase else task?.phase ?: phase
         val progressText = task?.message.orEmpty()
         val label = when (state) {
             "listening" -> message.ifBlank { "Слушаю…" }
+            "thinking" -> "Думаю…"
             "executing" -> progressText.ifBlank { message.ifBlank { "Выполняю…" } }
+            "reminder" -> "Напоминание"
             "done" -> "Готово"
             "error" -> "Проверьте результат"
             "stopped" -> "Остановлено"
             "understood" -> message
             else -> ""
         }
+        visible.appearance(style)
         visible.phase(state, label, actionBusy)
         visible.haptics = preferences.getBoolean("haptics", true)
-        visible.reduceMotion(preferences.getBoolean("reduceMotion", false))
+        visible.reduceMotion(preferences.getBoolean("reduceMotion", false) || style.motion == "none")
         visible.conversation.status(state, label)
         visible.conversation.busy(busy || actionBusy)
+        visible.conversation.reminder(reminderActions)
         val resultText = task?.takeUnless { actionBusy }?.answer.orEmpty()
-        visible.conversation.answer(if (busy || reply.isNotBlank()) reply else resultText)
+        visible.conversation.answer(reminder?.second ?: when {
+            busy -> reply
+            !style.results -> ""
+            reply.isNotBlank() -> reply
+            else -> resultText
+        })
         placeIsland(visible)
     }
 
     private fun createIsland(): LiquidIslandView? {
         val panel = IslandConversationPanel(overlayContext, { submit(it) }, ::stopAnswer,
-            { setExpanded(false) }, ::openApplication)
+            { if (reminder != null) closeReminder(true) else setExpanded(false) }, ::openApplication)
         panel.draft(draft)
         panel.onKeyboardFocus = { focused ->
             keyboardFocus = focused && opening && !exiting
@@ -354,7 +410,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         task = null
         ui.removeCallbacks(clearTask)
         reply = ""
-        updateStatus("executing", "Думаю…")
+        updateStatus("thinking", "Думаю…")
         setExpanded(true)
         val streamed = StringBuilder()
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
@@ -381,6 +437,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun stopAnswer() {
+        CortexSchedule.clearDraft("island")
         if (!busy) { if (actionBusy) CortexActionState.stop(); return }
         assistant.cancel()
         busy = false
@@ -535,6 +592,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     override fun onDisplayRemoved(displayId: Int) = Unit
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
+        reminder?.first?.let { CortexSchedule.showNotification(this, it) }
+        if (CortexRuntime.reminder === showReminder) CortexRuntime.reminder = null
         if (CortexActionState.listener === actionStatus) CortexActionState.listener = null
         if (CortexRuntime.islandVisibility === visibilityChanged) CortexRuntime.islandVisibility = null
         if (CortexRuntime.wakeLevel === wakeLevel) CortexRuntime.wakeLevel = null
@@ -560,7 +619,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         internal const val WAKE_PAUSED = "wakePausedByVoice"
         private val STOP_COMMAND = Regex("(?iu)^(?:стоп|остановись|отмена)[.!?]*$")
         private val HIDE_COMMAND = Regex("(?iu)^(?:убери|скрой|спрячь|закрой) (?:островок|динамический островок)$")
-        private val POWER_COMMAND = Regex("(?iu)^(?:выключись|отключись|выключи себя|отключи себя|выключи кортекс|останови работу в фоне)$")
+        private val POWER_COMMAND = Regex("(?iu)^(?:выключись|отключись|выключи себя|отключи себя|выключи кортекс|останови работу в фоне|иди спи|иди спать|отдыхай|перестань слушать|усни)$")
         private const val RESULT_MS = 6_800L
         private const val CHANNEL = "cortex-island"
         private const val NOTIFICATION = 2810

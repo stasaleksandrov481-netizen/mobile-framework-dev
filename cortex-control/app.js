@@ -9,13 +9,14 @@ const feedback = document.querySelector("#feedback");
 const redirectTo = "https://cortex-control-phi.vercel.app/";
 const labels = {
   overview: "Обзор", support: "Обращения", updates: "Версии", maintenance: "Техработы",
-  roles: "Доступы", audit: "Журнал"
+  roles: "Доступы", quota: "Лимиты ИИ", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
 const roles = { owner: "Владелец", admin: "Разработчик", support: "Поддержка" };
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
+let quotaId = "";
 
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -93,7 +94,7 @@ async function initialize() {
   const previous = user?.id;
   user = data(await db.auth.getUser()).user;
   if (!user) { signIn(); return; }
-  if (previous !== user.id) { factor = enrollment = ticket = null; }
+  if (previous !== user.id) { factor = enrollment = ticket = null; quotaId = ""; }
   const assurance = data(await db.auth.mfa.getAuthenticatorAssuranceLevel());
   if (assurance.currentLevel !== "aal2") {
     const factors = data(await db.auth.mfa.listFactors());
@@ -117,7 +118,7 @@ async function initialize() {
 
 function allowedTabs() {
   if (role === "owner") return Object.keys(labels);
-  if (role === "admin") return ["overview", "support", "updates", "maintenance", "audit"];
+  if (role === "admin") return ["overview", "support", "updates", "maintenance", "quota", "audit"];
   return ["overview", "support"];
 }
 
@@ -239,7 +240,35 @@ async function audit() {
     escape(event.event) + ' · ' + escape(event.target) + '</span><small>' + date(event.created_at) + '</small></li>').join("") + '</ul>');
 }
 
-const views = { overview, support, maintenance, updates, roles: access, audit };
+async function quotas() {
+  const search = form("quota-search", field("id", "ID профиля или гостя", "text", quotaId,
+    'maxlength="49" required autocomplete="off"'), "Найти");
+  if (!quotaId) return card("Поиск по ID", search);
+  const quota = data(await db.rpc("cortex_admin_beta_quota", { p_id: quotaId }));
+  if (!quota) return card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
+  const summary = "<p>" + escape(quota.id) + "</p><p>Использовано " + dateNumber(quota.used) +
+    " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + "</p>" +
+    "<p>Сброс в 03:00 по Москве.</p>";
+  return card("Поиск по ID", search) + card("Суточный лимит", summary +
+    form("quota-limit", field("limit", "Запросов в сутки", "number", quota.limit, 'min="0" max="10000" required'),
+      "Установить лимит") +
+    '<div class="actions">' + button("Сбросить счётчик", "quota-change", "reset") +
+    button("Обнулить лимит", "quota-change", "zero") +
+    button("Дать безлимит", "quota-change", "unlimited") +
+    button("Вернуть 80", "quota-change", "revoke") + "</div>");
+}
+
+async function updateQuota(operation, limit) {
+  if (!quotaId || !["owner", "admin"].includes(role)) return;
+  const quota = data(await db.rpc("cortex_admin_beta_quota", {
+    p_id: quotaId, p_operation: operation, p_limit: limit ?? null
+  }));
+  if (!quota) throw new Error("Запись с этим ID больше недоступна.");
+  flash("Лимит обновлён.");
+  await loadTab();
+}
+
+const views = { overview, support, maintenance, updates, roles: access, quota: quotas, audit };
 
 async function saveConfig(values) {
   data(await db.from("cortex_control_config").update({ ...values, updated_at: new Date().toISOString() })
@@ -277,6 +306,10 @@ app.addEventListener("click", async event => {
         control.setAttribute("aria-expanded", "true");
         break;
       case "close-menu": document.querySelector("#mobile-nav")?.close(); break;
+      case "quota-change":
+        if (confirm(control.textContent + " для выбранного ID?")) await updateQuota(value === "zero" ? "limit" : value,
+          value === "zero" ? 0 : null);
+        break;
       case "allow-version":
       case "block-version":
         if (role !== "owner" && role !== "admin") break;
@@ -358,6 +391,13 @@ app.addEventListener("submit", async event => {
       case "role":
         data(await db.rpc("cortex_set_admin_role", { p_email: read("email"), p_role: read("role") }));
         break;
+      case "quota-search":
+        quotaId = read("id");
+        await loadTab();
+        return;
+      case "quota-limit":
+        await updateQuota("limit", Number(read("limit")));
+        return;
     }
     flash("Изменения сохранены.");
     await loadTab();

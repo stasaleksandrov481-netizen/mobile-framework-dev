@@ -13,6 +13,7 @@ import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -25,16 +26,13 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Bridge to the CORTEX Supabase Edge Function. No API provider keys in the APK. */
 internal class CortexServerBridge(context: Context) : AutoCloseable {
-    private val state = context.getSharedPreferences("cortex-backend", Context.MODE_PRIVATE)
     private val store = SecureSession(context)
     private val executor = Executors.newFixedThreadPool(3)
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
     private val main = Handler(Looper.getMainLooper())
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
     private val loginLock = Any()
-    private val installId = synchronized(installLock) {
-        state.getString("install", null) ?: randomToken().also { state.edit().putString("install", it).apply() }
-    }
+    private val installId = installToken(context)
     private val endpoint = "https://jjcqrjztxohnifmziksy.supabase.co/functions/v1/cortex/v1/"
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
 
@@ -74,6 +72,7 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
             } catch (error: GatewayFailure) {
                 outcome.put("error", error.code)
                 if (error.retryAfter > 0) outcome.put("retry_after", error.retryAfter)
+                error.quota?.let { outcome.put("quota", it) }
             } catch (_: SocketTimeoutException) {
                 outcome.put("error", "timeout")
             } catch (_: Exception) {
@@ -162,13 +161,20 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
                 val body = connection.errorStream?.bufferedReader()?.use { it.readText().take(2000) }.orEmpty()
                 val error = runCatching { JSONObject(body) }.getOrNull()
                 val code = error?.optString("error").orEmpty().ifBlank { if (status == 429) "rate_limit" else "server" }
-                throw GatewayFailure(code, error?.optInt("retry_after") ?: 0)
+                if (code == "sign_in" && !token.isNullOrEmpty()) store.clearSessionIf(token)
+                throw GatewayFailure(code, error?.optInt("retry_after") ?: 0, error?.optJSONObject("quota"))
             }
             return if (onEvent != null && connection.contentType.orEmpty().contains("event-stream")) {
+                val quota = connection.getHeaderField("X-Cortex-Quota")?.takeIf { it.length <= 1024 }
+                    ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                quota?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
                 connection.inputStream.bufferedReader().use { sse(it, onEvent) }
             } else {
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
-                JSONObject(text)
+                JSONObject(text).also {
+                    if (route == "status" && it.optString("fault").isEmpty() && it.has("account") &&
+                        it.isNull("account") && !token.isNullOrEmpty()) store.clearSessionIf(token)
+                }
             }
         } finally {
             connections.remove(id, connection)
@@ -205,15 +211,23 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
         jobs.keys.toList().forEach(::cancel)
         executor.shutdownNow()
     }
-    private class GatewayFailure(val code: String, val retryAfter: Int = 0) : Exception(code)
-    private companion object {
-        val installLock = Any()
-        val LOGIN_CODE = Regex("^[A-Za-z0-9_-]{43}$")
-    }
-    private fun randomToken(): String {
-        val bytes = ByteArray(32)
-        SecureRandom().nextBytes(bytes)
-        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+    private class GatewayFailure(val code: String, val retryAfter: Int = 0, val quota: JSONObject? = null) : Exception(code)
+    companion object {
+        private val installLock = Any()
+        private val LOGIN_CODE = Regex("^[A-Za-z0-9_-]{43}$")
+        private const val ENCODING = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+
+        private fun installToken(context: Context) = synchronized(installLock) {
+            val state = context.getSharedPreferences("cortex-backend", Context.MODE_PRIVATE)
+            state.getString("install", null) ?: Base64.encodeToString(
+                ByteArray(32).also(SecureRandom()::nextBytes), ENCODING
+            ).also { state.edit().putString("install", it).commit() }
+        }
+
+        fun guestId(context: Context): String {
+            val hash = MessageDigest.getInstance("SHA-256").digest(installToken(context).toByteArray(Charsets.UTF_8))
+            return "guest_" + Base64.encodeToString(hash, ENCODING)
+        }
     }
 }
 
@@ -243,4 +257,7 @@ private class SecureSession(context: Context) {
         }.getOrNull()
     }
     @Synchronized fun clear(name: String = "session") { prefs.edit().remove(name).apply() }
+    @Synchronized fun clearSessionIf(token: String) {
+        if (get() == token) clear()
+    }
 }

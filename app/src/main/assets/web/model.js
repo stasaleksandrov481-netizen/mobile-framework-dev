@@ -13,10 +13,10 @@ const Cortex = (() => {
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
   const models = { auto: "Авто", fast: "Быстро", deep: "Подробно" };
   const defaults = {
-    quality: "balanced", reduceMotion: false, autoSaveChats: true, rememberSaved: true,
+    quality: "balanced", reduceMotion: false, rememberSaved: true,
     language: "auto", haptics: true, voiceContinue: true,
     phoneActions: true, visualLaunch: false, model: "auto", notifyReplies: false,
-    overlayMode: "off", hideLandscape: true, hotwordEnabled: false
+    overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };
   const array = input => Array.isArray(input) ? input : [];
   const object = input => input && typeof input === "object" && !Array.isArray(input) ? input : {};
@@ -70,8 +70,10 @@ const Cortex = (() => {
   if (!Object.hasOwn(models, preferences.model)) preferences.model = defaults.model;
   if (!Object.hasOwn(languages, preferences.language)) preferences.language = defaults.language;
   if (!["always", "wake", "off"].includes(preferences.overlayMode)) preferences.overlayMode = "off";
+  if (!["economy", "balanced", "maximum"].includes(preferences.energy)) preferences.energy = "balanced";
   const state = {
     preferences,
+    islandStyle: object(persisted.islandStyle),
     edits: { cortex: object(persisted.edits?.cortex) },
     chats: (old ? importHistory(old.history) : array(current.chats))
       .filter(item => item?.saved && Array.isArray(item.messages)).map(migrateChat),
@@ -84,7 +86,7 @@ const Cortex = (() => {
   function save() {
     try {
       localStorage.setItem(key, JSON.stringify({
-        ...state, chats: state.chats.filter(chat => chat.saved && chat.messages.length)
+        ...state, chats: state.chats.filter(chat => chat.saved)
       }));
       return true;
     } catch {
@@ -94,7 +96,7 @@ const Cortex = (() => {
 
   function clearLocalData() {
     const cleared = {
-      preferences: { ...defaults }, edits: { cortex: {} }, chats: [], memories: {},
+      preferences: { ...defaults }, islandStyle: {}, edits: { cortex: {} }, chats: [], memories: {},
       instructions: { cortex: {} }, notes: [], account: state.account
     };
     try {
@@ -123,8 +125,8 @@ const Cortex = (() => {
 
   function chat(id) { return state.chats.find(item => item.id === id); }
 
-  function createChat() {
-    const item = migrateChat({ id: uid("chat"), saved: state.preferences.autoSaveChats });
+  function createChat(saved = false) {
+    const item = migrateChat({ id: uid("chat"), saved });
     state.chats.unshift(item);
     return item;
   }
@@ -178,6 +180,7 @@ const Cortex = (() => {
       "Ты CORTEX, персональный помощник Android. Общайся как внимательный собеседник: спокойно, дружелюбно и конкретно. " +
         "Подхватывай контекст, пропускай шаблонное вступление и называй своё имя только по просьбе. " + replyLanguage,
       "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ". " + person.description,
+      state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
       "Используй Markdown для содержательной структуры: заголовки, списки, таблицы для сравнения и блоки кода. Если нужна заметка, совет или важный акцент, используй > [!NOTE], > [!TIP] или > [!IMPORTANT] отдельной строкой внутри цитаты. Действия выполняет клиент приложения и сообщает результат.",
       ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
       facts ? "Память пользователя:\n" + facts : "",

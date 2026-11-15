@@ -10,6 +10,7 @@ import android.graphics.PointF
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -85,7 +86,8 @@ class CortexScreenService : AccessibilityService() {
     }
 
     internal fun activePackage(): String? = if (locked()) null else withRoot { it.packageName?.toString() }
-    internal fun locked(): Boolean = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+    internal fun locked(): Boolean = !getSystemService(PowerManager::class.java).isInteractive ||
+        getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
     internal fun homePackages(): Set<String> = packageManager.queryIntentActivities(
         Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY
@@ -232,6 +234,13 @@ class CortexScreenService : AccessibilityService() {
     }
 
     internal fun global(action: Int): Boolean = !locked() && performGlobalAction(action)
+
+    internal suspend fun tapRelative(frame: VisualFrame, x: Double, y: Double): Boolean {
+        val point = PointF((frame.bounds.left + frame.bounds.width() * x).toFloat(),
+            (frame.bounds.top + frame.bounds.height() * y).toFloat())
+        if (locked() || !frame.bounds.contains(point.x.toInt(), point.y.toInt())) return false
+        return gesture(frame, point, point, 65L)
+    }
 
     private suspend fun gesture(frame: VisualFrame, from: PointF, to: PointF, duration: Long): Boolean {
         if (!isCurrent(frame)) return false

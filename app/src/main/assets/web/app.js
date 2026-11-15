@@ -2,7 +2,7 @@
 
 (() => {
   const M = Cortex, U = CortexUI, Api = CortexApi, S = M.state, Wave = CortexWave;
-  const Markdown = CortexMarkdown, Motion = CortexMotion;
+  const Markdown = CortexMarkdown, Motion = CortexMotion, Planner = CortexPlanner;
   const { esc, icon, button, iconButton } = U;
   const app = document.querySelector("#app");
   const screen = document.querySelector("#screen");
@@ -18,9 +18,9 @@
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
-  const filters = { search: "", onlySaved: false };
+  const filters = { search: "" };
   const connection = { google: false, profiles: false, checked: false, visualPrivacy: false };
-  let wakeState = "", islandCamera = "drop";
+  let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
   let pending, login, voice, activeSheet, ghost, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
@@ -72,7 +72,23 @@
 
   function syncIslandOptions() {
     sendDevice("island-options", { profile: S.preferences.model, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
-      reduceMotion: reduced(), haptics: S.preferences.haptics });
+      reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
+      addressName: S.preferences.addressName, appearance: Planner.style() });
+  }
+
+  function applyEnergy(mode) {
+    if (!Object.hasOwn(Planner.powers, mode)) return;
+    const p = S.preferences;
+    p.energy = mode;
+    p.overlayMode = { economy: "off", balanced: "wake", maximum: "always" }[mode];
+    if (mode === "economy") p.hotwordEnabled = false;
+    if (mode === "maximum") p.hotwordEnabled = permissions.microphone && permissions.overlay;
+    saved();
+    syncIslandOptions();
+    sendDevice("overlay-config", { mode: p.overlayMode, hideLandscape: p.hideLandscape, resume: true });
+    sendDevice("wake-config", { enabled: p.hotwordEnabled });
+    if (mode === "maximum" && !p.hotwordEnabled) flash("В разделе «Вызов» выдайте доступы к островку и микрофону, затем включите обращение «Кортекс».");
+    render();
   }
 
   function haptic() {
@@ -108,7 +124,8 @@
     return false;
   }
 
-  function rootTab(page) {
+  function rootTab(page, id = chatId) {
+    if (page === "chat") return M.chat(id)?.saved ? "chats" : "home";
     while (U.parent[page]) page = U.parent[page];
     return page;
   }
@@ -169,7 +186,7 @@
     screen.dataset.route = route;
     screen.dataset.chat = route === "chat" ? chatId : "";
     screen.className = "screen " + route + "-screen";
-    screen.innerHTML = U.page(route, {
+    screen.innerHTML = Planner.routes.has(route) ? Planner.page(route) : U.page(route, {
       connection, permissions, wakeState, islandCamera, native: Boolean(device), login, chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
@@ -255,6 +272,7 @@
   function navigate(next, { id, replace = false, origin, newChat = false, messageEnter = false, cinematic = false } = {}) {
     if (!routes.has(next)) return;
     const previous = route;
+    const previousId = chatId;
     if (next === "chat") id = id && M.chat(id) ? id : current()?.id || M.createChat().id;
     if (previous === next && (next !== "chat" || id === chatId)) return;
     if (login && !sheet.open) stopLogin();
@@ -264,7 +282,7 @@
     clearVisuals();
     const before = !composition.hidden ? box(form) : null;
     const source = cinematic ? box(dockCore()) : null;
-    const tabDirection = U.tabs.findIndex(([key]) => key === rootTab(next)) >=
+    const tabDirection = U.tabs.findIndex(([key]) => key === rootTab(next, id)) >=
       U.tabs.findIndex(([key]) => key === rootTab(previous)) ? 1 : -1;
     const title = box(screen.querySelector(".hero-copy h1"));
     if (next !== "chat" && document.activeElement === input) input.blur();
@@ -272,12 +290,13 @@
     const animated = !reduced() && typeof screen.animate === "function";
     const intoChat = next === "chat" && previous === "home";
     const intoHome = next === "home";
-    const switchesTab = rootTab(previous) !== rootTab(next);
+    const switchesTab = rootTab(previous) !== rootTab(next, id);
     if (animated && (route !== "chat" || (current()?.messages.length || 0) < 40)) {
       fadeOldPage(switchesTab ? 240 : 176, intoChat, switchesTab ? tabDirection : 0);
     }
     route = next;
     if (next === "chat") chatId = id;
+    if (previous === "chat" && (next !== "chat" || chatId !== previousId)) discardTemporary(previousId);
     const hash = "#" + next + (next === "chat" ? "/" + encodeURIComponent(chatId) : "");
     history[replace ? "replaceState" : "pushState"](null, "", hash);
     render({ bottom: next === "chat", messageEnter });
@@ -301,10 +320,12 @@
       }
     }
     if (permissionsPage()) sendDevice("permissions");
+    Planner.enter(route);
   }
 
   function readRoute() {
     const previous = route;
+    const previousId = chatId;
     closeVoice();
     clearVisuals();
     const [name, id] = location.hash.slice(1).split("/");
@@ -317,6 +338,7 @@
       try { decoded = decodeURIComponent(id || ""); } catch {}
       chatId = M.chat(decoded)?.id || current()?.id || M.createChat().id;
     }
+    if (previous === "chat" && (route !== "chat" || chatId !== previousId)) discardTemporary(previousId);
     render({ bottom: route === "chat" });
     if (previous !== route && !reduced() && splash.hidden && typeof screen.animate === "function") {
       const switchesTab = rootTab(previous) !== rootTab(route);
@@ -324,6 +346,7 @@
       if (switchesTab) clearMorph = Motion.wave(app, null, -1);
     }
     if (permissionsPage()) sendDevice("permissions");
+    Planner.enter(route);
   }
 
   function back() {
@@ -336,7 +359,7 @@
     if (drawer.open) { closeHistory(); return true; }
     if (voice) { closeVoice(); return true; }
     if (route === "home") return false;
-    navigate(U.parent[route] || "home", { replace: true });
+    navigate(route === "chat" && current()?.saved ? "chats" : U.parent[route] || "home", { replace: true });
     return true;
   }
   window.cortexBack = back;
@@ -513,7 +536,10 @@
   function setAccount(value) {
     const previousId = S.account?.id;
     S.account = M.account(value);
-    if (previousId !== S.account?.id) dispatchEvent(new Event("cortex-account-changed"));
+    if (previousId !== S.account?.id) {
+      connection.quota = null;
+      dispatchEvent(new Event("cortex-account-changed"));
+    }
     saved();
   }
 
@@ -527,9 +553,17 @@
       connection.google = Boolean(data.google);
       connection.profiles = data.device_profiles === true;
       if (!login) setAccount(data.account);
+      connection.quota = data.quota || null;
       if (["profile", "models"].includes(route)) render();
     } catch {}
   }
+
+  addEventListener("cortex-quota", event => {
+    const quota = event.detail;
+    if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
+    connection.quota = quota;
+    if (["profile", "models"].includes(route)) render();
+  });
 
   function updateLogin(message) {
     const text = sheet.querySelector("[data-login-status]");
@@ -715,6 +749,7 @@
     const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
     const deviceContext = {
       surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
+      version: U.version, version_code: androidVersionCode || undefined,
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
     };
@@ -810,7 +845,8 @@
   }
 
   function newChat(control) {
-    const item = M.createChat();
+    const item = M.createChat(true);
+    saved();
     navigate("chat", { id: item.id, origin: control, newChat: true });
     haptic();
   }
@@ -820,6 +856,15 @@
     if (drafts.get("home")) drafts.set(chat.id, drafts.get("home"));
     drafts.delete("home");
     return chat;
+  }
+
+  function discardTemporary(id) {
+    if (M.chat(id)?.saved !== false) return;
+    if (pending?.chatId === id) stopAnswer(false);
+    S.chats = S.chats.filter(chat => chat.id !== id);
+    drafts.delete(id);
+    errors.delete(id);
+    sendDevice("conversation-clear", { source: id });
   }
 
   function submitMessage(text, control) {
@@ -847,26 +892,17 @@
     if (!chat) return;
     showSheet(chat.title, `<div class="stack">
       ${button(chat.pinned ? "Открепить чат" : "Закрепить чат", "pin", "pin-chat", id, "primary")}
-      ${button(chat.saved ? "Убрать из сохранённых" : "Сохранить чат", "bookmark", "save-chat", id)}
       ${button("Переименовать", "note", "rename-chat", id)}
       ${button("Удалить чат", "trash", "delete-chat", id, "danger")}</div>`);
   }
 
-  function updateChat(id, pin) {
+  function pinChat(id) {
     const chat = M.chat(id);
-    if (!chat) return;
-    const before = { saved: chat.saved, pinned: chat.pinned };
-    if (pin) {
-      chat.pinned = !chat.pinned;
-      if (chat.pinned) chat.saved = true;
-    } else {
-      chat.saved = !chat.saved;
-      if (!chat.saved) chat.pinned = false;
-    }
-    const message = pin ? (chat.pinned ? "Чат закреплён" : "Чат откреплён") :
-      (chat.saved ? "Чат сохранён" : "Чат убран из сохранённых");
+    if (!chat?.saved) return;
+    chat.pinned = !chat.pinned;
     closeSheet();
-    if (!saved(message)) Object.assign(chat, before);
+    if (!saved(chat.pinned ? "Чат закреплён" : "Чат откреплён")) chat.pinned = !chat.pinned;
+    render();
     historyItems();
   }
 
@@ -1127,6 +1163,7 @@
   function deviceEvent(event) {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
+    if (Planner.handle(message)) return;
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
@@ -1151,6 +1188,9 @@
     if (message.type === "background") closeVoice();
     if (message.type === "screen-context") acceptScreen(message.context);
     if (message.type === "permissions") {
+      if (typeof message.versionName === "string") U.setVersion(message.versionName);
+      if (Number.isInteger(message.versionCode)) androidVersionCode = message.versionCode;
+      if (typeof message.guestId === "string" && /^guest_[a-z0-9_-]{43}$/i.test(message.guestId)) connection.guestId = message.guestId;
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1219,7 +1259,7 @@
       // The central CORTEX control always opens the conversation, from any tab.
       if (value === "home") {
         haptic();
-        if (route !== "chat") navigate("chat", { id: homeChat().id, origin: control, cinematic: true });
+        if (route !== "chat" || current()?.saved) navigate("chat", { id: homeChat().id, origin: control, cinematic: true });
         else if (document.activeElement !== input) {
           playCore(box(dockCore()));
           const effect = clearMorph;
@@ -1240,19 +1280,17 @@
       Promise.resolve().then(() => run?.()).catch(error => flash(error.message));
     },
     "new-chat": (_, control) => newChat(control),
+    "clear-temporary": () => confirm("Очистить временный чат?", "Сообщения текущего сеанса будут удалены.", () => {
+      navigate("chat", { id: M.createChat().id, replace: true });
+    }),
+    "address-name": () => editor("Как к вам обращаться", field("name", "Имя или обращение", S.preferences.addressName, { max: 60, optional: true }),
+      ({ name }) => { S.preferences.addressName = name.slice(0, 60); saved("Обращение сохранено."); syncIslandOptions(); closeSheet(); render(); }),
+    "copy-account-id": () => { const id = S.account?.id || connection.guestId; if (id) copyText(id); },
     history: openHistory,
     "close-history": closeHistory,
     "open-chat": id => { closeHistory(true); navigate("chat", { id }); },
-    "history-filter"(value) {
-      filters.onlySaved = value === "saved";
-      for (const button of drawer.querySelectorAll('[data-action="history-filter"]')) {
-        button.setAttribute("aria-pressed", String(button.dataset.value === value));
-      }
-      historyItems();
-    },
     "chat-menu": chatMenu,
-    "pin-chat": id => updateChat(id, true),
-    "save-chat": id => updateChat(id, false),
+    "pin-chat": pinChat,
     "rename-chat"(id) {
       const chat = M.chat(id);
       if (!chat) return;
@@ -1267,7 +1305,7 @@
       if (pending) stopAnswer(false);
       drafts.clear(); errors.clear(); ruleDrafts.clear();
       chatId = ""; rule = "goal";
-      appearance(); render(); flash("Локальные данные сброшены");
+      syncIslandOptions(); appearance(); render(); flash("Локальные данные сброшены");
     }),
     stop: () => stopAnswer(),
     retry() {
@@ -1419,6 +1457,9 @@
     }
   });
 
+  Planner.bind({ root: app, route: () => route, native: Boolean(device), open: navigate, send: sendDevice, render, confirm, toast: flash,
+    updateStyle() { saved(); syncIslandOptions(); }, power: applyEnergy });
+
   app.addEventListener("input", event => {
     const input = event.target;
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
@@ -1476,12 +1517,23 @@
     }
   });
   systemMotion.addEventListener("change", () => { clearVisuals(); appearance(); syncIslandOptions(); mountWave(); });
-  addEventListener("cortex-onboarding-end", () => { mountWave(); updateJumpLatest(); });
+  addEventListener("cortex-onboarding-end", event => {
+    if (event.detail?.configured) {
+      syncIslandOptions();
+      sendDevice("overlay-config", { mode: S.preferences.overlayMode, hideLandscape: S.preferences.hideLandscape });
+      if (S.preferences.hotwordEnabled) sendDevice("wake-config", { enabled: true });
+    }
+    mountWave();
+    updateJumpLatest();
+  });
   function visibilityChanged() {
     splashPrevious = null;
     const hidden = document.hidden || window.cortexAppVisible === false;
     document.documentElement.classList.toggle("app-background", hidden);
-    if (!hidden) pollLogin();
+    if (!hidden) {
+      pollLogin();
+      if (route === "schedule") Planner.enter(route);
+    }
   }
   document.addEventListener("visibilitychange", visibilityChanged);
   addEventListener("cortex-app-visibility", visibilityChanged);

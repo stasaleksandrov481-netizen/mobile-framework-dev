@@ -69,11 +69,16 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                     }
                     "island-options" -> {
                         val profile = objectValue.optString("profile").takeIf { it in setOf("auto", "fast", "deep") } ?: "auto"
+                        val energy = objectValue.optString("energy").takeIf { it in setOf("economy", "balanced", "maximum") } ?: "balanced"
                         prefs.edit().putString("profile", profile)
+                            .putString("energy", energy)
+                            .putString("addressName", objectValue.optString("addressName").take(60))
+                            .putString("island-style", objectValue.optJSONObject("appearance")?.toString() ?: "{}")
                             .putBoolean("phoneActions", objectValue.optBoolean("phoneActions", true))
                             .putBoolean("visualLaunch", objectValue.optBoolean("visualLaunch"))
                             .putBoolean("reduceMotion", objectValue.optBoolean("reduceMotion"))
                             .putBoolean("haptics", objectValue.optBoolean("haptics", true)).apply()
+                        CortexRuntime.wakeHook?.invoke()
                         if (!prefs.getBoolean(CortexIslandService.WAKE_PAUSED, false) &&
                             prefs.getString("mode", "off") != "off" && Settings.canDrawOverlays(activity)) {
                             CortexIslandService.send(activity, CortexIslandService.ACTION_ENSURE)
@@ -96,6 +101,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
             return
         }
         val problem = when {
+            prefs.getString("energy", "balanced") == "economy" -> "Голосовой вызов доступен в сбалансированном и максимальном режимах."
             !Settings.canDrawOverlays(activity) -> "Разрешите показ островка поверх приложений."
             prefs.getString("mode", "off") == "off" -> "Включите режим островка."
             activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> "Разрешите доступ к микрофону."

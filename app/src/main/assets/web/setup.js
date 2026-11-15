@@ -22,7 +22,7 @@ window.CortexSetup = (() => {
     { id: "notifications", name: "Уведомления", icon: "bell", action: "notification-permission",
       description: "Уведомления показывают шаг задачи и позволяют её остановить. Также можно получать уведомления о новых ответах поддержки." }
   ];
-  const pages = ["welcome", "demo", ...accesses.map(x => x.id), "finish"];
+  const pages = ["welcome", "demo", ...accesses.map(x => x.id), "personalize", "finish"];
 
   function native(operation, data = {}) {
     const island = window.CortexIslandControl;
@@ -57,20 +57,33 @@ window.CortexSetup = (() => {
 
   function finishStage() {
     return '<div class="intro-stage finish-intro"><div class="intro-finish-mark">' + mark + '</div><h1>Готовы начать.</h1>' +
-      '<p>Выберите, когда показывать островок. Режим можно поменять в настройках.</p><div class="intro-mode-list">' +
-      [["always", "Всегда", "Видим поверх других приложений"], ["wake", "По обращению", "Появляется во время голосовой задачи"], ["off", "В приложении", "Чат и управление из CORTEX"]].map(([mode, title, detail]) =>
-        '<button type="button" class="intro-mode ' + (prefs().overlayMode === mode ? "selected" : "") +
-        '" data-intro-action="mode" data-mode="' + mode + '" aria-pressed="' + (prefs().overlayMode === mode) +
-        '"><span class="intro-mode-art ' + mode + '"><b></b><i></i></span><span class="intro-mode-text"><strong>' +
+      '<p>Выберите режим энергопотребления.</p><div class="intro-mode-list">' +
+      Object.entries(CortexPlanner.powers).map(([mode, [title, detail]]) =>
+        '<button type="button" class="intro-mode ' + (prefs().energy === mode ? "selected" : "") +
+        '" data-intro-action="mode" data-mode="' + mode + '" aria-pressed="' + (prefs().energy === mode) +
+        '"><span class="intro-mode-text"><strong>' +
         title + '</strong><small>' + detail + '</small></span><span class="intro-mode-check"></span></button>').join("") +
       '</div><p class="intro-feedback" role="status">' + esc(notice) + '</p></div>';
+  }
+
+  function personalize() {
+    return '<div class="intro-stage intro-custom"><h1>Как к вам обращаться?</h1>' +
+      '<label class="field"><span>Имя или обращение</span><input id="intro-address" value="' +
+      esc(prefs().addressName) + '" maxlength="60" placeholder="Можно пропустить"></label>' +
+      '<h2>Оформление островка</h2><div class="intro-mode-list">' +
+      Object.entries(CortexPlanner.islandPresets).map(([name, preset]) => {
+        const selected = CortexPlanner.style().background === preset.background;
+        return '<button type="button" class="intro-mode ' + (selected ? "selected" : "") +
+          '" data-intro-action="style" data-mode="' + esc(name) + '" aria-pressed="' + selected + '">' +
+          '<span class="intro-mode-text"><strong>' + esc(name) + '</strong></span><span class="intro-mode-check"></span></button>';
+      }).join("") + '</div></div>';
   }
 
   function draw(direction = 0) {
     if (!view) return;
     const id = pages[page];
     const item = accesses.find(x => x.id === id);
-    const content = item ? access(item) : id === "finish" ? finishStage() : prologue(id);
+    const content = item ? access(item) : id === "finish" ? finishStage() : id === "personalize" ? personalize() : prologue(id);
     const oldWidth = view.querySelector(".intro-meter i")?.style.width;
     const previous = direction === 0 ? view.querySelector(".intro-content")?.scrollTop || 0 : 0;
     view.innerHTML = '<div class="intro-top"><span class="intro-wordmark">CORTEX</span>' +
@@ -79,7 +92,7 @@ window.CortexSetup = (() => {
       '</section><div class="intro-bottom">' + (!single ? '<div class="intro-meter"><i style="width:' + (100 * (page + 1) / pages.length) + '%"></i></div>' : '') +
       '<div class="intro-nav"><button type="button" class="intro-back" data-intro-action="back" ' + (page === 0 || single ? "hidden" : "") + '>Назад</button>' +
       '<button type="button" class="intro-next" data-intro-action="next">' +
-      (single ? "Готово" : id === "finish" ? "Открыть CORTEX" : item && !permissions[id] ? "Пока пропустить" : "Продолжить") +
+      (single ? "Готово" : id === "finish" ? "Открыть CORTEX" : "Далее") +
       ' <span aria-hidden="true">↗</span></button></div></div>';
     const bar = view.querySelector(".intro-meter i");
     if (bar && oldWidth && direction && !reduced()) {
@@ -117,8 +130,7 @@ window.CortexSetup = (() => {
     view = null;
     root.classList.remove("in-onboarding");
     for (const id of ["screen", "navigation", "composition"]) document.getElementById(id).inert = false;
-    if (!single && complete) native("overlay-config", { mode: prefs().overlayMode, hideLandscape: prefs().hideLandscape });
-    dispatchEvent(new Event("cortex-onboarding-end"));
+    dispatchEvent(new CustomEvent("cortex-onboarding-end", { detail: { configured: !single && complete } }));
   }
 
   root.addEventListener("click", event => {
@@ -146,15 +158,29 @@ window.CortexSetup = (() => {
       case "details": native("open-settings"); break;
       case "mode": {
         const mode = target.dataset.mode;
-        if (!["always", "wake", "off"].includes(mode)) return;
-        prefs().overlayMode = mode;
-        if (mode === "off") prefs().hotwordEnabled = false;
+        if (!Object.hasOwn(CortexPlanner.powers, mode)) return;
+        prefs().energy = mode;
+        prefs().overlayMode = { economy: "off", balanced: "wake", maximum: "always" }[mode];
+        prefs().hotwordEnabled = mode === "maximum" && Boolean(permissions.overlay && permissions.microphone);
         Cortex.save();
-        notice = mode !== "off" && !permissions.overlay ? "Чтобы показать островок, разрешите отображение поверх приложений." :
-          mode === "wake" ? "Голосовой вызов можно включить в разделе «Телефон»." : "";
+        notice = mode !== "economy" && !permissions.overlay ? "Разрешение для островка можно выдать в разделе «Вызов»." : "";
         draw();
         break;
       }
+      case "style":
+        if (Object.hasOwn(CortexPlanner.islandPresets, target.dataset.mode)) {
+          Cortex.state.islandStyle = { ...CortexPlanner.islandPresets[target.dataset.mode] };
+          Cortex.save();
+          draw();
+        }
+        break;
+    }
+  });
+
+  root.addEventListener("input", event => {
+    if (view?.contains(event.target) && event.target.id === "intro-address") {
+      prefs().addressName = event.target.value.trim().slice(0, 60);
+      Cortex.save();
     }
   });
 

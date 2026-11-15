@@ -3,15 +3,16 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  const version = "1.0.6";
+  let version = "1.0.7";
   const tabs = [
-    ["chat", "Чат", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
+    ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
   ];
   const parent = {
     settings: "profile", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
-    support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory"
+    support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
+    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", "island-editor": "phone-tools", energy: "settings"
   };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -124,9 +125,10 @@ const CortexUI = (() => {
         ${button("Повторить", "refresh", "retry")}
       </div></div></div>` : "";
     return `<header class="chat-header">
-      <button type="button" class="chat-control" aria-label="Новый чат" ${attributes("new-chat")}>${icon("newChat", 19)}<span>Новый чат</span></button>
-      <div class="chat-brand" data-chat-logo>${sign}<span>CORTEX</span></div>
-      <button type="button" class="chat-control" aria-label="История чатов" ${attributes("history")}>${icon("history", 18)}<span>История<span class="history-long"> чатов</span></span></button>
+      <button type="button" class="chat-control" aria-label="Чаты" ${attributes("go", "chats")}>${icon("back", 19)}<span>Чаты</span></button>
+      <div class="chat-brand" data-chat-logo>${sign}<span>CORTEX<small>${item?.saved ? "Сохранённый" : "Временный"}</small></span></div>
+      ${item?.saved ? iconButton("dots", "Настройки чата", "chat-menu", item.id) :
+        iconButton("trash", "Очистить временный чат", "clear-temporary")}
     </header>
     <div class="scroll conversation" aria-label="Переписка">
       ${messages || pending || error ? `<div class="message-list${ctx.messageEnter ? " entering" : ""}">${messages}${pending}${error}</div>` :
@@ -143,7 +145,7 @@ const CortexUI = (() => {
   }
   function chatItems(ctx) {
     const query = ctx.search.trim().toLocaleLowerCase("ru");
-    const items = M.state.chats.filter(item => item.messages.length && (!ctx.onlySaved || item.saved) &&
+    const items = M.state.chats.filter(item => item.saved &&
       (!query || item.title.toLocaleLowerCase("ru").includes(query) ||
         item.messages.some(message => message.text.toLocaleLowerCase("ru").includes(query))))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated.localeCompare(a.updated));
@@ -161,9 +163,23 @@ const CortexUI = (() => {
       ${iconButton("close", "Закрыть историю", "close-history")}</header>
       <label class="search-box">${icon("search", 19)}<input id="history-search" type="search" aria-label="Поиск по чатам"
         placeholder="Поиск по чатам" value="${esc(ctx.search)}"></label>
-      <div class="filters">${pill("Все", "history-filter", "all", !ctx.onlySaved)}
-        ${pill("Сохранённые", "history-filter", "saved", ctx.onlySaved, "bookmark")}</div>
       <div class="drawer-scroll" id="history-items">${chatItems(ctx)}</div>`;
+  }
+
+  function chats() {
+    return `<header class="profile-header notes-header"><h1>Чаты</h1>
+      ${iconButton("search", "Поиск по чатам", "history")}</header>
+      <div class="scroll detail-scroll stack">${button("Новый чат", "plus", "new-chat", "", "primary")}
+        ${chatItems({ search: "" })}</div>`;
+  }
+
+  function quotaPanel(quota, id) {
+    if (!id) return "";
+    return `<section class="panel stack quota-panel"><h2>Запросы к ИИ</h2>
+      ${quota ? `<p>${quota.unlimited ? "Безлимит" : "Осталось " + esc(quota.remaining) + " из " + esc(quota.limit)}
+      <small> · сброс в 03:00 по Москве</small></p>` : '<p class="muted">Остаток обновится при подключении.</p>'}
+      <div class="quota-id"><code>${esc(id)}</code>
+      ${iconButton("copy", "Копировать ID", "copy-account-id")}</div></section>`;
   }
 
   function profile(ctx) {
@@ -179,6 +195,7 @@ const CortexUI = (() => {
             <span class="google-letter" aria-hidden="true">G</span><span>${ctx.login ? "Ожидаю вход" : "Войти через Google"}</span></button>
             ${ctx.connection.checked && !ctx.connection.google ? '<small class="muted">Вход через Google пока недоступен на сервере.</small>' : ""}` : ""}
         </section>
+        ${quotaPanel(ctx.connection.quota, account?.id || ctx.connection.guestId)}
         ${group(tile("Настройки", "Телефон, интерфейс и уведомления", "sliders", "go", "settings") +
           tile("Чаты и данные", "История, экспорт и заметки", "folder", "go", "data") +
           tile("Память и персонализация", "Факты, контекст и стиль ответа", "memory", "go", "memory"))}
@@ -191,6 +208,8 @@ const CortexUI = (() => {
   function settings() {
     return detail("Настройки", "", group(
       tile("Способ вызова CORTEX", "Островок, голос или без плавающего окна", "focus", "go", "phone-tools") +
+      tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
+      tile("Энергопотребление", "", "bolt", "go", "energy") +
       tile("Модели ИИ", "Бесплатные профили OpenRouter", "spark", "go", "models") +
       tile("Язык", "Язык ответа и распознавания", "globe", "go", "language") +
       tile("Анимации и отклик", "Движение интерфейса и вибрация", "wave", "go", "motion") +
@@ -229,6 +248,9 @@ const CortexUI = (() => {
       <div class="scroll detail-scroll stack phone-tools-scroll">
         <div class="capability-note"><span class="capability-signal" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(status)}</span></div>
         ${fix}
+        ${group(tile("Расписание", "Напоминания и отложенные действия", "bell", "go", "schedule") +
+          tile("Сценарии", "Создавайте цепочки действий", "bolt", "go", "scenarios") +
+          tile("Оформление островка", "Размер, положение и виджеты", "sliders", "go", "island-editor"))}
         <div class="island-demo" data-camera="${esc(ctx.islandCamera || "drop")}" aria-hidden="true">
           <div class="demo-pill"><span class="demo-rim"></span>
             <div class="demo-body">
@@ -283,7 +305,7 @@ const CortexUI = (() => {
   }
   function models(ctx) {
     const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", `<section class="panel stack">
+    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection.quota, M.state.account?.id || ctx.connection.guestId) + `<section class="panel stack">
       ${choices(M.models, model, "model-profile")}
       <p class="muted">${({
         auto: "Автоматический выбор подходящей бесплатной модели.",
@@ -306,7 +328,6 @@ const CortexUI = (() => {
   function data() {
     const p = M.state.preferences;
     return detail("Чаты и данные", "Переписка на этом устройстве", `<section class="panel stack">
-      ${switchRow("Сохранять новые чаты", "Оставлять диалоги после закрытия приложения", p.autoSaveChats, "autoSaveChats")}
       ${switchRow("Помнить сохранённые чаты", "Учитывать подходящие фрагменты бесед в новых ответах", p.rememberSaved, "rememberSaved")}
     </section>` + group(
       tile("Экспортировать чаты", "Скачать сохранённые диалоги в JSON", "download", "export") +
@@ -403,7 +424,7 @@ const CortexUI = (() => {
   }
 
   function page(route, ctx) {
-    const pages = { home, chat, profile, settings, motion, "phone-tools": phoneTools, language, notifications,
+    const pages = { home, chat, chats, profile, settings, motion, "phone-tools": phoneTools, language, notifications,
       data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
@@ -415,5 +436,7 @@ const CortexUI = (() => {
         `<button type="button" class="dock-tab" data-tab="${key}" ${attributes("tab", key)}>
           <span class="nav-icon">${icon(name, 20)}</span><span>${title}</span></button>`).join("");
   }
-  return { esc, icon, iconButton, button, tile, version, tabs, parent, page, composer, navigation, history, chatItems };
+  return { esc, icon, iconButton, button, tile, detail, get version() { return version; },
+    setVersion(value) { if (/^\d+\.\d+\.\d+(?:[-.][a-z0-9.]+)?$/i.test(value)) version = value; },
+    tabs, parent, page, composer, navigation, history, chatItems };
 })();
