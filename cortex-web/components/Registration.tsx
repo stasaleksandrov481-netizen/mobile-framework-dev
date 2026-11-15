@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
+import UiIcon from "@/components/UiIcon";
 
 type Mode = "signup" | "verify" | "signin" | "done";
 
@@ -117,16 +118,18 @@ export function Registration() {
   return (
     <>
       <button ref={triggerRef} type="button" id="register" className="button button--primary" onClick={() => { setError(""); setOpen(true); }}>
-        Зарегистрироваться <span aria-hidden="true">↗</span>
+        Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
       </button>
       {open && (
         <div className="modal-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpen(false); }}>
           <div ref={dialogRef} className="registration-dialog" role="dialog" aria-modal="true" aria-labelledby="registration-title">
-            <button type="button" className="dialog-close" aria-label="Закрыть" onClick={() => setOpen(false)}>×</button>
+            <button type="button" className="dialog-close" aria-label="Закрыть" onClick={() => setOpen(false)}>
+              <UiIcon name="close" size={19} />
+            </button>
             <div className="dialog-kicker">CORTEX · РАННИЙ ДОСТУП</div>
             {mode === "done" ? (
               <div className="dialog-success">
-                <div className="success-icon" aria-hidden="true">✓</div>
+                <div className="success-icon" aria-hidden="true"><UiIcon name="check" size={25} /></div>
                 <h2 id="registration-title">Ты в списке.</h2>
                 <p>Аккаунт подтверждён. Мы зарезервировали 5 000 бонусных ИИ-токенов к запуску открытой беты.</p>
                 <button className="button button--primary dialog-submit" type="button" onClick={() => setOpen(false)}>Готово</button>
@@ -149,7 +152,7 @@ export function Registration() {
                   {mode === "verify" ? (
                     <>
                       <label htmlFor="registration-code">Код из письма</label>
-                      <input id="registration-code" inputMode="numeric" autoComplete="one-time-code" value={code}
+                      <input id="registration-code" className="verification-input" inputMode="numeric" autoComplete="one-time-code" value={code}
                         onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
                         required minLength={6} maxLength={10} placeholder="000000" />
                     </>
@@ -197,11 +200,11 @@ export function DownloadCTA({ url }: { url?: string }) {
 
   return available && url ? (
     <a className="button button--secondary" href={url} rel="noopener noreferrer">
-      Установить <span aria-hidden="true">↓</span>
+      Установить <span className="button-icon"><UiIcon name="download" size={18} /></span>
     </a>
   ) : (
     <span className="button button--secondary button--disabled" aria-label="Установка станет доступна 20 ноября">
-      Установить <span className="button-soon">20.11</span>
+      <UiIcon name="clock" size={17} /> Установить <span className="button-soon">20.11</span>
     </span>
   );
 }
