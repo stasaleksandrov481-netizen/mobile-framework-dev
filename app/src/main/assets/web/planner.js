@@ -2,13 +2,21 @@
 
 const CortexPlanner = (() => {
   const M = Cortex, U = CortexUI;
-  const { esc, detail } = U;
+  const { esc, detail, icon } = U;
   const routes = new Set(["schedule", "scenarios", "island-editor", "energy"]);
   const fieldTypes = {
     open: "Открыть приложение", tap: "Нажать элемент", point: "Нажать записанную точку", type: "Ввести текст",
     swipe: "Свайп", wait: "Ждать элемент", pause: "Пауза", if: "Условие", repeat: "Повторение",
     run: "Запустить сценарий", variable: "Задать переменную"
   };
+  const actionGroups = [
+    ["Навигация", "open", "tap", "point", "type", "swipe"],
+    ["Условия и ожидание", "wait", "pause", "if", "repeat"],
+    ["Сценарии и данные", "run", "variable"]
+  ];
+  const stepIcons = { open: "folder", tap: "focus", point: "target", type: "note", swipe: "sendUp", wait: "history",
+    pause: "stop", if: "layers", repeat: "refresh", run: "bolt", variable: "file" };
+  const draftKey = () => "cortex:scenario:draft:v1:" + (M.state.account?.id || "guest");
   const statuses = {
     scheduled: "Запланировано", due: "Ожидает отметки", blocked: "Ожидает запуска", running: "Выполняется",
     done: "Готово", failed: "Ошибка", cancelled: "Отменено"
@@ -33,6 +41,10 @@ const CortexPlanner = (() => {
   let app, items = [], tasks = [], exact = false, notifications = false;
   let selectedTask = "", scheduleDraft, scenarioDraft, pointPath, scenarioBusy = false;
   let scheduleReady = false, scenarioReady = false;
+  let expandedStep = "", pickerBranch = "", gesture;
+  const colorNames = { background: "Фон", text: "Текст", border: "Граница", accent: "Прогресс", faceColor: "Смайлик" };
+  let formOperation = "";
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const format = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
   const isObject = value => value && typeof value === "object" && !Array.isArray(value);
   const options = (values, selected) => Object.entries(values).map(([key, title]) =>
@@ -145,7 +157,7 @@ const CortexPlanner = (() => {
         case "open": return input("Название приложения");
         case "tap": return input("Точная подпись элемента") + label("Что появится после нажатия",
           inline(path, "expect", "text", step.expect, 'maxlength="180" placeholder="Необязательно"')) +
-          `<label class="plan-check"><input data-step="${path}" data-key="confirm" type="checkbox" ${step.confirm ? "checked" : ""}> Подтверждать нажатие</label>`;
+          `${planSwitch("Подтверждать нажатие", `data-step="${path}" data-key="confirm"`, step.confirm)}`;
         case "point": return `<p class="muted">${step.package ? esc(step.target || step.package) :
           "Оставьте нужное приложение открытым за CORTEX."}</p>${action("Записать касание", "scenario-point", path)}`;
         case "type": return label("Текст для ввода", `<textarea data-step="${path}" data-key="value" rows="2" maxlength="2000" required>${esc(step.value)}</textarea>`);
@@ -153,7 +165,7 @@ const CortexPlanner = (() => {
         case "wait": return input("Какой элемент должен появиться");
         case "pause": return label("Секунд", inline(path, "seconds", "number", step.seconds, 'min="1" max="30" required'));
         case "if": return input("Если на экране есть элемент") + `<div class="plan-branch"><strong>Да</strong>${stepList(step.steps, path + ".steps", depth + 1)}</div>
-          <div class="plan-branch"><strong>Иначе</strong>${stepList(step.else, path + ".else", depth + 1)}</div>`;
+          <div class="plan-branch"><strong>Нет</strong>${stepList(step.else, path + ".else", depth + 1)}</div>`;
         case "repeat": return label("Количество повторов", inline(path, "count", "number", step.count, 'min="1" max="10" required')) +
           `<div class="plan-branch">${stepList(step.steps, path + ".steps", depth + 1)}</div>`;
         case "run": return label("Сценарий", `<select data-step="${path}" data-key="target" required><option value="">Выберите</option>
@@ -161,28 +173,70 @@ const CortexPlanner = (() => {
         default: return input("Имя переменной", "target", 32) + label("Значение", inline(path, "value", "text", step.value, 'maxlength="2000"'));
       }
     };
-    return steps.map((step, index) => {
+    return `<div class="plan-chain" data-chain="${esc(parent)}">${steps.map((step, index) => {
       const path = parent ? `${parent}.${index}` : String(index);
-      return `<section class="plan-step"><div class="plan-step-head"><strong>${index + 1}. ${esc(fieldTypes[step.kind])}</strong>
-        <div class="plan-step-buttons">${index > 0 ? action("↑", "step-up", path, "quiet") : ""}
-          ${index < steps.length - 1 ? action("↓", "step-down", path, "quiet") : ""}
-          ${action("Удалить", "step-delete", path, "quiet")}</div></div>${fields(step, path)}</section>`;
-    }).join("") + `<div class="plan-add"><select aria-label="Тип нового шага">${options(Object.fromEntries(Object.entries(fieldTypes)
-      .filter(([kind]) => depth < 4 || !["if", "repeat"].includes(kind))), "open")}</select>${action("Добавить шаг", "step-add", parent)}</div>`;
+      const summary = step.kind === "pause" ? `${step.seconds} с` : step.kind === "repeat" ? `${step.count} повторов` :
+        step.kind === "run" ? items.find(item => item.id === step.target)?.name : step.kind === "swipe" ? directions[step.value] :
+        step.target || step.value;
+      return `<section class="plan-step" data-step-row="${path}">
+        <header class="plan-step-head">
+          <button type="button" class="plan-grip" data-grip="${path}" aria-label="Перетащить шаг ${index + 1}">⠿</button>
+          <button type="button" class="plan-step-name" data-plan="step-edit" data-value="${path}"
+            aria-expanded="${expandedStep === path}">${icon(stepIcons[step.kind], 17)}
+            <span><strong>${index + 1}. ${esc(fieldTypes[step.kind])}</strong>
+            ${summary ? `<small>${esc(summary)}</small>` : ""}</span>${icon("chevron", 15)}</button>
+        </header>
+        ${expandedStep === path ? `<div class="plan-step-body">${fields(step, path)}
+          <div class="plan-step-buttons">${index > 0 ? action("Выше", "step-up", path, "quiet") : ""}
+          ${index < steps.length - 1 ? action("Ниже", "step-down", path, "quiet") : ""}
+          ${action("Дублировать", "step-copy", path, "quiet")}${action("Удалить", "step-delete", path, "quiet")}</div></div>` :
+          ["if", "repeat"].includes(step.kind) ?
+          `<div class="plan-branch"><strong>${step.kind === "if" ? "Да" : "Шаги повтора"}</strong>${stepList(step.steps, path + ".steps", depth + 1)}</div>
+          ${step.kind === "if" ? `<div class="plan-branch"><strong>Нет</strong>${stepList(step.else, path + ".else", depth + 1)}</div>` : ""}` : ""}
+      </section>`;
+    }).join("")}${action("＋ Добавить шаг", "step-picker", parent, "quiet")}</div>`;
+  }
+
+  function actionPicker(branch) {
+    pickerBranch = branch;
+    const depth = branch ? branch.split(".").length / 2 : 0;
+    app.sheet("Добавить действие", `<div class="stack plan-picker">
+      ${label("Поиск действий", '<input type="search" data-step-search placeholder="Название действия" maxlength="80">')}
+      ${actionGroups.map(([title, ...kinds]) => `<section data-step-group><h3>${esc(title)}</h3>
+        ${kinds.filter(kind => depth < 4 || !["if", "repeat"].includes(kind)).map(kind =>
+          `<button type="button" class="tile" data-plan="step-add" data-value="${kind}"><span class="tile-glyph">
+            ${icon(stepIcons[kind], 19)}</span><span>${esc(fieldTypes[kind])}</span></button>`).join("")}
+      </section>`).join("")}<p class="muted" data-no-step hidden>Совпадений нет.</p></div>`);
+  }
+
+  function storedDraft() {
+    try {
+      const value = JSON.parse(localStorage.getItem(draftKey()));
+      return isObject(value) ? scenarioFrom(value, true) : null;
+    } catch { return null; }
+  }
+
+  function planSwitch(title, attributes, checked) {
+    return `<label class="plan-switch"><span>${esc(title)}</span>
+      <input type="checkbox" role="switch" ${attributes} ${checked ? "checked" : ""}>
+      <span class="switch-track" aria-hidden="true"><i></i></span></label>`;
   }
 
   function scenarios() {
     if (!app.native) return detail("Сценарии", "", '<p class="muted">Запуск сценариев доступен в Android-приложении.</p>');
     if (!scenarioReady && !scenarioDraft) return detail("Сценарии", "", '<p class="muted">Загружаю сценарии…</p>');
-    if (scenarioDraft) return detail("Конструктор", "Сохраните схему перед запуском", `<form class="panel stack" id="plan-scenario-form">
+    if (scenarioDraft) return detail("Конструктор", "", `<form class="panel stack" id="plan-scenario-form" novalidate>
       ${label("Название", `<input name="name" maxlength="90" required value="${esc(scenarioDraft.name)}">`)}
       ${label("Голосовые фразы, по одной в строке", `<textarea name="triggers" rows="2" maxlength="1200">${esc(scenarioDraft.triggers.join("\n"))}</textarea>`)}
       <p class="muted">Вставляйте переменную в текст или название элемента в виде \${имя}. Имена переменных задавайте латиницей.</p>
       ${stepList(scenarioDraft.steps)}
-      <div class="actions">${submit("Сохранить")}${action("К списку", "scenario-close", "", "quiet")}</div>
+      <div class="actions"><button type="submit" class="action primary">Сохранить сценарий</button>
+        ${action("Проверить", "scenario-check")}${action("Сохранить черновик", "draft-save", "", "quiet")}
+        ${action("К списку", "scenario-close", "", "quiet")}</div>
     </form>`);
     return detail("Сценарии", "Цепочки действий для телефона", `<div class="actions">${action("Создать", "scenario-edit", "", "primary")}
-      ${action("Импорт JSON", "native", "scenario-import")}${action("Журнал шагов", "native", "action-history")}</div>
+      ${action("Импорт JSON", "native", "scenario-import")}${action("Журнал шагов", "native", "action-history")}
+      ${storedDraft() ? action("Открыть черновик", "draft-open") : ""}</div>
       <form class="panel stack" id="plan-ai-form">
         ${label("Описать сценарий своими словами", '<textarea name="goal" rows="2" maxlength="1200" placeholder="Открой настройки и дождись раздела «Дисплей»" required></textarea>')}
         ${submit(scenarioBusy ? "Готовлю черновик…" : "Предложить шаги через ИИ")}
@@ -210,35 +264,135 @@ const CortexPlanner = (() => {
     const data = style();
     const size = Math.max(80, Math.min(125, data.size));
     return `<span class="plan-camera"></span>
-      <div class="plan-island-wrap" style="transform:translate(${Math.max(-50, Math.min(50, data.offsetX)) / 2}px,${Math.max(0, Math.min(80, data.offsetY)) / 3}px)">
+      <div class="plan-island-wrap" style="transform:translate(${clamp(data.offsetX, -75, 75) / 2}px,${clamp(data.offsetY, 0, 80) / 3}px)">
         ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}">•ᴗ•</span>` : ""}
         <div class="plan-island-sample" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
           --island-accent:${data.accent};--island-opacity:${Math.max(40, Math.min(100, data.opacity))}%;--island-size:${size}%;
           --island-radius:${Math.max(12, Math.min(32, data.corner))}px;--island-weight:${Math.max(0, Math.min(3, data.borderWidth))}px">
           <span class="plan-logo" aria-hidden="true"></span>${data.status ? "<span>Слушаю…</span>" : ""}
           ${data.progress ? '<i aria-hidden="true"></i>' : ""}</div>
+        <span class="plan-size-grip" aria-hidden="true">↘</span>
       </div>`;
   }
 
   function islandEditor() {
     const data = style();
-    const slider = (key, text, min, max, increments = 1) => `<label class="field plan-range">
-      <span>${esc(text)}<output>${esc(data[key])}</output></span>
-      <input type="range" aria-label="${esc(text)}" min="${min}" max="${max}" step="${increments}" data-style="${key}" value="${esc(data[key])}">
-    </label>`;
-    const color = (key, text) => label(text, `<input type="color" data-style="${key}" value="${esc(data[key])}">`);
-    const widget = (key, text) => `<label class="plan-check"><input type="checkbox" data-style="${key}" ${data[key] ? "checked" : ""}> ${esc(text)}</label>`;
+    const slider = (key, title, min, max, increments = 1) => `<div class="field plan-range">
+      <div class="plan-range-head"><label for="range-${key}">${esc(title)}</label>
+        <input type="number" data-number-style="${key}" aria-label="${esc(title)} вручную"
+          min="${min}" max="${max}" step="${increments}" value="${esc(data[key])}"></div>
+      <input type="range" id="range-${key}" min="${min}" max="${max}" step="${increments}" data-style="${key}" value="${esc(data[key])}">
+    </div>`;
+    const widget = (key, title) => planSwitch(title, `data-style="${key}"`, data[key]);
     return detail("Оформление островка", "", `<div class="plan-island-preview" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
+      <p class="muted plan-hint">Перетащите островок. Потяните за угол, чтобы изменить размер.</p>
       <div class="actions">${Object.keys(islandPresets).map(title => action(title, "island-preset", title)).join("")}</div>
       <section class="panel stack"><h2>Положение и форма</h2>${slider("size", "Размер", 80, 125)}
         ${slider("offsetX", "Сдвиг влево и вправо", -75, 75)}${slider("offsetY", "Сдвиг вниз", 0, 80)}
         ${slider("corner", "Скругление", 12, 32)}${slider("borderWidth", "Толщина границы", 0, 3, .1)}
         ${slider("opacity", "Непрозрачность", 40, 100)}
         ${label("Анимация", `<select data-style="motion">${options({ liquid: "Плавная", soft: "Короткая", none: "Мгновенная" }, data.motion)}</select>`)}</section>
-      <section class="panel stack"><h2>Цвета</h2><div class="plan-color-grid">${color("background", "Фон")}${color("text", "Текст")}
-        ${color("border", "Граница")}${color("accent", "Прогресс")}${color("faceColor", "Смайлик")}</div></section>
+      <section class="panel stack"><h2>Цвета</h2><div class="plan-color-grid">${Object.entries(colorNames).map(([key, title]) =>
+        `<button type="button" class="plan-swatch" data-plan="palette" data-value="${key}">
+          <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></section>
       <section class="panel stack"><h2>Виджеты</h2>${widget("face", "Смайлик со статусом")}${widget("status", "Статус")}
         ${widget("progress", "Полоса прогресса")}${widget("quick", "Быстрые команды")}${widget("results", "Результат действий")}</section>`);
+  }
+
+  function hsvFromHex(hex) {
+    const [r, g, b] = hex.slice(1).match(/../g).map(part => parseInt(part, 16) / 255);
+    const max = Math.max(r, g, b), delta = max - Math.min(r, g, b);
+    const angle = !delta ? 0 : max === r ? (g - b) / delta : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+    return [Math.round((60 * angle + 360) % 360), max ? Math.round(100 * delta / max) : 0, Math.round(max * 100)];
+  }
+
+  function hexFromHsv(hue, saturation, value) {
+    const s = saturation / 100, v = value / 100;
+    return "#" + [5, 3, 1].map(channel => {
+      const position = (channel + hue / 60) % 6;
+      return Math.round(255 * (v - v * s * Math.max(0, Math.min(position, 4 - position, 1)))).toString(16).padStart(2, "0");
+    }).join("");
+  }
+
+  function palette(key) {
+    const hex = style()[key];
+    const sliders = ["Оттенок", "Насыщенность", "Яркость"].map((title, index) => label(title,
+      `<input type="range" data-hsv="${index}" min="0" max="${index ? 100 : 359}" value="${hsvFromHex(hex)[index]}">`)).join("");
+    app.sheet(colorNames[key], `<form id="plan-palette-form" class="stack plan-palette" data-color="${key}">
+      <div data-palette-preview class="plan-palette-preview" style="--swatch:${hex}" aria-label="Предпросмотр цвета"></div>
+      ${sliders}${label("HEX", `<input type="text" name="hex" maxlength="7" pattern="#[0-9a-fA-F]{6}" value="${hex}"
+        required spellcheck="false" autocapitalize="none">`)}
+      ${submit("Применить")}</form>`);
+  }
+
+  function applyStyle(key, value) {
+    M.state.islandStyle = { ...style(), [key]: value };
+    const sample = document.querySelector("[data-island-preview]");
+    if (sample) sample.innerHTML = preview();
+  }
+
+  function startGesture(event) {
+    if (!event.isPrimary || event.button !== 0 || gesture) return;
+    const grip = event.target.closest("[data-grip]");
+    const island = event.target.closest(".plan-island-wrap");
+    if (!grip && !island) return;
+    const handle = grip || island.closest("[data-island-preview]");
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const { offsetX, offsetY, size } = style();
+    gesture = { id: event.pointerId, handle, grip, source: grip?.dataset.grip, startX: event.clientX, startY: event.clientY,
+      offsetX, offsetY, size, resize: Boolean(event.target.closest(".plan-size-grip")), target: null };
+  }
+
+  function moveGesture(event) {
+    if (gesture?.id !== event.pointerId) return;
+    if (!gesture.grip) {
+      const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
+      const values = gesture.resize ? { size: clamp(Math.round(gesture.size + dx + dy), 80, 125) } :
+        { offsetX: clamp(Math.round(gesture.offsetX + dx * 2), -75, 75),
+          offsetY: clamp(Math.round(gesture.offsetY + dy * 3), 0, 80) };
+      M.state.islandStyle = { ...style(), ...values };
+      gesture.handle.innerHTML = preview();
+      for (const [key, value] of Object.entries(values)) {
+        for (const field of app.root.querySelectorAll(`[data-style="${key}"], [data-number-style="${key}"]`)) field.value = value;
+      }
+      return;
+    }
+    const scroll = gesture.handle.closest(".scroll");
+    if (scroll) {
+      const box = scroll.getBoundingClientRect();
+      if (event.clientY < box.top + 37) scroll.scrollTop -= 10;
+      else if (event.clientY > box.bottom - 37) scroll.scrollTop += 10;
+    }
+    const row = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-step-row]");
+    const chain = gesture.grip.closest("[data-chain]");
+    const target = row?.parentElement === chain ? row : null;
+    gesture.target?.classList.remove("plan-drag-target");
+    gesture.target = target;
+    target?.classList.add("plan-drag-target");
+  }
+
+  function endGesture(event) {
+    if (gesture?.id !== event.pointerId) return;
+    const { grip, source, target, offsetX, offsetY, size } = gesture;
+    gesture = null;
+    target?.classList.remove("plan-drag-target");
+    if (!grip) {
+      if (event.type === "pointercancel") {
+        M.state.islandStyle = { ...style(), offsetX, offsetY, size };
+        app.render();
+      } else app.updateStyle();
+      return;
+    }
+    const path = target?.dataset.stepRow;
+    if (event.type === "pointercancel" || !path || path === source) return;
+    const from = address(source), to = address(path);
+    if (from.steps && from.steps === to.steps) {
+      const [item] = from.steps.splice(from.index, 1);
+      from.steps.splice(to.index, 0, item);
+      expandedStep = "";
+      app.render();
+    }
   }
 
   function energy() {
@@ -278,7 +432,13 @@ const CortexPlanner = (() => {
         if (app.route() === "scenarios") app.render();
         return true;
       case "scenario-result":
-        if (message.ok && message.operation === "save") { scenarioDraft = null; if (app.route() === "scenarios") app.render(); }
+        if (message.ok && message.operation === "save") {
+          scenarioDraft = null;
+          expandedStep = "";
+          try { localStorage.removeItem(draftKey()); } catch {}
+          if (app.route() === "scenarios") app.render();
+        }
+        if (message.operation === formOperation) formOperation = "";
         app.toast(message.text);
         return true;
       case "scenario-point": {
@@ -292,6 +452,7 @@ const CortexPlanner = (() => {
       }
       case "scenario-import":
         scenarioDraft = scenarioFrom(message.item || {});
+        expandedStep = "";
         app.render();
         app.toast("Проверьте импортированную схему перед сохранением.");
         return true;
@@ -322,6 +483,7 @@ const CortexPlanner = (() => {
     if (command === "scenario-edit" || command === "scenario-copy") {
       const item = items.find(item => item.id === value) || {};
       scenarioDraft = scenarioFrom(item, command === "scenario-edit");
+      expandedStep = "";
       if (command === "scenario-copy") {
         scenarioDraft.name = (scenarioDraft.name + " · копия").slice(0, 90);
         scenarioDraft.triggers = [];
@@ -329,7 +491,19 @@ const CortexPlanner = (() => {
       app.render();
       return;
     }
-    if (command === "scenario-close") { scenarioDraft = null; app.render(); return; }
+    if (command === "scenario-close") { scenarioDraft = null; expandedStep = ""; app.render(); return; }
+    if (command === "draft-save" && scenarioDraft) {
+      try { localStorage.setItem(draftKey(), JSON.stringify(scenarioDraft)); app.toast("Черновик сохранён."); }
+      catch { app.toast("Не удалось сохранить черновик."); }
+      return;
+    }
+    if (command === "draft-open") {
+      scenarioDraft = storedDraft();
+      expandedStep = "";
+      app.render();
+      return;
+    }
+    if (command === "scenario-check") { sendScenario("check"); return; }
     if (command === "scenario-point") { pointPath = value; app.send("scenario-point"); return; }
     if (command === "scenario-export") { app.send("scenario-export", { id: value }); return; }
     if (command === "scenario-delete") {
@@ -340,14 +514,24 @@ const CortexPlanner = (() => {
       app.confirm("Запустить тест?", "CORTEX выполнит шаги на экране и запишет результат в журнал.", () => app.send("scenario-run", { id: value }));
       return;
     }
+    if (command === "palette" && Object.hasOwn(colorNames, value)) { palette(value); return; }
     if (command === "island-preset" && Object.hasOwn(islandPresets, value)) {
       M.state.islandStyle = { ...islandPresets[value] };
       app.updateStyle(); app.render(); return;
     }
     if (command === "power") { app.power(value); return; }
-    if (command === "step-add") {
-      const steps = stepsAt(value);
-      if (steps && steps.length < 40) steps.push(makeStep(control.previousElementSibling.value));
+    if (command === "step-picker") { actionPicker(value); return; }
+    if (command === "step-add" && Object.hasOwn(fieldTypes, value)) {
+      const steps = stepsAt(pickerBranch);
+      if (!steps || steps.length >= 40) { app.toast("Здесь уже 40 шагов."); return; }
+      expandedStep = (pickerBranch ? pickerBranch + "." : "") + steps.length;
+      steps.push(makeStep(value));
+      app.close();
+      app.render();
+      return;
+    }
+    if (command === "step-edit") {
+      expandedStep = expandedStep === value ? "" : value;
       app.render();
       return;
     }
@@ -355,16 +539,39 @@ const CortexPlanner = (() => {
       const { steps, index } = address(value);
       if (!steps?.[index]) return;
       if (command === "step-delete") steps.splice(index, 1);
-      else {
+      else if (command === "step-copy") {
+        if (steps.length >= 40) return;
+        steps.splice(index + 1, 0, JSON.parse(JSON.stringify(steps[index])));
+      } else {
         const next = index + (command === "step-up" ? -1 : 1);
         if (steps[next]) [steps[index], steps[next]] = [steps[next], steps[index]];
       }
+      expandedStep = "";
       app.render();
     }
   }
 
+  function sendScenario(operation) {
+    if (!scenarioDraft || formOperation) return;
+    if (app.send("scenario-" + operation, { scenario: scenarioDraft })) formOperation = operation;
+    else app.toast("Не удалось связаться с Android.");
+  }
+
   function input(event) {
     const control = event.target;
+    if (control.matches("[data-step-search]")) {
+      const query = control.value.trim().toLocaleLowerCase("ru-RU");
+      const picker = control.closest(".plan-picker");
+      let found = false;
+      for (const group of picker.querySelectorAll("[data-step-group]")) {
+        const controls = [...group.querySelectorAll("[data-plan=step-add]")];
+        for (const row of controls) row.hidden = !row.textContent.toLocaleLowerCase("ru-RU").includes(query);
+        group.hidden = controls.every(row => row.hidden);
+        if (!group.hidden) found = true;
+      }
+      picker.querySelector("[data-no-step]").hidden = found;
+      return;
+    }
     if (control.form?.id === "plan-schedule-form" && scheduleDraft) scheduleDraft[control.name] = control.value;
     if (control.form?.id === "plan-scenario-form" && scenarioDraft) {
       if (control.dataset.step) {
@@ -374,20 +581,54 @@ const CortexPlanner = (() => {
       } else if (control.name === "name") scenarioDraft.name = control.value;
       else if (control.name === "triggers") scenarioDraft.triggers = control.value.split("\n");
     }
+    const paletteForm = control.closest("#plan-palette-form");
+    if (paletteForm) {
+      const { hex } = paletteForm.elements;
+      const sliders = [...paletteForm.querySelectorAll("[data-hsv]")];
+      if (control.hasAttribute("data-hsv")) hex.value = hexFromHsv(...sliders.map(slider => Number(slider.value)));
+      if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
+        if (control === hex) hsvFromHex(hex.value).forEach((value, i) => { sliders[i].value = value; });
+        paletteForm.querySelector("[data-palette-preview]").style.setProperty("--swatch", hex.value);
+      }
+      return;
+    }
     const key = control.dataset.style;
     if (!key || !Object.hasOwn(islandDefaults, key)) return;
     const value = control.type === "range" ? Number(control.value) : control.type === "checkbox" ? control.checked : control.value;
-    M.state.islandStyle = { ...style(), [key]: value };
-    const output = control.closest("label")?.querySelector("output");
-    if (output) output.value = String(value);
-    const sample = document.querySelector("[data-island-preview]");
-    if (sample) sample.innerHTML = preview();
+    applyStyle(key, value);
+    const number = control.closest(".plan-range")?.querySelector('[type="number"]');
+    if (number) number.value = String(value);
+  }
+
+  function styleChange(event) {
+    const control = event.target;
+    const key = control.dataset.numberStyle;
+    if (key && Object.hasOwn(islandDefaults, key)) {
+      const value = Number.isFinite(control.valueAsNumber) ?
+        Number((clamp(control.valueAsNumber, Number(control.min), Number(control.max))).toFixed(key === "borderWidth" ? 1 : 0)) :
+        style()[key];
+      control.value = value;
+      control.closest(".plan-range").querySelector('[type="range"]').value = value;
+      applyStyle(key, value);
+    }
+    if (key || control.dataset.style) app.updateStyle();
   }
 
   async function submitForm(event) {
     const id = event.target.id;
+    if (id === "plan-palette-form") {
+      const hex = event.target.elements.hex.value;
+      const key = event.target.dataset.color;
+      if (Object.hasOwn(colorNames, key) && /^#[0-9a-f]{6}$/i.test(hex)) {
+        applyStyle(key, hex);
+        app.updateStyle();
+        app.close();
+        app.render();
+      }
+      return;
+    }
     if (id === "plan-schedule-form" && scheduleDraft) app.send("schedule-save", { task: scheduleDraft });
-    if (id === "plan-scenario-form" && scenarioDraft) app.send("scenario-save", { scenario: scenarioDraft });
+    if (id === "plan-scenario-form") sendScenario("save");
     if (id !== "plan-ai-form" || scenarioBusy) return;
     scenarioBusy = true;
     const control = event.target.querySelector("button[type=submit]");
@@ -424,12 +665,25 @@ const CortexPlanner = (() => {
     app = controller;
     app.root.addEventListener("click", click);
     app.root.addEventListener("input", input);
-    app.root.addEventListener("change", event => { if (event.target.dataset.style) app.updateStyle(); });
+    app.root.addEventListener("change", styleChange);
     app.root.addEventListener("submit", submitForm);
+    app.root.addEventListener("pointerdown", startGesture);
+    app.root.addEventListener("pointermove", moveGesture);
+    app.root.addEventListener("pointerup", endGesture);
+    app.root.addEventListener("pointercancel", endGesture);
   }
   function enter(route) {
     if (route === "schedule") app.send("schedule-list");
     if (route === "scenarios" && !scenarioReady) app.send("scenario-list");
   }
-  return { routes, page: route => pages[route](), bind, enter, handle, islandPresets, powers, style };
+  function accountChanged() {
+    scenarioDraft = null;
+    items = [];
+    scenarioReady = false;
+    expandedStep = "";
+    formOperation = "";
+    pointPath = null;
+    enter(app.route());
+  }
+  return { routes, page: route => pages[route](), bind, enter, handle, accountChanged, islandPresets, powers, style };
 })();

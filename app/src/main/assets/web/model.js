@@ -31,9 +31,9 @@ const Cortex = (() => {
 
   function account(value) {
     const data = object(value);
-    if (typeof data.id !== "string" || !data.id || data.provider !== "Google") return null;
+    if (typeof data.id !== "string" || !data.id || !["Google", "Email", "Yandex"].includes(data.provider)) return null;
     return {
-      id: string(data.id, 200), name: string(data.name, 100), email: string(data.email, 254), provider: "Google",
+      id: string(data.id, 200), name: string(data.name, 100), email: string(data.email, 254), provider: data.provider,
       avatar: avatarPattern.test(data.avatar || "") ? data.avatar : ""
     };
   }
@@ -82,11 +82,42 @@ const Cortex = (() => {
     notes: array(persisted.notes).filter(item => item && typeof item.id === "string"),
     account: account(persisted.account)
   };
+  let owner = state.account?.id || "";
+  let guestImported = persisted.guestImported === true || Boolean(owner);
+  const accountData = Object.assign(Object.create(null), object(persisted.accountData));
+
+  function localData(value, savedOnly = false) {
+    return {
+      edits: { cortex: object(value.edits?.cortex) },
+      chats: array(value.chats).filter(item => item && (!savedOnly || item.saved)),
+      memories: object(value.memories),
+      instructions: { ...object(value.instructions), cortex: object(value.instructions?.cortex) },
+      notes: array(value.notes).filter(item => item && typeof item.id === "string")
+    };
+  }
+
+  function useAccount(next) {
+    const selected = next?.id || "";
+    if (selected !== owner) {
+      if (!owner && selected && !guestImported && !Object.hasOwn(accountData, selected)) {
+        guestImported = true;
+        state.chats = state.chats.filter(chat => chat.saved);
+      } else {
+        accountData[owner] = localData(state, true);
+        const incoming = localData(object(accountData[selected]), true);
+        incoming.chats = incoming.chats.filter(chat => Array.isArray(chat.messages)).map(migrateChat);
+        delete accountData[selected];
+        Object.assign(state, incoming);
+      }
+      owner = selected;
+    }
+    state.account = next;
+  }
 
   function save() {
     try {
       localStorage.setItem(key, JSON.stringify({
-        ...state, chats: state.chats.filter(chat => chat.saved)
+        ...state, chats: state.chats.filter(chat => chat.saved), accountData, guestImported
       }));
       return true;
     } catch {
@@ -101,7 +132,7 @@ const Cortex = (() => {
     };
     try {
       localStorage.removeItem("cortex.interface.v1");
-      localStorage.setItem(key, JSON.stringify(cleared));
+      localStorage.setItem(key, JSON.stringify({ ...cleared, accountData, guestImported }));
       Object.assign(state, cleared);
       return true;
     } catch { return false; }
@@ -189,7 +220,7 @@ const Cortex = (() => {
     ].filter(Boolean).join("\n\n");
     const recent = conversation.slice(start);
     let size = system.length + recent.reduce((sum, item) => sum + item.text.length + 2, 0);
-    while (size > 50_000 && recent.length > 1) size -= recent.shift().text.length + 2;
+    while (size > 12_000 && recent.length > 1) size -= recent.shift().text.length + 2;
     const messages = [];
     for (const item of recent) {
       const previous = messages.at(-1);
@@ -203,6 +234,6 @@ const Cortex = (() => {
   if (old && Object.keys(old).length) save();
   return {
     state, defaults, motion, languages, styles, models, instructionFields, profile, memory, chat, account,
-    createChat, touch, turns, save, clearLocalData, id: uid
+    createChat, touch, turns, save, useAccount, clearLocalData, id: uid
   };
 })();

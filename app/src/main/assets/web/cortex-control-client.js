@@ -16,7 +16,7 @@ window.CortexControl = (() => {
   document.body.append(layer);
   const update = layer.querySelector("[data-gate-update]");
   let gate = { mode: "open" }, checking = false, again = false;
-  function applyGate(value, google) {
+  function applyGate(value, canSignIn) {
     if (!["open", "maintenance", "update"].includes(value?.mode)) return;
     gate = value;
     layer.hidden = gate.mode === "open";
@@ -24,7 +24,7 @@ window.CortexControl = (() => {
     if (layer.hidden) return;
     layer.querySelector("h1").textContent = gate.mode === "maintenance" ? "Технические работы" : "Требуется обновление";
     layer.querySelector(".cortex-guard-copy").textContent = String(gate.message || "CORTEX временно недоступен.").slice(0, 400);
-    layer.querySelector("[data-gate-login]").hidden = !google;
+    layer.querySelector("[data-gate-login]").hidden = !canSignIn;
     update.hidden = gate.mode !== "update" || !/^https:\/\//.test(gate.update_url || "");
   }
 
@@ -32,7 +32,7 @@ window.CortexControl = (() => {
     if (!visible()) return;
     if (checking) { again = true; return; }
     checking = true;
-    try { const status = await api.request("status"); applyGate(status.gate, status.google === true); }
+    try { const status = await api.request("status"); applyGate(status.gate, status.yandex === true || status.email_auth === true); }
     catch { /* Keep the last verified state until the connection returns. */ }
     finally {
       checking = false;

@@ -160,6 +160,7 @@ class CortexWakeService : Service() {
         }
     }
 
+    @androidx.annotation.RequiresApi(33)
     private fun attachFeed(intent: Intent): Boolean {
         return runCatching {
             val previous = feed

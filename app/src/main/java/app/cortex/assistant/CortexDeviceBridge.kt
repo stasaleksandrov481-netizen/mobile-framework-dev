@@ -19,7 +19,7 @@ import java.io.ByteArrayOutputStream
 internal class CortexDeviceBridge(
     private val activity: Activity,
     private val speech: CortexSpeech,
-    private val openGoogleLogin: (String) -> Boolean,
+    private val openLogin: (String) -> Boolean,
     private val emit: (JSONObject) -> Unit
 ) : AutoCloseable {
     private val context get() = activity.applicationContext
@@ -50,6 +50,10 @@ internal class CortexDeviceBridge(
                 activity.moveTaskToBack(true)
             })
             "scenario-list" -> scenarioList()
+            "scenario-check" -> {
+                val error = CortexScenarios.check(body.optJSONObject("scenario") ?: JSONObject())
+                scenarioStatus(error ?: "Параметры сценария прошли проверку.", error == null, "check")
+            }
             "scenario-save" -> {
                 val error = CortexScenarios.save(context, body.optJSONObject("scenario") ?: JSONObject())
                 if (error == null) scenarioList()
@@ -146,7 +150,7 @@ internal class CortexDeviceBridge(
                 emit(JSONObject().put("type", "link").put("ok", ok))
             }
             "open-login" -> {
-                val ok = openGoogleLogin(body.optString("url"))
+                val ok = openLogin(body.optString("url"))
                 emit(JSONObject().put("type", "browser").put("ok", ok))
             }
             "choose-image" -> {
@@ -226,7 +230,6 @@ internal class CortexDeviceBridge(
         val obj = JSONObject().put("type", "permissions")
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
-            .put("guestId", CortexServerBridge.guestId(context))
             .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
             .put("screenLock", Build.VERSION.SDK_INT >= 28 && CortexScreenService.connected != null)

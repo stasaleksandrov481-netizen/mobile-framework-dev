@@ -9,7 +9,9 @@ const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
 const ANDROID_SCHEME = "app.cortex.assistant";
 const PREVIEW_SCHEME = /^app\.cortex\.assistant\.preview\.(v[0-9]{1,6})$/;
 const PROJECT = /^[a-z0-9]{6,63}\.supabase\.co$/;
-const PHOTO = new Set(["lh3.googleusercontent.com", "lh4.googleusercontent.com", "lh5.googleusercontent.com", "lh6.googleusercontent.com"]);
+const USER_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const YANDEX_CALLBACK = "/v1/auth/callback/yandex";
 const FREE_MODEL = /^[a-z0-9._-]+\/[a-z0-9._-]+:free$/;
 const JSON_HEADERS = {
   "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
@@ -20,6 +22,7 @@ type Limit = { bucket: string; seconds: number; maximum: number };
 type Login = { state: string; account?: Account };
 type Quota = {
   id: string;
+  unit: "tokens";
   used: number;
   limit: number;
   unlimited: boolean;
@@ -28,6 +31,12 @@ type Quota = {
   time_zone: string;
   allowed: boolean;
 };
+
+class BudgetFailure extends Failure {
+  constructor(code: string, seconds: number, readonly quota: Quota) {
+    super(code, 429, seconds);
+  }
+}
 
 function configuredKey(env: Env, dictionary: string, legacy: string): string {
   try {
@@ -83,35 +92,20 @@ function apiHeaders(key: string): Headers {
   return headers;
 }
 
-async function picture(network: Network, raw: unknown): Promise<string> {
-  if (typeof raw !== "string" || raw.length > 1024) return "";
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "https:" || !PHOTO.has(url.hostname) || url.username || url.password || url.port) return "";
-    const result = await network(url, { redirect: "error", signal: AbortSignal.timeout(4000) });
-    const mime = result.headers.get("content-type")?.split(";")[0];
-    if (!result.ok || !mime || !["image/png", "image/jpeg", "image/webp"].includes(mime)) {
-      await result.body?.cancel();
-      return "";
-    }
-    const reader = result.body?.getReader();
-    if (!reader) return "";
-    const data = new Uint8Array(65_536);
-    let offset = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (offset + value.byteLength > data.byteLength) return "";
-        data.set(value, offset);
-        offset += value.byteLength;
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
-    return offset ? "data:" + mime + ";base64," + btoa(String.fromCharCode(...data.subarray(0, offset))) : "";
-  } catch { return ""; }
+type EmailUser = {
+  id?: string; email?: string; email_confirmed_at?: string; user_metadata?: { name?: string };
+};
+
+function checkedEmail(raw: unknown): string {
+  if (typeof raw !== "string" || raw.length > 254 || !EMAIL.test(raw.trim())) throw new Failure("invalid_email", 400);
+  return raw.trim().toLowerCase();
+}
+
+function checkedPassword(raw: unknown, fresh: boolean): string {
+  if (typeof raw !== "string" || raw.length < (fresh ? 10 : 1) || new TextEncoder().encode(raw).length > 72) {
+    throw new Failure("invalid_password", 400);
+  }
+  return raw;
 }
 
 export function createHandler(env: Env, network: Network = fetch): (request: Request) => Promise<Response> {
@@ -120,6 +114,11 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const publicKey = configuredKey(env, "SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
+  const yandexId = env.YANDEX_CLIENT_ID?.trim() || "";
+  const yandexSecret = env.YANDEX_CLIENT_SECRET?.trim() || "";
+  const yandex = Boolean(publicApi && /^[a-zA-Z0-9_-]{8,128}$/.test(yandexId) && yandexSecret);
+  const yandexRedirect = publicApi + "/functions/v1/cortex" + YANDEX_CALLBACK;
+  const emailReady = Boolean(api && publicKey && env.CORTEX_EMAIL_AUTH === "true");
   const models = [...new Set([
     (env.OPENROUTER_MODEL ?? "google/gemma-4-26b-a4b-it:free").trim(),
     (env.OPENROUTER_FALLBACK_MODEL ?? "nvidia/nemotron-3.5-super-vl:free").trim(),
@@ -130,7 +129,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     fast: ["nvidia/nemotron-3.5-lightning:free", "google/gemma-4-26b-a4b-it:free", "cohere/north-mini-code:free"],
     deep: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "cohere/north-mini-code:free", "nvidia/nemotron-3.5-super-vl:free"],
   };
-  const daily = Math.max(1, Math.min(10_000, Math.floor(Number(env.CORTEX_DAILY_REQUEST_LIMIT) || 1000)));
+  const dayCap = Math.max(1, Math.min(1000, Math.floor(Number(env.CORTEX_DAILY_REQUEST_LIMIT) || 50)));
+  const minuteCap = Math.max(1, Math.min(20, Math.floor(Number(env.CORTEX_MINUTE_REQUEST_LIMIT) || 20)));
   const allow = new Set((env.CORTEX_ALLOWED_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
   const guests = !allow.size && env.CORTEX_GUEST_ACCESS !== "false";
   const allowed = (email: string) => !allow.size || allow.has(email.toLowerCase());
@@ -206,28 +206,86 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     return value;
   }
 
-  async function auth<T>(path: string, payload?: unknown): Promise<T> {
+  async function auth<T>(path: string, payload?: unknown, method = "POST", userToken?: string): Promise<T> {
     if (!api || !publicKey) throw new Failure("account_config", 503);
+    const headers = apiHeaders(publicKey);
+    if (userToken) headers.set("Authorization", "Bearer " + userToken);
     const response = await network(api + "/auth/v1/" + path, {
-      method: payload === undefined ? "GET" : "POST",
-      headers: apiHeaders(publicKey), redirect: "error", signal: AbortSignal.timeout(12_000),
+      method, headers, redirect: "error", signal: AbortSignal.timeout(12_000),
       body: payload === undefined ? undefined : JSON.stringify(payload),
     });
     if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw new Failure("auth_denied", 403);
+      const error = await response.json().catch(() => ({}));
+      if ([429, 503].includes(response.status) || response.status >= 500) throw new Failure("auth_busy", 503);
+      if (error?.code === "email_not_confirmed") throw new Failure("auth_unconfirmed", 403);
+      if (error?.code === "weak_password") throw new Failure("invalid_password", 400);
+      throw new Failure("auth_credentials", 403);
     }
-    return await response.json() as T;
+    return (response.status === 204 ? {} : await response.json()) as T;
   }
 
-  let googleCache = { value: false, until: 0 };
-  async function google(): Promise<boolean> {
-    if (!publicApi || !publicKey) return false;
-    if (googleCache.until > Date.now()) return googleCache.value;
-    let value = false;
-    try { value = (await auth<{ external?: { google?: boolean } }>("settings")).external?.google === true; } catch { /* Provider is unavailable. */ }
-    googleCache = { value, until: Date.now() + 8000 };
-    return value;
+  function emailAccount(user: EmailUser | undefined): Account {
+    if (!user?.id || !USER_ID.test(user.id) || !user.email_confirmed_at || !user.email) {
+      throw new Failure("auth_unconfirmed", 403);
+    }
+    const email = checkedEmail(user.email);
+    if (!allowed(email)) throw new Failure("account_forbidden", 403);
+    return { id: user.id, name: String(user.user_metadata?.name || email.split("@")[0]).slice(0, 100),
+      email, provider: "Email", avatar: "" };
+  }
+
+  async function emailAuth(request: Request, operation: string): Promise<Response> {
+    if (!emailReady || !await ready()) throw new Failure("account_config", 503);
+    if (!await installIdentity(request)) throw new Failure("client_version", 400);
+    const input = await body(request, 4096);
+    const email = checkedEmail(input.email);
+    const sending = operation === "signup" || operation === "recover";
+    await reserve(
+      { bucket: "email:ip:" + await peer(request), seconds: 600, maximum: 30 },
+      { bucket: (sending ? "email:send:" : "email:verify:") + await hash(email), seconds: 900, maximum: sending ? 4 : 10 },
+      { bucket: "email:all", seconds: 60, maximum: 90 },
+    );
+    if (sending) {
+      try {
+        if (operation === "signup") {
+          const result = await auth<{ access_token?: string }>("signup", { email, password: checkedPassword(input.password, true),
+            data: { name: typeof input.name === "string" ? input.name.trim().slice(0, 100) : "" } });
+          if (result.access_token) throw new Failure("account_config", 503);
+        } else await auth("recover", { email });
+      } catch (error) {
+        if (!(error instanceof Failure) || error.code !== "auth_credentials") throw error;
+        // Keep the response identical for registered and unknown addresses.
+      }
+      return json({ state: "check_email" });
+    }
+    let user: EmailUser | undefined;
+    if (operation === "password") {
+      ({ user } = await auth<{ user?: EmailUser }>("token?grant_type=password", { email, password: checkedPassword(input.password, false) }));
+    } else {
+      if (typeof input.code !== "string" || !/^[0-9]{6,10}$/.test(input.code)) throw new Failure("invalid_code", 400);
+      const resetting = operation === "reset";
+      const password = resetting ? checkedPassword(input.password, true) : undefined;
+      const verified = await auth<{ user?: EmailUser; access_token?: string }>("verify",
+        { email, token: input.code, type: resetting ? "recovery" : "email" });
+      user = verified.user;
+      if (resetting) {
+        const account = emailAccount(user);
+        if (!verified.access_token) throw new Failure("auth_credentials", 403);
+        await auth("user", { password }, "PUT", verified.access_token);
+        await database("cortex_sessions?account->>id=eq." + account.id, "DELETE");
+        await auth("logout?scope=global", undefined, "POST", verified.access_token);
+        return json({ state: "password_changed" });
+      }
+    }
+    const account = emailAccount(user);
+    const token = secret();
+    await database("cortex_sessions", "POST", {
+      token_hash: await hash(token), account, expires_at: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+    }, "return=minimal");
+    const previous = bearer(request);
+    if (previous) await database("cortex_sessions?token_hash=eq." + await hash(previous), "DELETE");
+    await claimGuest(request, account);
+    return json({ state: "signed_in", token, account });
   }
 
   const reserve = (...rules: Limit[]) => database("rpc/cortex_reserve", "POST", { p_limits: rules });
@@ -263,76 +321,72 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function ticketOwners(request: Request, account: Account | null): Promise<string[]> {
+    if (account) return ["account_" + await hash(account.id)];
     const install = await installIdentity(request);
-    const owners: string[] = [];
-    if (account) owners.push("account_" + await hash(account.id));
-    if (install) owners.push("install_" + install);
-    return owners;
+    return install ? ["install_" + install] : [];
   }
 
-  async function usage(request: Request, account: Account | null, consume = false): Promise<Quota | null> {
-    const install = await installIdentity(request);
-    const guest = install ? "guest_" + install : null;
-    const id = account?.id ?? (guests ? guest : null);
-    if (!id) return null;
-    const quota = await database<Quota>("rpc/cortex_beta_quota", "POST", {
-      p_id: id,
-      p_guest_id: account ? guest : null,
-      p_guest_owner: account && install ? "install_" + install : null,
-      p_account_owner: account && install ? "account_" + await hash(account.id) : null,
-      p_consume: consume,
-    });
-    if (!quota || quota.id !== id || typeof quota.allowed !== "boolean") throw new Failure("storage_config", 503);
-    return quota;
+  async function subject(request: Request, account: Account | null): Promise<string | null> {
+    if (account) return account.id;
+    const install = guests ? await installIdentity(request) : null;
+    return install ? "guest_" + install : null;
   }
 
-  function exhausted(quota: Quota): Response {
-    const seconds = Math.max(1, Math.ceil((Date.parse(quota.reset_at) - Date.now()) / 1000));
-    return Response.json({ error: "daily_limit", retry_after: seconds, quota }, {
-      status: 429, headers: { ...JSON_HEADERS, "Retry-After": String(seconds) },
-    });
+  async function usage(request: Request, account: Account | null): Promise<Quota | null> {
+    const id = await subject(request, account);
+    return id ? await database<Quota>("rpc/cortex_ai_usage", "POST", { p_subject: id }) : null;
+  }
+
+  async function claimGuest(request: Request, account: Account) {
+    const install = await installIdentity(request);
+    if (install) await database("rpc/cortex_claim_guest", "POST", { p_install: install,
+      p_owner: "account_" + await hash(account.id), p_subject: account.id });
   }
 
   function budget(caller: Awaited<ReturnType<typeof actor>>): Promise<unknown> {
     return reserve(
       { bucket: "chat:" + caller.bucket, seconds: 60, maximum: caller.account ? 16 : 12 },
-      { bucket: "chat:all", seconds: 86_400, maximum: daily },
-      ...(caller.account ? [] : [
-        { bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 },
-        { bucket: "chat:guest-all", seconds: 86_400, maximum: Math.min(daily, 900) },
-      ]),
+      ...(caller.account ? [] : [{ bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 }]),
     );
+  }
+
+  let aiSettings: { until: number; value: Promise<string> } | undefined;
+  function configuredModel() {
+    if (aiSettings && aiSettings.until > Date.now()) return aiSettings.value;
+    const value = database<Array<{ model?: string }>>("cortex_ai_settings?select=model&singleton=eq.true&limit=1")
+      .then(rows => rows[0]?.model || "");
+    aiSettings = { value, until: Date.now() + 5000 };
+    void value.catch(() => { if (aiSettings?.value === value) aiSettings = undefined; });
+    return value;
   }
 
   async function begin(request: Request, android: boolean, scheme: string | null): Promise<Response> {
     const preview = scheme && PREVIEW_SCHEME.exec(scheme)?.[1];
     if (scheme && (!android || (scheme !== ANDROID_SCHEME && !preview))) throw new Failure("invalid", 400);
     if (!await ready()) throw new Failure("storage_config", 503);
-    if (!await google()) throw new Failure("account_config", 503);
+    if (!yandex) throw new Failure("account_config", 503);
     await reserve(
       { bucket: "login:" + await peer(request), seconds: 300, maximum: 10 },
       { bucket: "login:all", seconds: 60, maximum: 90 },
     );
-    const state = secret(), poll = secret(), verifier = secret();
+    const state = (android ? "android-" + (preview ? preview + "-" : "") : "") + secret();
+    const poll = secret(), verifier = secret();
     await database("rpc/cortex_begin_login", "POST", {
       p_state_hash: await hash(state), p_poll_hash: await hash(poll), p_verifier: verifier,
     });
-    const url = new URL(publicApi + "/auth/v1/authorize");
+    const url = new URL("https://oauth.yandex.ru/authorize");
     url.search = new URLSearchParams({
-      provider: "google",
-      redirect_to: publicApi + "/functions/v1/cortex/v1/auth/callback/" +
-        (android ? "android-" + (preview ? preview + "-" : "") : "") + state,
-      code_challenge: await hash(verifier),
-      code_challenge_method: "s256",
-      prompt: "select_account",
+      client_id: yandexId, response_type: "code", redirect_uri: yandexRedirect, state,
+      code_challenge: await hash(verifier), code_challenge_method: "S256",
+      scope: "login:email login:info",
     }).toString();
     return json({ url: url.toString(), poll, expires_in: 300 });
   }
 
-  async function callback(path: string, code: string): Promise<Response> {
-    const { scheme, state } = androidReturn(path);
-    if (!CAPABILITY.test(state)) return browserResult(false, scheme);
-    const filter = "cortex_auth_flows?state_hash=eq." + await hash(state) + "&expires_at=gt." + expires();
+  async function callback(rawState: string, code: string): Promise<Response> {
+    const { scheme, state } = androidReturn(rawState);
+    if (!yandex || !CAPABILITY.test(state)) return browserResult(false, scheme);
+    const filter = "cortex_auth_flows?state_hash=eq." + await hash(rawState) + "&expires_at=gt." + expires();
     const claims = await database<Array<{ verifier: string }>>(
       filter + "&stage=eq.pending", "PATCH", { stage: "exchanging" }, "return=representation",
     );
@@ -340,32 +394,33 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (!claim) return browserResult(false, scheme);
     let stage = "denied";
     let account: Account | null = null;
-    if (code && code.length <= 2048) {
+    if (code && code.length <= 2048 && CAPABILITY.test(claim.verifier)) {
       try {
-        const { user } = await auth<{ user?: {
-          id?: string; email?: string; email_confirmed_at?: string;
-          app_metadata?: { provider?: string };
-          identities?: Array<{ provider?: string; identity_data?: { email?: string } }>;
-          user_metadata?: { full_name?: string; name?: string; avatar_url?: string; picture?: string };
-        } }>("token?grant_type=pkce", { auth_code: code, code_verifier: claim.verifier });
-        const email = user?.email;
-        const googleIdentity = user?.app_metadata?.provider === "google" ||
-          user?.identities?.some(identity => identity.provider === "google" &&
-            identity.identity_data?.email?.toLowerCase() === email?.toLowerCase());
-        if (typeof user?.id === "string" && user.id && typeof email === "string" && email &&
-          typeof user.email_confirmed_at === "string" && googleIdentity) {
-          if (!allowed(email)) stage = "forbidden";
-          else {
-            const info = user.user_metadata || {};
-            account = {
-              id: user.id.slice(0, 200), email: email.slice(0, 254), provider: "Google",
-              name: String(info.full_name || info.name || email.split("@")[0]).slice(0, 100),
-              avatar: await picture(network, info.avatar_url || info.picture),
-            };
-            stage = "approved";
-          }
+        const response = await network("https://oauth.yandex.ru/token", {
+          method: "POST", redirect: "error", signal: AbortSignal.timeout(9_000),
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "authorization_code", code, code_verifier: claim.verifier,
+            client_id: yandexId, client_secret: yandexSecret }),
+        });
+        if (!response.ok) { await response.body?.cancel(); throw new Failure("auth_denied", 403); }
+        const token = (await response.json()).access_token;
+        if (typeof token !== "string" || !/^[a-zA-Z0-9._~-]{12,2048}$/.test(token)) throw new Failure("auth_denied", 403);
+        const identity = await network("https://login.yandex.ru/info?format=json", {
+          redirect: "error", signal: AbortSignal.timeout(9_000), headers: { Authorization: "OAuth " + token },
+        });
+        if (!identity.ok) { await identity.body?.cancel(); throw new Failure("auth_denied", 403); }
+        const profile = await identity.json();
+        if (profile.client_id !== yandexId || typeof profile.id !== "string" || !/^\d{1,30}$/.test(profile.id)) {
+          throw new Failure("auth_denied", 403);
         }
-      } catch { /* The application receives a clean sign-in error. */ }
+        const email = checkedEmail(profile.default_email);
+        if (!allowed(email)) stage = "forbidden";
+        else {
+          account = { id: "yandex_" + await hash("yandex:" + profile.id), email, provider: "Yandex",
+            name: String(profile.display_name || profile.real_name || profile.login || email.split("@")[0]).slice(0, 100), avatar: "" };
+          stage = "approved";
+        }
+      } catch { /* The phone receives a bounded authentication error. */ }
     }
     const saved = await database<Array<unknown>>(
       filter + "&stage=eq.exchanging", "PATCH", { stage, account, verifier: "" }, "return=representation",
@@ -387,32 +442,33 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (result.state === "expired") throw new Failure("auth_expired", 410);
     if (result.state === "denied") throw new Failure("auth_denied", 403);
     if (result.state === "forbidden") throw new Failure("account_forbidden", 403);
-    return result.state === "signed_in" ? json({ ...result, token }) : json({ state: "pending" });
+    if (result.state !== "signed_in" || !result.account) return json({ state: "pending" });
+    await claimGuest(request, result.account);
+    return json({ ...result, token });
   }
 
   return async request => {
     const url = new URL(request.url);
     const path = url.pathname.replace(/^(?:\/functions\/v1)?\/cortex(?=\/)/, "");
     const method = request.method;
-    const callbackPath = "/v1/auth/callback/";
-    const isCallback = method === "GET" && path.startsWith(callbackPath);
+    const isCallback = method === "GET" && path === YANDEX_CALLBACK;
     try {
       if (method === "GET" && path === "/v1/status") {
         const storage = await ready();
-        const [account, googleReady, key] = storage
-          ? await Promise.all([lookup(request), google(), providerKey().catch(() => "")])
-          : [null, false, ""];
+        const [account, key] = storage
+          ? await Promise.all([lookup(request), providerKey().catch(() => "")])
+          : [null, ""];
         const quota = storage ? await usage(request, account).catch(() => null) : null;
         return json({
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
-          google: googleReady, account, guest: guests, support: storage, device_tools: true,
+          yandex, email_auth: emailReady, account, guest: guests, support: storage, device_tools: true,
           device_profiles: true, device_repair: true, device_action_plan: true, model_fallback: true,
           ...(storage ? { gate: await control.gate(request, account?.id), quota } : { fault: "storage_config" }),
         });
       }
       if (method === "GET" && path === "/v1/support/inbox") {
-        const account = await lookup(request);
-        if (account) await usage(request, account);
+        const { account } = await actor(request);
+        if (account) await claimGuest(request, account);
         return json(await control.inbox(await ticketOwners(request, account)));
       }
       if (method === "POST" && path === "/v1/presence") {
@@ -428,7 +484,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       if (method === "POST" && path === "/v1/auth/start") {
         return await begin(request, url.searchParams.get("return") === "android", url.searchParams.get("scheme"));
       }
-      if (isCallback) return await callback(path.slice(callbackPath.length), url.searchParams.get("code") || "");
+      if (isCallback) return await callback(url.searchParams.get("state") || "", url.searchParams.get("code") || "");
+      const emailRoute = /^\/v1\/auth\/(signup|password|verify|recover|reset)$/.exec(path);
+      if (method === "POST" && emailRoute) return await emailAuth(request, emailRoute[1]);
       if (method === "POST" && path === "/v1/auth/poll") return await poll(request);
       if (method === "DELETE" && path === "/v1/session") {
         const token = bearer(request);
@@ -443,21 +501,46 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const gate = await control.gate(request, caller.account?.id);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
-        const snapshot = await usage(request, caller.account);
-        if (!snapshot) throw new Failure("sign_in", 401);
-        if (!snapshot.allowed) return exhausted(snapshot);
-        const key = await providerKey().catch(() => "");
+        const id = await subject(request, caller.account);
+        if (!id) throw new Failure("sign_in", 401);
+        const [key, modelOverride] = await Promise.all([providerKey().catch(() => ""), configuredModel()]);
         if (!key) throw new Failure("unconfigured", 503);
         if (quotaBlock?.key === key && quotaBlock.until > Date.now()) {
           const { failure, until } = quotaBlock;
           throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
         }
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
-        const candidates = [...new Set([...preferred, ...models])];
+        const candidates = [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
         await budget(caller);
-        const quota = await usage(request, caller.account, true);
-        if (!quota) throw new Failure("sign_in", 401);
-        if (!quota.allowed) return exhausted(quota);
+        let quota: Quota | undefined;
+        const hold = async (estimatedInput: number, output: number) => {
+          const result = await database<{ attempt?: string; max_output?: number; quota: Quota; error?: string; retry_after?: number }>(
+            "rpc/cortex_ai_reserve", "POST", { p_subject: id, p_input: estimatedInput,
+              p_output: output, p_day_cap: dayCap, p_minute_cap: minuteCap });
+          if (!result?.quota || result.quota.id !== id || result.quota.unit !== "tokens") {
+            throw new Failure("storage_config", 503);
+          }
+          quota = result.quota;
+          if (result.error) {
+            const reset = Math.max(1, Math.ceil((Date.parse(quota.reset_at) - Date.now()) / 1000));
+            throw new BudgetFailure(result.error, result.retry_after || (result.error === "daily_limit" ? reset : 0), quota);
+          }
+          if (!result.attempt || !result.max_output) throw new Failure("storage_config", 503);
+          return {
+            maxOutput: result.max_output,
+            async finish(usage: { input: number; output: number } | null) {
+              const payload = { p_attempt: result.attempt, p_input: usage?.input ?? null, p_output: usage?.output ?? null };
+              for (let retry = 0; retry < 2; retry++) {
+                try {
+                  return await database<Record<string, unknown>>("rpc/cortex_ai_finish", "POST", payload);
+                } catch {
+                  if (retry === 1) console.warn("CORTEX could not record model usage");
+                }
+              }
+              return null;
+            },
+          };
+        };
         const upstream = new AbortController();
         const quick = input.profile === "fast";
         const firstTokenMs = input.profile === "deep" ? 18_000 : quick ? 9_000 : 12_000;
@@ -466,6 +549,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
         const ordered = ready.length ? ready : choices.slice(0, 1);
+        const maxAttempts = 3;
         let catalogChecked = false;
         const restModel = (model: string, failure: Failure) => {
           if (!["timeout", "provider_limit", "provider_quota", "provider_quota_daily", "provider", "empty", "model", "provider_key", "provider_access"].includes(failure.code)) return;
@@ -488,7 +572,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           let failure = previous && await examine(previous);
           if (failure && !canTryNext(failure)) throw failure;
           if (failure && lastModel) restModel(lastModel, failure);
-          while (!signal.aborted) {
+          while (!signal.aborted && next < maxAttempts) {
             if (next >= ordered.length) {
               if (catalogChecked) break;
               catalogChecked = true;
@@ -505,7 +589,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
               }
               const result = await completion(network, key, [model], [...input.messages], isChat, input.limit, signal,
-                input.device, input.repair, firstTokenMs, quick, input.plan);
+                input.device, input.repair, firstTokenMs, quick, input.plan, hold);
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {
@@ -523,7 +607,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (!response) throw new Failure("model", 502);
         if (!isChat) {
           while (response) {
-            try { await verifyCompletion(response); return json({ connected: true, quota }); }
+            try { return json({ connected: true, quota: await verifyCompletion(response) ?? quota }); }
             catch (error) {
               if (!(error instanceof Failure)) throw error;
               response = await getResponse(error);
@@ -533,7 +617,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         }
         return new Response(relay(response, getResponse, input.device, input.repair, next > 1, () => upstream.abort(), input.plan), {
           headers: { ...JSON_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no",
-            "X-Cortex-Quota": JSON.stringify(quota) },
+            "X-Cortex-Quota": JSON.stringify(quota || {}) },
         });
       }
       if (method === "POST" && path === "/v1/support") {
@@ -555,7 +639,12 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       }
       return json({ error: "endpoint" }, 404);
     } catch (error) {
-      if (isCallback) return browserResult(false, androidReturn(path.slice(callbackPath.length)).scheme);
+      if (isCallback) return browserResult(false, androidReturn(url.searchParams.get("state") || "").scheme);
+      if (error instanceof BudgetFailure) {
+        return Response.json({ ...failureBody(error), quota: error.quota }, {
+          status: error.status, headers: { ...JSON_HEADERS, "Retry-After": String(error.retryAfter || 1) },
+        });
+      }
       if (error instanceof Failure) return json(failureBody(error), error.status);
       if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return json({ error: "timeout" }, 504);
       console.warn("CORTEX gateway request failed");

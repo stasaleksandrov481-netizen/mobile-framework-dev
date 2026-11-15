@@ -9,26 +9,40 @@ const accountId = "98d87a12-240b-4a57-95e0-7bc0bbbd0f42";
 const ticketId = "2f343286-09bb-4e8e-9aa3-21ecc664219b";
 const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
-function fixture(maintenance = false, streamedReply?: () => Response, remaining = 80) {
+function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
   const requests: string[] = [];
   const usage = new Map<string, number>();
+  const attempts = new Map<string, string>();
+  let approvedAccount: Record<string, unknown> | undefined;
+  let exchangeClaimed = false;
+  const sampleUser = { id: accountId, email: "admin@example.test", email_confirmed_at: "2026-11-13T12:00:00.000Z" };
+  const quota = (id: string) => {
+    const used = usage.get(id) ?? 15000 - remaining;
+    return { id, used, unit: "tokens", allowed: used < 15000, remaining: Math.max(0, 15000 - used),
+      limit: 15000, reset_at: new Date(Date.now() + 3600000).toISOString(), history: [] };
+  };
   const app = createHandler({
     SUPABASE_URL: "https://examplecortex.supabase.co",
     SUPABASE_ANON_KEY: "test-publishable",
     SUPABASE_SERVICE_ROLE_KEY: "test-service",
     OPENROUTER_API_KEY: "test-key",
+    YANDEX_CLIENT_ID: "yandex-test-app",
+    YANDEX_CLIENT_SECRET: "yandex-test-secret",
+    CORTEX_EMAIL_AUTH: "true",
     OPENROUTER_MODEL: "example/unavailable:free",
     OPENROUTER_FALLBACK_MODEL: "example/working:free",
   }, async (input, init) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
     const method = init?.method ?? "GET";
-    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    const body = init?.body instanceof URLSearchParams ? Object.fromEntries(init.body) :
+      init?.body ? JSON.parse(String(init.body)) : {};
     requests.push(method + " " + url.pathname);
 
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
+      assert.equal(body.usage.include, true);
       assert.equal(body.provider.max_price.prompt, 0);
       assert.equal(body.provider.max_price.completion, 0);
       assert.match(body.model, /:free$/);
@@ -38,10 +52,21 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       }
       if (body.stream) {
         if (streamedReply) return streamedReply();
-        return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n',
+        return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"prompt_tokens":82,"completion_tokens":18}}\n\ndata: [DONE]\n\n',
           { headers: { "content-type": "text/event-stream" } });
       }
-      return Response.json({ choices: [{ message: { content: "OK" } }] });
+      return Response.json({ choices: [{ message: { content: "OK" } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
+    }
+    if (url.hostname === "oauth.yandex.ru" && url.pathname === "/token") {
+      assert.equal(body.grant_type, "authorization_code");
+      assert.equal(body.code_verifier, login?.p_verifier);
+      assert.equal(body.code, "test-yandex-code");
+      assert.equal(body.client_secret, "yandex-test-secret");
+      return Response.json({ access_token: "example-yandex-access-token" });
+    }
+    if (url.hostname === "login.yandex.ru" && url.pathname === "/info") {
+      assert.equal(new Headers(init?.headers).get("Authorization"), "OAuth example-yandex-access-token");
+      return Response.json({ id: "123456789", client_id: "yandex-test-app", default_email: "qa@example.test", display_name: "QA" });
     }
     switch (url.pathname) {
       case "/rest/v1/cortex_control_config":
@@ -52,33 +77,58 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         ] : []);
       case "/rest/v1/cortex_release_versions": return Response.json([]);
       case "/rest/v1/cortex_admin_roles": return Response.json([{ role: "admin" }]);
-      case "/auth/v1/settings": return Response.json({ external: { google: true } });
+
+      case "/rest/v1/cortex_ai_settings": return Response.json([{ model: null }]);
+      case "/rest/v1/rpc/cortex_claim_guest": return Response.json(true);
+      case "/auth/v1/signup":
+      case "/auth/v1/recover": return Response.json({ user: { id: accountId } });
+      case "/auth/v1/verify":
+        if (body.token !== "123456") return Response.json({ code: "otp_expired" }, { status: 403 });
+        return Response.json({ user: sampleUser, access_token: "supabase-test-access" });
+      case "/auth/v1/user":
+        assert.equal(method, "PUT");
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer supabase-test-access");
+        return Response.json(sampleUser);
+      case "/auth/v1/logout": return new Response(null, { status: 204 });
       case "/rest/v1/rpc/cortex_begin_login":
         login = body;
+        exchangeClaimed = false;
         return Response.json(null);
       case "/rest/v1/cortex_auth_flows":
         assert.ok(login);
         assert.equal(url.searchParams.get("state_hash"), "eq." + login.p_state_hash);
-        return Response.json(body.stage === "exchanging" ? [{ verifier: login.p_verifier }] : [{ stage: body.stage }]);
+        if (body.stage === "exchanging") {
+          if (exchangeClaimed) return Response.json([]);
+          exchangeClaimed = true;
+          return Response.json([{ verifier: login.p_verifier }]);
+        }
+        approvedAccount = body.account;
+        return Response.json([{ stage: body.stage }]);
+      case "/rest/v1/rpc/cortex_finish_login":
+        return Response.json(approvedAccount ? { state: "signed_in", account: approvedAccount } : { state: "pending" });
       case "/auth/v1/token":
-        assert.equal(url.searchParams.get("grant_type"), "pkce");
-        assert.equal(body.code_verifier, login?.p_verifier);
-        assert.equal(body.auth_code, "test-google-code");
-        return Response.json({ user: { id: accountId, email: "admin@example.test",
-          email_confirmed_at: "2026-11-13T12:00:00.000Z", app_metadata: { provider: "google" } } });
+        assert.equal(url.searchParams.get("grant_type"), "password");
+        if (body.password === "unverified") return Response.json({ code: "email_not_confirmed" }, { status: 403 });
+        return Response.json({ user: sampleUser });
       case "/rest/v1/rpc/cortex_reserve":
       case "/rest/v1/cortex_installs":
       case "/rest/v1/cortex_app_sessions": return Response.json(null);
-      case "/rest/v1/rpc/cortex_beta_quota": {
-        const id = String(body.p_id);
-        let used = usage.get(id) ?? 80 - remaining;
-        const allowed = used < 80;
-        if (allowed && body.p_consume) {
-          used++;
-          usage.set(id, used);
-        }
-        return Response.json({ id, used, allowed, remaining: 80 - used, limit: 80,
-          time_zone: "Europe/Moscow", reset_at: new Date(Date.now() + 3600000).toISOString() });
+      case "/rest/v1/rpc/cortex_ai_usage": return Response.json(quota(body.p_subject));
+      case "/rest/v1/rpc/cortex_ai_reserve": {
+        const id = String(body.p_subject);
+        const snapshot = quota(id);
+        assert.equal(body.p_day_cap, 50);
+        assert.equal(body.p_minute_cap, 20);
+        if (attempts.size >= globalLimit) return Response.json({ quota: snapshot, error: "provider_quota_daily", retry_after: 111 });
+        if (!snapshot.allowed) return Response.json({ quota: snapshot, error: "daily_limit" });
+        const attempt = crypto.randomUUID();
+        attempts.set(attempt, id);
+        return Response.json({ quota: snapshot, attempt, max_output: body.p_output });
+      }
+      case "/rest/v1/rpc/cortex_ai_finish": {
+        const id = attempts.get(body.p_attempt)!;
+        if (body.p_input !== null) usage.set(id, quota(id).used + body.p_input + body.p_output);
+        return Response.json(body.p_input === null ? null : quota(id));
       }
       case "/rest/v1/cortex_support":
         if (method === "POST") {
@@ -107,7 +157,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
 }
 
 test("uses a stable guest ID and rejects the next AI call at the daily limit", async () => {
-  const { call, models } = fixture(false, undefined, 1);
+  const { call, models } = fixture(false, undefined, 100);
   const read = async (headers: Record<string, string> = {}) => (await (await call("status", undefined, headers)).json()).quota;
   const before = await read();
   assert.match(before.id, /^guest_[A-Za-z0-9_-]{43}$/);
@@ -123,36 +173,71 @@ test("uses a stable guest ID and rejects the next AI call at the daily limit", a
   assert.equal(models.length, attempts);
 });
 
-test("Android Google callback uses PKCE and returns to the app without a bearer token in the URL", async () => {
+test("Android Yandex callback uses PKCE and does not put a bearer token in the redirect", async () => {
   const { call } = fixture();
   const start = await call("auth/start?return=android", {});
   assert.equal(start.status, 200);
   const { url, poll } = await start.json();
   assert.match(poll, /^[A-Za-z0-9_-]{43}$/);
   const authorize = new URL(url);
-  assert.equal(authorize.searchParams.get("provider"), "google");
-  assert.equal(authorize.searchParams.get("code_challenge_method"), "s256");
-  const callback = new URL(String(authorize.searchParams.get("redirect_to")));
+  assert.equal(authorize.origin, "https://oauth.yandex.ru");
+  assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
+  const callback = new URL(String(authorize.searchParams.get("redirect_uri")));
   assert.equal(callback.protocol, "https:");
-  assert.match(callback.pathname, /\/auth\/callback\/android-[A-Za-z0-9_-]{43}$/);
-  const returned = await call("auth/callback/" + callback.pathname.split("/").at(-1) + "?code=test-google-code");
+  assert.match(callback.pathname, /\/auth\/callback\/yandex$/);
+  const state = authorize.searchParams.get("state");
+  const returned = await call("auth/callback/yandex?state=" + state + "&code=test-yandex-code");
   assert.equal(returned.status, 303);
   assert.equal(returned.headers.get("location"), "app.cortex.assistant://oauth/return");
   assert.match(await returned.text(), /Вход выполнен/);
+  const repeated = await call("auth/callback/yandex?state=" + state + "&code=test-yandex-code");
+  assert.match(await repeated.text(), /Вход не завершён/);
+  const signedIn = await (await call("auth/poll", { code: poll })).json();
+  assert.equal(signedIn.account.provider, "Yandex");
+  assert.match(signedIn.account.id, /^yandex_[A-Za-z0-9_-]{43}$/);
+  assert.match(signedIn.token, /^[A-Za-z0-9_-]{43}$/);
 });
 
-test("Google callback routes to the requesting preview and rejects arbitrary schemes", async () => {
+test("Yandex callback routes to the requesting preview and rejects arbitrary schemes", async () => {
   const { call } = fixture();
   assert.equal((await call("auth/start?return=android&scheme=another.app", {})).status, 400);
   const scheme = "app.cortex.assistant.preview.v103";
   const start = await call("auth/start?return=android&scheme=" + scheme, {});
   assert.equal(start.status, 200);
   const authorize = new URL((await start.json()).url);
-  const callback = new URL(String(authorize.searchParams.get("redirect_to")));
-  const path = callback.pathname.split("/").at(-1);
-  assert.match(path ?? "", /^android-v103-[A-Za-z0-9_-]{43}$/);
-  const returned = await call("auth/callback/" + path + "?code=test-google-code");
+  const state = authorize.searchParams.get("state");
+  assert.match(state ?? "", /^android-v103-[A-Za-z0-9_-]{43}$/);
+  const returned = await call("auth/callback/yandex?state=" + state + "&code=test-yandex-code");
   assert.equal(returned.headers.get("location"), scheme + "://oauth/return");
+});
+
+test("email signup and password reset verify the code before issuing or revoking sessions", async () => {
+  const { call, requests } = fixture();
+  const email = "admin@example.test";
+  const password = "long QA password 2026";
+  const signup = await call("auth/signup", { email, password });
+  assert.deepEqual(await signup.json(), { state: "check_email" });
+  const denied = await call("auth/password", { email, password: "unverified" });
+  assert.equal((await denied.json()).error, "auth_unconfirmed");
+  const wrongCode = await call("auth/verify", { email, code: "000000" });
+  assert.equal(wrongCode.status, 403);
+  const accepted = await (await call("auth/verify", { email, code: "123456" })).json();
+  assert.equal(accepted.account.provider, "Email");
+  assert.equal(accepted.account.id, accountId);
+  assert.match(accepted.token, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal((await call("auth/recover", { email })).status, 200);
+  const reset = await (await call("auth/reset", { email, code: "123456", password })).json();
+  assert.deepEqual(reset, { state: "password_changed" });
+  assert.ok(requests.includes("DELETE /rest/v1/cortex_sessions"));
+  assert.ok(requests.includes("POST /auth/v1/logout"));
+});
+
+test("global free provider budget includes model retries", async () => {
+  const { call, models } = fixture(false, undefined, 15000, 1);
+  const response = await call("check", {});
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error, "provider_quota_daily");
+  assert.deepEqual(models, ["example/unavailable:free"]);
 });
 
 test("retries a rate-limited provider with a different :free model", async () => {
@@ -161,7 +246,7 @@ test("retries a rate-limited provider with a different :free model", async () =>
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.equal(result.connected, true);
-  assert.equal(result.quota.used, 1);
+  assert.equal(result.quota.used, 100);
   assert.deepEqual(models, ["example/unavailable:free", "example/working:free"]);
 });
 
@@ -228,7 +313,10 @@ test("ordinary chat completes with device tools enabled", async () => {
   const { call } = fixture();
   const response = await call("chat", chatPayload("Привет"));
   assert.equal(response.status, 200);
-  assert.match(await response.text(), /data: {"delta":"OK"}\n\ndata: \[DONE\]\n\n$/);
+  const received = await response.text();
+  assert.match(received, /data: {"delta":"OK"}/);
+  assert.match(received, /"unit":"tokens","allowed":true,"remaining":14900/);
+  assert.match(received, /data: \[DONE\]\n\n$/);
 });
 
 test("streams a validated Android tool call and closes before waiting for upstream cleanup", { timeout: 2000 }, async () => {

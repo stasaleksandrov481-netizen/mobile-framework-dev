@@ -135,8 +135,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         mode = preferences.getString("mode", "off") ?: "off"
         val appearance = IslandAppearance.read(preferences)
         if (style != appearance) {
+            if (style.size != appearance.size || style.offsetX != appearance.offsetX ||
+                style.offsetY != appearance.offsetY || style.face != appearance.face) placement = null
             style = appearance
-            placement = null
         }
         if (mode != "off" && intent?.getBooleanExtra(EXTRA_RESUME, false) == true) {
             if (hiddenByVoice && exiting) {

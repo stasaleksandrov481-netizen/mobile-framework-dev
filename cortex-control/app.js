@@ -54,12 +54,15 @@ function signIn() {
   showAuth("Вход в панель", form("signin",
     field("email", "Email", "email", "", 'autocomplete="username" required') +
     field("password", "Пароль", "password", "", 'autocomplete="current-password" required'), "Войти") +
-    '<div class="actions"><span data-google-login></span>' + button("Создать аккаунт", "signup") + '</div>');
-  const entry = document.querySelector("[data-google-login]");
-  fetch(projectUrl + "/auth/v1/settings", { headers: { apikey: publishableKey }, signal: AbortSignal.timeout(5000) })
-    .then(response => response.ok ? response.json() : null).then(settings => {
-      if (entry.isConnected && settings?.external?.google) entry.innerHTML = button("Войти через Google", "google");
-    }).catch(() => {});
+    '<div class="actions">' + button("Забыли пароль?", "recover") + button("Создать аккаунт", "signup") + '</div>');
+}
+
+function recover(email) {
+  const address = field("email", "Почта", "email", email || "", 'autocomplete="email" required');
+  showAuth(email ? "Новый пароль" : "Восстановление доступа", email ?
+    form("reset-password", address + field("code", "Код из письма", "text", "", 'inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required') +
+      field("password", "Новый пароль", "password", "", 'minlength="10" maxlength="72" autocomplete="new-password" required'),
+      "Изменить пароль") : form("send-recovery", address, "Отправить код"));
 }
 
 function signUp() {
@@ -241,27 +244,34 @@ async function audit() {
 }
 
 async function quotas() {
+  const config = data(await db.rpc("cortex_admin_ai", { p_operation: "config" }));
+  const budget = card("Общий бюджет ИИ", form("ai-config",
+    field("limit", "Токенов в сутки на пользователя", "number", config.daily_tokens, 'min="0" max="1000000" required') +
+    field("day", "Запросов OpenRouter в сутки", "number", config.requests_day, 'min="1" max="1000" placeholder="Лимит сервера"') +
+    field("minute", "Запросов OpenRouter в минуту", "number", config.requests_minute, 'min="1" max="20" placeholder="Лимит сервера"') +
+    field("model", "Основная бесплатная модель", "text", config.model, 'maxlength="120" placeholder="provider/model:free"') +
+    '<p>Лимиты запросов ограничены параметрами аккаунта OpenRouter, указанными на сервере.</p>', "Сохранить"));
   const search = form("quota-search", field("id", "ID профиля или гостя", "text", quotaId,
-    'maxlength="49" required autocomplete="off"'), "Найти");
-  if (!quotaId) return card("Поиск по ID", search);
-  const quota = data(await db.rpc("cortex_admin_beta_quota", { p_id: quotaId }));
-  if (!quota) return card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
+    'maxlength="50" required autocomplete="off"'), "Найти");
+  if (!quotaId) return budget + card("Поиск по ID", search);
+  const quota = data(await db.rpc("cortex_admin_ai", { p_subject: quotaId }));
+  if (!quota) return budget + card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
   const summary = "<p>" + escape(quota.id) + "</p><p>Использовано " + dateNumber(quota.used) +
-    " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + "</p>" +
+    " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + " токенов</p>" +
     "<p>Сброс в 03:00 по Москве.</p>";
-  return card("Поиск по ID", search) + card("Суточный лимит", summary +
-    form("quota-limit", field("limit", "Запросов в сутки", "number", quota.limit, 'min="0" max="10000" required'),
+  return budget + card("Поиск по ID", search) + card("Суточный лимит", summary +
+    form("quota-limit", field("limit", "Токенов в сутки", "number", quota.limit, 'min="0" max="1000000" required'),
       "Установить лимит") +
     '<div class="actions">' + button("Сбросить счётчик", "quota-change", "reset") +
     button("Обнулить лимит", "quota-change", "zero") +
     button("Дать безлимит", "quota-change", "unlimited") +
-    button("Вернуть 80", "quota-change", "revoke") + "</div>");
+    button("Вернуть общий лимит", "quota-change", "revoke") + "</div>");
 }
 
 async function updateQuota(operation, limit) {
   if (!quotaId || !["owner", "admin"].includes(role)) return;
-  const quota = data(await db.rpc("cortex_admin_beta_quota", {
-    p_id: quotaId, p_operation: operation, p_limit: limit ?? null
+  const quota = data(await db.rpc("cortex_admin_ai", {
+    p_subject: quotaId, p_operation: operation, p_limit: limit ?? null
   }));
   if (!quota) throw new Error("Запись с этим ID больше недоступна.");
   flash("Лимит обновлён.");
@@ -284,7 +294,7 @@ app.addEventListener("click", async event => {
     switch (action) {
       case "signin": signIn(); break;
       case "signup": signUp(); break;
-      case "google": data(await db.auth.signInWithOAuth({ provider: "google", options: { redirectTo } })); break;
+      case "recover": recover(""); break;
       case "logout": data(await db.auth.signOut()); await initialize(); break;
       case "refresh-auth": await initialize(); break;
       case "enroll": {
@@ -338,6 +348,18 @@ app.addEventListener("submit", async event => {
         data(await db.auth.signInWithPassword({ email: read("email"), password: String(formData.get("password")) }));
         await initialize();
         return;
+      case "send-recovery":
+        data(await db.auth.resetPasswordForEmail(read("email"), { redirectTo }));
+        recover(read("email"));
+        flash("Если эта почта зарегистрирована, на неё придёт код.");
+        return;
+      case "reset-password":
+        data(await db.auth.verifyOtp({ email: read("email"), token: read("code"), type: "recovery" }));
+        data(await db.auth.updateUser({ password: String(formData.get("password")) }));
+        data(await db.auth.signOut({ scope: "global" }));
+        signIn();
+        flash("Пароль изменён.");
+        return;
       case "signup": {
         const result = data(await db.auth.signUp({ email: read("email"), password: String(formData.get("password")), options: { emailRedirectTo: redirectTo } }));
         if (result.session) await initialize();
@@ -390,6 +412,11 @@ app.addEventListener("submit", async event => {
         break;
       case "role":
         data(await db.rpc("cortex_set_admin_role", { p_email: read("email"), p_role: read("role") }));
+        break;
+      case "ai-config":
+        data(await db.rpc("cortex_admin_ai", { p_operation: "configure", p_limit: Number(read("limit")),
+          p_day: read("day") ? Number(read("day")) : null, p_minute: read("minute") ? Number(read("minute")) : null,
+          p_model: read("model") || null }));
         break;
       case "quota-search":
         quotaId = read("id");

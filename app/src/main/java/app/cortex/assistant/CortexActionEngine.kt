@@ -150,6 +150,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 result = Result("Не удалось получить подтверждение Android.", false, preserve)
             } finally {
                 if (!result.ok) service?.stopTouch()
+                task.recognized = null
                 if (preserve) {
                     task.inFlight?.let { interrupted ->
                         task.deferred = if (task.local) {
@@ -264,15 +265,12 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     private fun parseSystem(command: String): List<JSONObject>? {
         val visual = preferences.getBoolean("visualLaunch", false)
-        return CortexLocalCommands.parse(command) { name ->
-            if (visual || CortexScreenService.connected != null) null else phone.resolveApp(name)?.pkg
-        }?.takeIf { steps ->
+        val visualAvailable = visual && CortexScreenService.connected != null
+        return CortexLocalCommands.parse(command) { name -> phone.resolveApp(name)?.pkg }?.takeIf { steps ->
             steps.all { step ->
                 when (step.optString("kind")) {
-                    "read_device", "volume", "recents", "play_store" -> true
-                    "torch" -> !visual || CortexScreenService.connected == null
-                    "settings" -> !visual && step.optString("target") != "system"
-                    "app" -> CortexScreenService.connected == null
+                    "read_device", "volume", "brightness", "recents", "play_store" -> true
+                    "torch", "settings", "app", "panel" -> !visualAvailable
                     else -> false
                 }
             }
@@ -288,6 +286,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 "read_device" -> "Проверяю состояние телефона…"
                 "torch" -> "Проверяю фонарик…"
                 "volume" -> "Меняю громкость…"
+                "brightness" -> "Проверяю яркость экрана…"
                 else -> "Выполняю команду Android…"
             })
             phone.executeChecked(step, { pending.isActive }, done)
@@ -353,9 +352,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     else -> "Составляю план…"
                 })
                 val screen = if (useFrame) {
-                    val current = navigation.await { it.pkg == frame.pkg && it.window == frame.window && !it.hasPrivateFields }
+                    val current = navigation.await { it.pkg == frame.pkg && it.window == frame.window && !it.secure && !it.hasPrivateFields }
                     if (current == null) null else {
-                        val result = if (current.tree.count { it.label.isNotBlank() } < 5) augment(current, service) else current
+                        val result = if (current.tree.count { it.label.isNotBlank() } < 5) augment(task, current, service) else current
                         if (result.secure || result.hasPrivateFields) return manual()
                         result.takeIf { it.pkg == current.pkg && it.window == current.window }
                     }
@@ -523,7 +522,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             }
             VisualAction.EXPECT -> {
                 report("Проверяю результат…")
-                result(navigation.await { it.has(step.target) } != null || augment(before, service).has(step.target),
+                result(navigation.await { it.has(step.target) } != null || augment(task, before, service).has(step.target),
                     "На экране нет ожидаемого элемента «${step.target}».")
             }
             VisualAction.TAP, VisualAction.SET -> activate(task, service, navigation, before, step, report)
@@ -559,7 +558,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             }
         }
         if (node == null && step.action == VisualAction.TAP) {
-            before = augment(before, service)
+            before = augment(task, before, service)
             if (before.secure || before.hasPrivateFields) return StepOutcome(false, manual().text, manual = true)
             if (before.pkg != frame.pkg || before.window != frame.window) {
                 return StepOutcome(false, "Открытый экран изменился во время поиска элемента.")
@@ -586,7 +585,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             val fresh = navigation.await { it.pkg == before.pkg && it.window == before.window &&
                 !it.secure && !it.hasPrivateFields }
                 ?: return StepOutcome(false, "После подтверждения открыт другой экран.", retry = false)
-            before = if (target.ocr) augment(fresh, service) else fresh
+            before = if (target.ocr) augment(task, fresh, service) else fresh
         }
         val current = before.nodes.firstOrNull { it.path == target.path && it.ocr == target.ocr && it.label == target.label &&
             it.resource == target.resource && Rect.intersects(it.bounds, target.bounds) } ?: return StepOutcome(false,
@@ -601,7 +600,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             } != null
             step.expect.isNotBlank() -> navigation.await { it.has(step.expect) &&
                 (it.structure() != before.structure() || it.window != before.window || it.pkg != before.pkg) } != null
-            current.ocr -> navigation.after(before) != null || augment(before, service).let { updated ->
+            current.ocr -> navigation.after(before) != null || augment(task, service.frame(fresh = true) ?: before, service).let { updated ->
                 !updated.secure && updated.nodes.any(VisualNode::ocr) &&
                     updated.nodes.filter(VisualNode::ocr).map { it.label to it.bounds } !=
                     before.nodes.filter(VisualNode::ocr).map { it.label to it.bounds }
@@ -695,11 +694,17 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private fun VisualNode.checkable() = checked != null
     private fun area(bounds: Rect) = bounds.width().toLong() * bounds.height()
 
-    private suspend fun augment(frame: VisualFrame, service: CortexScreenService): VisualFrame {
+    private suspend fun augment(task: Task, frame: VisualFrame, service: CortexScreenService): VisualFrame {
+        if (frame.secure || frame.hasPrivateFields) return frame
+        fun sameScreen(left: VisualFrame, right: VisualFrame) =
+            left.pkg == right.pkg && left.window == right.window && left.bounds == right.bounds &&
+                left.revision == right.revision && left.structure() == right.structure()
+        task.recognized?.takeIf { sameScreen(it, frame) }?.let { return it }
         val result = withTimeoutOrNull(5_500L) { service.recognize(frame) } ?: return frame
         val current = service.frame(fresh = true) ?: return frame
-        if (current.pkg != frame.pkg || current.window != frame.window || current.structure() != frame.structure()) return current
-        return current.copy(nodes = current.tree + result.nodes, secure = current.secure || result.protected)
+        if (current.secure || current.hasPrivateFields || current.pkg != frame.pkg ||
+            current.window != frame.window || current.structure() != frame.structure()) return current
+        return current.copy(nodes = current.tree + result.nodes, secure = result.protected).also { task.recognized = it }
     }
 
     private suspend fun screenConsent(report: (String) -> Unit): Boolean {
@@ -818,6 +823,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var planDone: Boolean = false,
         var deferred: List<VisualStep> = emptyList(),
         var boundScreen: VisualFrame? = null,
+        var recognized: VisualFrame? = null,
         var inFlight: VisualStep? = null,
         val scheduled: Boolean = false,
         var scenario: Boolean = false
@@ -825,7 +831,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     companion object {
         private var saved: Task? = null
-        private val SCENARIO_VARIABLE = Regex("""\$\{([a-zA-Z_][a-zA-Z0-9_]{0,31})}""")
+        private val SCENARIO_VARIABLE = Regex("""\$\{([a-zA-Z_][a-zA-Z0-9_]{0,31})\}""")
         private val SCENARIO_LABELS = mapOf("open" to "приложение", "tap" to "элемент", "point" to "точка",
             "type" to "ввод", "swipe" to "свайп", "wait" to "ожидание", "pause" to "пауза", "if" to "условие",
             "repeat" to "повторение", "run" to "вложенный сценарий", "variable" to "переменная")

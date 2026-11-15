@@ -69,4 +69,18 @@ class LocalIntentTest {
         assertEquals("Telegram", VisualRequest.singleApp("Кортекс, открой Telegram"))
         assertNull(VisualRequest.singleApp("Открой Telegram и найди Анну"))
     }
+
+    @Test fun localSettingsBrightnessAndLaunchUnderstandSynonyms() {
+        val resolve: (String) -> String? = { if (it == "telegram") "org.telegram.messenger" else null }
+        val settings = requireNotNull(CortexLocalCommands.parse("Пожалуйста, открой настройки телефона", resolve)).single()
+        assertEquals("settings", settings.getString("kind"))
+        assertEquals("system", settings.getString("target"))
+        val launch = requireNotNull(CortexLocalCommands.parse("Telegram открой", resolve)).single()
+        assertEquals("org.telegram.messenger", launch.getString("target"))
+        val brightness = requireNotNull(CortexLocalCommands.parse("Яркость экрана уменьши на 15 процентов", resolve)).single()
+        assertEquals("brightness", brightness.getString("kind"))
+        assertEquals("down", brightness.getString("mode"))
+        assertEquals(15, brightness.getInt("level"))
+        assertNull(CortexLocalCommands.parse("Как открыть настройки телефона?", resolve))
+    }
 }

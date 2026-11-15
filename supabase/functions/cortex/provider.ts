@@ -13,7 +13,7 @@ export class Failure extends Error {
 
 export type Network = typeof fetch;
 export type Turn = { role: "system" | "user" | "assistant"; content: string };
-export type Account = { id: string; name: string; email: string; provider: "Google"; avatar: string };
+export type Account = { id: string; name: string; email: string; provider: "Google" | "Yandex" | "Email"; avatar: string };
 
 const LIMITS = { brief: 740, balanced: 1450, deep: 2200 };
 const OUTPUT_LIMIT = 20_000;
@@ -152,11 +152,27 @@ function connectionFailure(error: unknown): Failure {
   return new Failure("provider", 502);
 }
 
-export type ModelResponse = { response: Response; releaseDeadline: () => void };
+type MeasuredUsage = { input: number; output: number };
+export type Reservation = { maxOutput: number; finish: (usage: MeasuredUsage | null) => Promise<Record<string, unknown> | null> };
+export type ModelResponse = {
+  response: Response;
+  releaseDeadline: () => void;
+  observe: (data: unknown) => void;
+  finish: () => Promise<Record<string, unknown> | null>;
+};
+
+function measuredUsage(value: unknown): MeasuredUsage | null {
+  const usage = value && typeof value === "object" ? (value as { usage?: Record<string, unknown> }).usage : null;
+  const input = usage?.prompt_tokens, output = usage?.completion_tokens;
+  if (typeof input !== "number" || typeof output !== "number" || !Number.isSafeInteger(input) ||
+      !Number.isSafeInteger(output) || input < 0 || output < 0 || input > 2_000_000 || output > 2_000_000) return null;
+  return { input, output };
+}
 
 export async function completion(
   network: Network, key: string, models: string[], messages: Turn[], stream: boolean, limit: number,
   signal: AbortSignal, device = false, repair = false, firstTokenMs = 18_000, quick = false, plan = false,
+  hold?: (estimatedInput: number, output: number) => Promise<Reservation>,
 ): Promise<ModelResponse> {
   if (!key || !models.length || models.some(model => !/^[a-z0-9._-]+\/[a-z0-9._-]+:free$/.test(model))) {
     throw new Failure("unconfigured", 503);
@@ -170,6 +186,33 @@ export async function completion(
       ? [{ role: "system", content: first.content + guide }, ...messages.slice(1)]
       : [{ role: "system", content: guide.trim() }, ...messages];
   }
+  const toolInput = device ? { tools, tool_choice: repair ? "required" : "auto" } : {};
+  const requested = plan ? Math.max(limit, 1600) : limit;
+  // Only provider-reported usage is charged. The estimate protects concurrent in-flight calls.
+  const estimatedInput = Math.ceil(new TextEncoder().encode(JSON.stringify({ messages, ...toolInput })).length / 3) + 128;
+  const reservation = await hold?.(estimatedInput, requested);
+  let usage: MeasuredUsage | null = null;
+  let generationId = "";
+  let settled: Promise<Record<string, unknown> | null> | undefined;
+  const finish = () => settled ??= (async () => {
+    if (!reservation) return null;
+    if (!usage && generationId) {
+      try {
+        const response = await network("https://openrouter.ai/api/v1/generation?id=" + encodeURIComponent(generationId),
+          { headers: { Authorization: "Bearer " + key }, redirect: "error", signal: AbortSignal.timeout(2200) });
+        if (response.ok) {
+          const { data } = await response.json();
+          usage = measuredUsage({ usage: { prompt_tokens: data?.native_tokens_prompt, completion_tokens: data?.native_tokens_completion } });
+        } else await response.body?.cancel().catch(() => {});
+      } catch { /* A disconnected generation may not report usage yet. */ }
+    }
+    return await reservation.finish(usage);
+  })();
+  const observe = (value: unknown) => {
+    usage = measuredUsage(value) ?? usage;
+    const id = value && typeof value === "object" ? (value as { id?: unknown }).id : null;
+    if (typeof id === "string" && /^gen-[a-zA-Z0-9-]{4,200}$/.test(id)) generationId = id;
+  };
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), firstTokenMs);
   const releaseDeadline = () => clearTimeout(timer);
@@ -184,8 +227,8 @@ export async function completion(
       },
       body: JSON.stringify({
         ...(models.length === 1 ? { model: models[0] } : { models }), messages, stream,
-        max_tokens: plan ? Math.max(limit, 1600) : limit, temperature: plan ? .18 : .42, top_p: .9,
-        ...(device ? { tools, tool_choice: repair ? "required" : "auto" } : {}),
+        max_tokens: reservation?.maxOutput ?? requested, temperature: plan ? .18 : .42, top_p: .9,
+        usage: { include: true }, ...toolInput,
         provider: {
           max_price: { prompt: 0, completion: 0 },
           ...(device ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),
@@ -194,33 +237,41 @@ export async function completion(
     });
     if (!response.ok) {
       const data = await response.json().catch(() => undefined);
+      observe(data);
       throw providerFailure(response.status, data?.error, response.headers);
     }
-    return { response, releaseDeadline };
+    return { response, releaseDeadline, observe, finish };
   } catch (error) {
     releaseDeadline();
+    await finish();
     throw connectionFailure(error);
   }
 }
 
-export async function verifyCompletion(model: ModelResponse): Promise<void> {
+export async function verifyCompletion(model: ModelResponse): Promise<Record<string, unknown> | null> {
   try {
-    if (!output(await model.response.json(), "message").trim()) throw new Failure("empty", 502);
+    const data: unknown = await model.response.json();
+    model.observe(data);
+    if (!output(data, "message").trim()) throw new Failure("empty", 502);
   } catch (error) {
     throw connectionFailure(error);
   } finally {
     model.releaseDeadline();
+    await model.finish();
   }
+  return await model.finish();
 }
 
 type RelayControl = { reader?: ReadableStreamDefaultReader<Uint8Array> };
 
-async function* events(response: Response, control: RelayControl, device: boolean, repair: boolean, plan: boolean): AsyncGenerator<Record<string, unknown>> {
+async function* events(model: ModelResponse, control: RelayControl, device: boolean, repair: boolean, plan: boolean): AsyncGenerator<Record<string, unknown>> {
+  const { response } = model;
   const decision = device ? new DeviceDecision(repair, plan) : undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
     if (!response.headers.get("content-type")?.includes("text/event-stream")) {
       const data: unknown = await response.json();
+      model.observe(data);
       const text = output(data, "message").slice(0, OUTPUT_LIMIT);
       decision?.collect(data, "message");
       const outcome = decision?.outcome();
@@ -248,6 +299,7 @@ async function* events(response: Response, control: RelayControl, device: boolea
         if (event === "[DONE]") { complete = true; break; }
         if (!event) continue;
         const data: unknown = JSON.parse(event);
+        model.observe(data);
         decision?.collect(data, "delta");
         const delta = output(data, "delta").slice(0, OUTPUT_LIMIT - length);
         if (delta) {
@@ -260,7 +312,6 @@ async function* events(response: Response, control: RelayControl, device: boolea
             yield { delta: visibleDelta };
           }
         }
-        if (length >= OUTPUT_LIMIT) { complete = true; break; }
       }
       if (done) break;
     }
@@ -274,7 +325,7 @@ async function* events(response: Response, control: RelayControl, device: boolea
     yield { error: failure.code, ...(failure.retryAfter ? { retry_after: failure.retryAfter } : {}) };
   } finally {
     if (reader) {
-      await reader.cancel().catch(() => {});
+      void reader.cancel().catch(() => {});
       reader.releaseLock();
       control.reader = undefined;
     } else if (!response.bodyUsed) {
@@ -293,7 +344,7 @@ async function* stream(
     let visible = false;
     let retry: Failure | undefined;
     try {
-      for await (const event of events(current.response, control, device, repair, plan)) {
+      for await (const event of events(current, control, device, repair, plan)) {
         if (!visible && typeof event.error === "string" &&
           (retryableModelError(event.error) || event.error === "provider_quota" || event.error === "provider_quota_daily")) {
           retry = new Failure(event.error, 502, Number(event.retry_after) || 0);
@@ -305,10 +356,15 @@ async function* stream(
           current.releaseDeadline();
         }
         if (event.error === "provider_limit_unknown") event.error = "provider_limit";
+        if (event.done === true || typeof event.error === "string") {
+          const quota = await current.finish();
+          if (quota) yield { quota, status: "quota" };
+        }
         yield event;
       }
     } finally {
       current.releaseDeadline();
+      await current.finish();
     }
     if (!retry) return;
     try {
@@ -338,6 +394,7 @@ export function relay(
     await upstream.reader?.cancel().catch(() => {});
     await source.return(undefined).catch(() => {});
     if (!initial.response.bodyUsed) await initial.response.body?.cancel().catch(() => {});
+    await initial.finish();
   }
 
   function finish(controller: ReadableStreamDefaultController<Uint8Array>, event: string) {

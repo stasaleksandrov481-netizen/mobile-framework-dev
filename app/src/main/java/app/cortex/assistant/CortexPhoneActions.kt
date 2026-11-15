@@ -371,7 +371,8 @@ internal class CortexPhoneActions(private val context: Context) {
                     cap.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"; else -> "connected" }
                 done().put("value", value).put("validated", cap?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true) }
             "airplane" -> done().put("enabled", Settings.Global.getInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) != 0)
-            "location" -> done().put("enabled", (context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager).isLocationEnabled)
+            "location" -> done().put("enabled", androidx.core.location.LocationManagerCompat.isLocationEnabled(
+                context.getSystemService(android.location.LocationManager::class.java)))
             "battery_saver" -> done().put("enabled", (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode)
             "screen_lock" -> done().put("enabled", (context.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager).isDeviceSecure)
             else -> JSONObject().put("status", "unsupported")

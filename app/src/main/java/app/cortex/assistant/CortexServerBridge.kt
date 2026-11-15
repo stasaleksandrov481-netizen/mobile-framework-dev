@@ -13,7 +13,6 @@ import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -25,13 +24,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Bridge to the CORTEX Supabase Edge Function. No API provider keys in the APK. */
-internal class CortexServerBridge(context: Context) : AutoCloseable {
+internal class CortexServerBridge(private val context: Context) : AutoCloseable {
     private val store = SecureSession(context)
     private val executor = Executors.newFixedThreadPool(3)
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
     private val main = Handler(Looper.getMainLooper())
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
-    private val loginLock = Any()
+    private val lifecycle = Any()
     private val installId = installToken(context)
     private val endpoint = "https://jjcqrjztxohnifmziksy.supabase.co/functions/v1/cortex/v1/"
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
@@ -80,7 +79,9 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
             }
             main.post { if (jobs.remove(id) != null) done(outcome) }
         }
-        if (jobs.putIfAbsent(id, task) == null) executor.execute(task)
+        synchronized(lifecycle) {
+            if (!executor.isShutdown && jobs.putIfAbsent(id, task) == null) executor.execute(task)
+        }
     }
 
     fun cancel(id: String) {
@@ -114,24 +115,39 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
                 if ((pending.substringBefore(':').toLongOrNull() ?: 0L) <= System.currentTimeMillis() ||
                     !LOGIN_CODE.matches(code)) throw GatewayFailure("auth_expired")
                 call("POST", "auth/poll", JSONObject().put("code", code), id).also {
-                    if (it.optString("state") == "signed_in") {
-                        val token = it.optString("token")
-                        if (!LOGIN_CODE.matches(token)) throw GatewayFailure("auth_denied")
-                        store.put(token)
-                        store.clear("login")
-                        it.remove("token") // Never expose the bearer token to JS.
-                    }
+                    adoptSession(it)
                 }
+            }
+            "auth-signup", "auth-password", "auth-verify", "auth-recover", "auth-reset" -> synchronized(loginLock) {
+                val route = request.optString("operation").removePrefix("auth-")
+                val payload = request.optJSONObject("payload") ?: throw GatewayFailure("invalid")
+                val result = call("POST", "auth/$route", payload, id)
+                adoptSession(result)
+                if (route == "reset") {
+                    store.clear()
+                    CortexScenarios.selectAccount(context, null)
+                }
+                result
             }
             "auth-cancel" -> synchronized(loginLock) { store.clear("login"); JSONObject().put("cancelled", true) }
             "logout" -> synchronized(loginLock) {
                 runCatching { call("DELETE", "session", null, id) }
                 store.clear("login")
                 store.clear()
+                CortexScenarios.selectAccount(context, null)
                 JSONObject().put("ok", true)
             }
             else -> throw GatewayFailure("endpoint_missing")
         }
+    }
+
+    private fun adoptSession(result: JSONObject) {
+        val token = result.remove("token") as? String
+        if (result.optString("state") != "signed_in") return
+        if (token == null || !LOGIN_CODE.matches(token)) throw GatewayFailure("auth_denied")
+        store.put(token)
+        store.clear("login")
+        CortexScenarios.selectAccount(context, result.optJSONObject("account")?.optString("id"))
     }
 
     private fun call(method: String, route: String, payload: JSONObject?, id: String,
@@ -161,7 +177,12 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
                 val body = connection.errorStream?.bufferedReader()?.use { it.readText().take(2000) }.orEmpty()
                 val error = runCatching { JSONObject(body) }.getOrNull()
                 val code = error?.optString("error").orEmpty().ifBlank { if (status == 429) "rate_limit" else "server" }
-                if (code == "sign_in" && !token.isNullOrEmpty()) store.clearSessionIf(token)
+                if (code == "sign_in" && !token.isNullOrEmpty()) synchronized(loginLock) {
+                    if (store.get() == token) {
+                        store.clear()
+                        CortexScenarios.selectAccount(context, null)
+                    }
+                }
                 throw GatewayFailure(code, error?.optInt("retry_after") ?: 0, error?.optJSONObject("quota"))
             }
             return if (onEvent != null && connection.contentType.orEmpty().contains("event-stream")) {
@@ -171,9 +192,14 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
                 connection.inputStream.bufferedReader().use { sse(it, onEvent) }
             } else {
                 val text = connection.inputStream.bufferedReader().use { it.readText() }
+                if (!jobs.containsKey(id)) throw InterruptedException()
                 JSONObject(text).also {
-                    if (route == "status" && it.optString("fault").isEmpty() && it.has("account") &&
-                        it.isNull("account") && !token.isNullOrEmpty()) store.clearSessionIf(token)
+                    if (route == "status" && it.optString("fault").isEmpty() && it.has("account")) synchronized(loginLock) {
+                        if (store.get() != token) throw GatewayFailure("auth_busy")
+                        val account = it.optJSONObject("account")
+                        if (account == null && !token.isNullOrEmpty()) store.clear()
+                        CortexScenarios.selectAccount(context, account?.optString("id"))
+                    }
                 }
             }
         } finally {
@@ -191,6 +217,7 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
             val value = line.substring(5).trim()
             if (value == "[DONE]") break
             val event = runCatching { JSONObject(value) }.getOrNull() ?: continue
+            event.optJSONObject("quota")?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
             if (event.has("error")) throw GatewayFailure(event.optString("error", "provider"), event.optInt("retry_after"))
             if (event.optString("status") == "fallback") onEvent(JSONObject().put("status", "fallback"))
             if (event.has("delta")) {
@@ -207,13 +234,15 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
         if (result.length() == 0) throw GatewayFailure("empty")
         return result
     }
-    override fun close() {
+    override fun close() = synchronized(lifecycle) {
         jobs.keys.toList().forEach(::cancel)
         executor.shutdownNow()
+        Unit
     }
     private class GatewayFailure(val code: String, val retryAfter: Int = 0, val quota: JSONObject? = null) : Exception(code)
     companion object {
         private val installLock = Any()
+        private val loginLock = Any()
         private val LOGIN_CODE = Regex("^[A-Za-z0-9_-]{43}$")
         private const val ENCODING = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
@@ -224,23 +253,19 @@ internal class CortexServerBridge(context: Context) : AutoCloseable {
             ).also { state.edit().putString("install", it).commit() }
         }
 
-        fun guestId(context: Context): String {
-            val hash = MessageDigest.getInstance("SHA-256").digest(installToken(context).toByteArray(Charsets.UTF_8))
-            return "guest_" + Base64.encodeToString(hash, ENCODING)
-        }
     }
 }
 
 /** AES-GCM encrypted bearer token in the Android Keystore. */
 private class SecureSession(context: Context) {
     private val prefs = context.getSharedPreferences("cortex-token", Context.MODE_PRIVATE)
-    private fun key(): SecretKey {
+    private fun key(): SecretKey = synchronized(keyLock) {
         val keystore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (keystore.getKey("cortex-session-key", null) as? SecretKey)?.let { return it }
+        (keystore.getKey("cortex-session-key", null) as? SecretKey)?.let { return@synchronized it }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         generator.init(KeyGenParameterSpec.Builder("cortex-session-key", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
-        return generator.generateKey()
+        generator.generateKey()
     }
     @Synchronized fun put(token: String, name: String = "session") {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
@@ -257,7 +282,5 @@ private class SecureSession(context: Context) {
         }.getOrNull()
     }
     @Synchronized fun clear(name: String = "session") { prefs.edit().remove(name).apply() }
-    @Synchronized fun clearSessionIf(token: String) {
-        if (get() == token) clear()
-    }
+    private companion object { val keyLock = Any() }
 }

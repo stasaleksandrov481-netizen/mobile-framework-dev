@@ -12,6 +12,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.browser.auth.AuthTabIntent
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
@@ -73,6 +74,18 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(container)
         createWebView(savedInstanceState)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (rendererFailed) {
+                    finish()
+                    return
+                }
+                val activeView = webView
+                activeView.evaluateJavascript("Boolean(window.cortexBack && window.cortexBack())") { handled ->
+                    if (webView === activeView && !rendererFailed && handled != "true") finish()
+                }
+            }
+        })
     }
 
     private fun createWebView(savedInstanceState: Bundle? = null) {
@@ -112,7 +125,7 @@ class MainActivity : ComponentActivity() {
         container.removeAllViews()
         container.addView(webView, FrameLayout.LayoutParams(-1, -1))
         speech = CortexSpeech(this) { event -> deviceEvent(event) }
-        device = CortexDeviceBridge(this, speech, ::openGoogleLogin, ::deviceEvent)
+        device = CortexDeviceBridge(this, speech, ::openYandexLogin, ::deviceEvent)
         server = CortexServerBridge(applicationContext)
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             val origin = "https://$ASSET_HOST"
@@ -167,10 +180,11 @@ class MainActivity : ComponentActivity() {
         container.addView(message, FrameLayout.LayoutParams(-1, -1))
     }
 
-    private fun openGoogleLogin(raw: String): Boolean = runCatching {
+    private fun openYandexLogin(raw: String): Boolean = runCatching {
         val uri = Uri.parse(raw)
-        require(uri.scheme == "https" && uri.host == "jjcqrjztxohnifmziksy.supabase.co" &&
-            uri.path == "/auth/v1/authorize" && uri.getQueryParameter("provider") == "google")
+        require(uri.scheme == "https" && uri.encodedAuthority == "oauth.yandex.ru" &&
+            uri.path == "/authorize" && uri.getQueryParameter("response_type") == "code" &&
+            uri.getQueryParameter("redirect_uri") == "https://jjcqrjztxohnifmziksy.supabase.co/functions/v1/cortex/v1/auth/callback/yandex")
         try {
             val browser = CustomTabsClient.getPackageName(this, null)
             if (browser != null && CustomTabsClient.isAuthTabSupported(this, browser)) {
@@ -219,14 +233,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isAsset(uri: Uri) = uri.scheme == "https" && uri.host == ASSET_HOST && uri.path?.startsWith("/assets/web/") == true
-
-    @Deprecated("WebView forwards Back to the SPA")
-    override fun onBackPressed() {
-        if (rendererFailed) { finish(); return }
-        webView.evaluateJavascript("Boolean(window.cortexBack && window.cortexBack())") { handled ->
-            if (handled != "true") finish()
-        }
-    }
 
     @Deprecated("For Android document pickers")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {

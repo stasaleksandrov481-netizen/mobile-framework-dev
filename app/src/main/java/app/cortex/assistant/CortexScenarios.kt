@@ -16,28 +16,47 @@ internal object CortexScenarios {
     private val variable = Regex("[a-zA-Z_][a-zA-Z0-9_]{0,31}")
     private val packageName = Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+")
     private val id = Regex("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}")
+    private val yandexId = Regex("yandex_[A-Za-z0-9_-]{43}")
     private var cached: List<Scenario>? = null
 
     private fun store(context: Context) = context.getSharedPreferences("cortex-scenarios", Context.MODE_PRIVATE)
+    private fun itemsKey(owner: String) = if (owner.isEmpty()) "items" else "items:$owner"
+    private fun owner(context: Context) = store(context).getString("owner", "").orEmpty()
+
+    @Synchronized
+    fun selectAccount(context: Context, candidate: String?) {
+        val next = candidate?.takeIf { id.matches(it) || yandexId.matches(it) }.orEmpty()
+        if (next == owner(context)) return
+        val store = store(context)
+        val editor = store.edit().putString("owner", next)
+        if (next.isNotEmpty() && !store.getBoolean("guest-migrated", false)) {
+            val previous = store.getString("items", null)
+            if (previous != null && !store.contains(itemsKey(next))) editor.putString(itemsKey(next), previous).remove("items")
+            editor.putBoolean("guest-migrated", true)
+        }
+        editor.apply()
+        cached = null
+    }
+
     private fun all(context: Context): List<Scenario> {
         cached?.let { return it }
-        val list = runCatching { JSONArray(store(context).getString("items", "[]")) }.getOrDefault(JSONArray())
+        val list = runCatching { JSONArray(store(context).getString(itemsKey(owner(context)), "[]")) }.getOrDefault(JSONArray())
         return (0 until list.length()).mapNotNull { i -> runCatching { decode(list.getJSONObject(i)) }.getOrNull() }
             .also { cached = it }
     }
 
-    fun list(context: Context) = JSONArray(all(context).map(Scenario::json))
-    fun get(context: Context, id: String) = all(context).firstOrNull { it.id == id }
+    @Synchronized fun list(context: Context) = JSONArray(all(context).map(Scenario::json))
+    @Synchronized fun get(context: Context, id: String) = all(context).firstOrNull { it.id == id }
+    @Synchronized
     fun find(context: Context, raw: String): Scenario? {
         val normalized = normalize(CortexHotword.command(raw) ?: raw)
-        val name = normalized.removePrefix("запусти сценарий ").removePrefix("выполни сценарий ")
-            .removePrefix("сценарий ").trim('«', '»', '"')
+        val name = scenarioCommand.matchEntire(normalized)?.groupValues?.get(1)?.trim('«', '»', '"')
         return all(context).firstOrNull { item ->
-            item.triggers.any { normalize(it) == normalized } || (name != normalized && normalize(item.name) == name)
+            item.triggers.any { normalize(it) == normalized } || normalize(item.name) == name
         }
     }
 
-    fun save(context: Context, input: JSONObject): String? {
+    @Synchronized fun save(context: Context, input: JSONObject): String? {
         val inputId = input.optString("id")
         val scenarios = all(context)
         val item = runCatching { decode(JSONObject(input.toString()).put("id", inputId.ifBlank { UUID.randomUUID().toString() })) }
@@ -50,10 +69,14 @@ internal object CortexScenarios {
         return if (persist(context, scenarios.filterNot { it.id == item.id } + item)) null else "Android не сохранил сценарий."
     }
 
-    fun delete(context: Context, id: String): Boolean = persist(context, all(context).filterNot { it.id == id })
+    fun check(input: JSONObject): String? = runCatching {
+        decode(JSONObject(input.toString()).put("id", input.optString("id").ifBlank { UUID.randomUUID().toString() }))
+    }.exceptionOrNull()?.message
+
+    @Synchronized fun delete(context: Context, id: String): Boolean = persist(context, all(context).filterNot { it.id == id })
 
     private fun persist(context: Context, items: List<Scenario>): Boolean {
-        val ok = store(context).edit().putString("items", JSONArray(items.map(Scenario::json)).toString()).commit()
+        val ok = store(context).edit().putString(itemsKey(owner(context)), JSONArray(items.map(Scenario::json)).toString()).commit()
         if (ok) cached = items
         return ok
     }
@@ -106,4 +129,8 @@ internal object CortexScenarios {
 
     private fun normalize(value: String) = value.trim().trimEnd('.', '!', '?')
         .lowercase(Locale.ROOT).replace('ё', 'е').replace(Regex("""\s+"""), " ")
+
+    private val scenarioCommand = Regex(
+        """(?:(?:запусти|запустить|выполни|выполнить|включи) (?:мне )?)?(?:мой )?(?:сценарий|автоматизацию) (.{1,90})"""
+    )
 }

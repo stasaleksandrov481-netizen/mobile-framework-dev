@@ -19,7 +19,7 @@
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
   const filters = { search: "" };
-  const connection = { google: false, profiles: false, checked: false, visualPrivacy: false };
+  const connection = { yandex: false, email: false, profiles: false, checked: false, visualPrivacy: false };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
@@ -291,7 +291,7 @@
     const intoChat = next === "chat" && previous === "home";
     const intoHome = next === "home";
     const switchesTab = rootTab(previous) !== rootTab(next, id);
-    if (animated && (route !== "chat" || (current()?.messages.length || 0) < 40)) {
+    if (animated && (route === "home" || route === "chat" && (current()?.messages.length || 0) < 15)) {
       fadeOldPage(switchesTab ? 240 : 176, intoChat, switchesTab ? tabDirection : 0);
     }
     route = next;
@@ -343,7 +343,7 @@
     if (previous !== route && !reduced() && splash.hidden && typeof screen.animate === "function") {
       const switchesTab = rootTab(previous) !== rootTab(route);
       pageMotion = Motion.page(screen, -1, switchesTab);
-      if (switchesTab) clearMorph = Motion.wave(app, null, -1);
+      if (switchesTab) Motion.dock(nav.querySelector("[aria-current=page]"));
     }
     if (permissionsPage()) sendDevice("permissions");
     Planner.enter(route);
@@ -535,9 +535,19 @@
 
   function setAccount(value) {
     const previousId = S.account?.id;
-    S.account = M.account(value);
-    if (previousId !== S.account?.id) {
+    const account = M.account(value);
+    const changed = previousId !== account?.id;
+    if (changed && pending) stopAnswer(false);
+    M.useAccount(account);
+    if (changed) {
       connection.quota = null;
+      drafts.clear();
+      errors.clear();
+      ruleDrafts.clear();
+      screenContext = null;
+      refreshScreen();
+      Planner.accountChanged();
+      if (route === "chat") navigate("profile", { replace: true });
       dispatchEvent(new Event("cortex-account-changed"));
     }
     saved();
@@ -550,7 +560,8 @@
       const data = await Api.request("status");
       if (epoch !== statusEpoch || data.fault) return;
       connection.checked = true;
-      connection.google = Boolean(data.google);
+      connection.yandex = data.yandex === true;
+      connection.email = data.email_auth === true;
       connection.profiles = data.device_profiles === true;
       if (!login) setAccount(data.account);
       connection.quota = data.quota || null;
@@ -579,7 +590,7 @@
   }
 
   function showLogin(attempt) {
-    showSheet("Вход через Google", `<div class="stack">
+    showSheet("Вход через Яндекс ID", `<div class="stack">
       <p class="muted" data-login-status>Подтвердите вход в браузере. CORTEX проверит результат после возврата.</p>
       <div class="actions">${button("Отмена", "", "close")}</div></div>`, { cleanup: stopLogin });
     attempt.timer = setTimeout(pollLogin, 1500);
@@ -668,7 +679,63 @@
     flash("Не удалось открыть браузер Android.");
   }
 
-  window.cortexAdminLogin = startLogin;
+  function accountOptions() {
+    showSheet("Войти в CORTEX", `<div class="stack auth-options">
+      ${button("По электронной почте", "user", "email-auth", "password", "primary")}
+      ${connection.yandex || !connection.checked ? button("Через Яндекс ID", "", "login", "", "outline") : ""}
+      ${button("Создать аккаунт", "", "email-auth", "signup", "quiet")}
+    </div>`);
+  }
+
+  function emailForm(mode, email = "") {
+    const forms = {
+      password: ["Вход по почте", "Войти"], signup: ["Создание аккаунта", "Отправить код"],
+      verify: ["Подтверждение почты", "Подтвердить"], recover: ["Восстановление пароля", "Отправить код"],
+      reset: ["Новый пароль", "Изменить пароль"]
+    };
+    if (!Object.hasOwn(forms, mode)) return;
+    const [title, label] = forms[mode];
+    const newPassword = mode === "signup" || mode === "reset";
+    const code = mode === "verify" || mode === "reset";
+    const password = (name, title) => `<label class="field"><span>${title}</span>
+      <input name="${name}" type="password" required maxlength="72" ${newPassword ? 'minlength="10" autocomplete="new-password"' :
+        'autocomplete="current-password"'}></label>`;
+    editor(title, (mode === "signup" ? field("name", "Имя", "", { optional: true }) : "") +
+      `<label class="field"><span>Электронная почта</span><input name="email" type="email" maxlength="254" required
+      autocomplete="email" autocapitalize="none" spellcheck="false" value="${esc(email)}"></label>` +
+      (code ? '<label class="field"><span>Код из письма</span><input name="code" type="text" inputmode="numeric" required ' +
+        'autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10"></label>' : "") +
+      (mode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : "") +
+      (newPassword ? password("confirmation", "Повторите пароль") : "") +
+      (newPassword ? '<small class="muted">Пароль должен содержать от 10 символов.</small>' : ""),
+    async values => {
+      const active = activeSheet;
+      if (newPassword && values.password !== values.confirmation) throw new Error("Пароли не совпадают.");
+      const result = await Api.request("auth-" + mode, { payload: {
+        name: values.name, email: values.email, password: values.password, code: values.code
+      } });
+      if (result.state === "signed_in" && M.account(result.account)) {
+        ++statusEpoch;
+        setAccount(result.account);
+        if (activeSheet === active) closeSheet();
+        render();
+        refreshConnection();
+        window.CortexControl?.refresh();
+        flash("Вход выполнен");
+      } else if (activeSheet === active) {
+        if (result.state === "check_email") emailForm(mode === "signup" ? "verify" : "reset", values.email);
+        if (result.state === "password_changed") {
+          setAccount(null);
+          emailForm("password", values.email);
+          flash("Пароль изменён");
+        }
+      }
+    }, { label, extra: mode === "password" ? '<div class="actions">' +
+      button("Забыли пароль?", "", "email-auth", "recover", "quiet") +
+      button("Подтвердить почту", "", "email-auth", "verify", "quiet") + "</div>" : "" });
+  }
+
+  window.cortexAdminLogin = accountOptions;
 
   function logout() {
     confirm("Выйти из аккаунта?", "Локальные чаты и заметки останутся на этом устройстве.", async () => {
@@ -1190,7 +1257,6 @@
     if (message.type === "permissions") {
       if (typeof message.versionName === "string") U.setVersion(message.versionName);
       if (Number.isInteger(message.versionCode)) androidVersionCode = message.versionCode;
-      if (typeof message.guestId === "string" && /^guest_[a-z0-9_-]{43}$/i.test(message.guestId)) connection.guestId = message.guestId;
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1254,6 +1320,23 @@
     render();
   }
 
+  function filterFaq(category) {
+    const faq = screen.querySelector("[data-faq]");
+    if (!faq) return;
+    const selected = category || faq.querySelector('[aria-pressed="true"]')?.dataset.value || "Все";
+    const query = faq.querySelector("#faq-search").value.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
+    for (const button of faq.querySelectorAll("[data-action=faq-category]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.value === selected));
+    }
+    let found = false;
+    for (const row of faq.querySelectorAll("[data-faq-category]")) {
+      const text = row.textContent.toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
+      row.hidden = (selected !== "Все" && row.dataset.faqCategory !== selected) || !text.includes(query);
+      if (!row.hidden) found = true;
+    }
+    faq.querySelector("[data-faq-empty]").hidden = found;
+  }
+
   const actions = {
     tab(value, control) {
       // The central CORTEX control always opens the conversation, from any tab.
@@ -1285,7 +1368,6 @@
     }),
     "address-name": () => editor("Как к вам обращаться", field("name", "Имя или обращение", S.preferences.addressName, { max: 60, optional: true }),
       ({ name }) => { S.preferences.addressName = name.slice(0, 60); saved("Обращение сохранено."); syncIslandOptions(); closeSheet(); render(); }),
-    "copy-account-id": () => { const id = S.account?.id || connection.guestId; if (id) copyText(id); },
     history: openHistory,
     "close-history": closeHistory,
     "open-chat": id => { closeHistory(true); navigate("chat", { id }); },
@@ -1353,6 +1435,9 @@
     },
     "model-profile"(value) { if (Object.hasOwn(M.models, value)) preference("model", value); },
     login: startLogin,
+    "account-options": accountOptions,
+    "email-auth": (mode, control) => emailForm(mode, control.closest("form")?.elements.email?.value || ""),
+    "faq-category": filterFaq,
     logout,
     export: exportChats,
     "open-settings": () => { if (!sendDevice("open-settings")) flash("Этот экран доступен в Android."); },
@@ -1436,7 +1521,8 @@
   app.addEventListener("submit", async event => {
     event.preventDefault();
     const form = event.target;
-    const data = Object.fromEntries(Array.from(new FormData(form), ([key, value]) => [key, String(value).trim()]));
+    const data = Object.fromEntries(Array.from(new FormData(form), ([key, value]) =>
+      [key, ["password", "confirmation"].includes(key) ? String(value) : String(value).trim()]));
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
     if (form.id === "rule-form") {
       const rules = S.instructions.cortex ||= {};
@@ -1457,12 +1543,14 @@
     }
   });
 
-  Planner.bind({ root: app, route: () => route, native: Boolean(device), open: navigate, send: sendDevice, render, confirm, toast: flash,
+  Planner.bind({ root: app, route: () => route, native: Boolean(device), open: navigate, send: sendDevice,
+    render, confirm, sheet: showSheet, close: closeSheet, toast: flash,
     updateStyle() { saved(); syncIslandOptions(); }, power: applyEnergy });
 
   app.addEventListener("input", event => {
     const input = event.target;
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
+    if (input.id === "faq-search") filterFaq();
     if (input.id === "history-search") {
       filters.search = input.value;
       clearTimeout(historySearchTimer);

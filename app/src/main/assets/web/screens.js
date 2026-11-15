@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.7";
+  let version = "1.0.8";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
@@ -173,33 +173,47 @@ const CortexUI = (() => {
         ${chatItems({ search: "" })}</div>`;
   }
 
-  function quotaPanel(quota, id) {
-    if (!id) return "";
-    return `<section class="panel stack quota-panel"><h2>Запросы к ИИ</h2>
-      ${quota ? `<p>${quota.unlimited ? "Безлимит" : "Осталось " + esc(quota.remaining) + " из " + esc(quota.limit)}
-      <small> · сброс в 03:00 по Москве</small></p>` : '<p class="muted">Остаток обновится при подключении.</p>'}
-      <div class="quota-id"><code>${esc(id)}</code>
-      ${iconButton("copy", "Копировать ID", "copy-account-id")}</div></section>`;
+  const tokenNumber = new Intl.NumberFormat("ru-RU");
+  const resetTime = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
+  const usageDate = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "numeric", timeZone: "UTC" });
+  function quotaPanel(quota) {
+    const available = quota?.unit === "tokens";
+    const percent = quota?.unlimited ? 100 : quota?.limit > 0 ? Math.max(0, Math.min(100, 100 * quota.remaining / quota.limit)) : 0;
+    const reset = new Date(quota?.reset_at);
+    const history = (Array.isArray(quota?.history) ? quota.history : []).filter(item =>
+      /^\d{4}-\d{2}-\d{2}$/.test(item.day) && Number.isFinite(Date.parse(item.day)) && Number.isFinite(item.used)).slice(-7);
+    return `<section class="panel stack quota-panel"><h2>Токены ИИ</h2>
+      ${available ? `<p class="quota-balance"><strong>${quota.unlimited ? "Безлимит" : esc(tokenNumber.format(quota.remaining))}</strong>
+      ${quota.unlimited ? "" : `<small>из ${esc(tokenNumber.format(quota.limit))}</small>`}</p>
+      <div class="quota-track" role="progressbar" aria-label="Осталось токенов" aria-valuemin="0" aria-valuemax="100"
+        aria-valuenow="${Math.round(percent)}"><span style="--quota-progress:${percent}%"></span></div>
+      ${Number.isFinite(reset.getTime()) ? `<small class="muted">Обновление в ${esc(resetTime.format(reset))} по Москве</small>` : ""}
+      ${history.length ? `<details class="quota-history"><summary>Использование за неделю</summary>
+        <ul>${history.map(item => `<li><time datetime="${item.day}">${esc(usageDate.format(new Date(item.day)))}</time>
+          <span>${esc(tokenNumber.format(item.used))}</span></li>`).join("")}</ul></details>` : ""}` :
+      '<p class="muted">Остаток появится после подключения к серверу.</p>'}</section>`;
   }
 
   function profile(ctx) {
     const account = M.state.account;
+    const type = { Email: "Вход по почте", Yandex: "Яндекс ID", Google: "Существующий аккаунт" }[account?.provider];
     return `<header class="profile-header"><h1>Профиль</h1></header>
       <div class="scroll profile-scroll stack">
         <section class="profile-identity">
           ${portrait(account, "large")}
-          <div class="account-copy"><strong>${esc(account?.name || "Гостевой режим")}</strong>
-            <p>${esc(account?.email || "Чаты и настройки на этом устройстве")}</p>
+          <div class="account-copy"><strong>${esc(account?.name || "Гость")}</strong>
+            <p>${esc(account?.email || "Локальные данные на этом устройстве")}</p>
+            ${type ? `<small class="muted">${esc(type)}</small>` : ""}
           </div>
-          ${!account && ctx.native ? `<button type="button" class="action primary profile-signin" ${attributes("login")} ${ctx.login ? "disabled" : ""}>
-            <span class="google-letter" aria-hidden="true">G</span><span>${ctx.login ? "Ожидаю вход" : "Войти через Google"}</span></button>
-            ${ctx.connection.checked && !ctx.connection.google ? '<small class="muted">Вход через Google пока недоступен на сервере.</small>' : ""}` : ""}
+          ${!account && ctx.native ? `<div class="profile-signin actions">
+            ${button("Войти", "user", "account-options", "", "primary")}
+            ${button("Регистрация", "", "email-auth", "signup", "quiet")}</div>` : ""}
         </section>
-        ${quotaPanel(ctx.connection.quota, account?.id || ctx.connection.guestId)}
-        ${group(tile("Настройки", "Телефон, интерфейс и уведомления", "sliders", "go", "settings") +
-          tile("Чаты и данные", "История, экспорт и заметки", "folder", "go", "data") +
+        ${quotaPanel(ctx.connection.quota)}
+        ${group(tile("Настройки", "Интерфейс, модели и уведомления", "sliders", "go", "settings") +
+          tile("Данные и чаты", "История, экспорт и заметки", "folder", "go", "data") +
           tile("Память и персонализация", "Факты, контекст и стиль ответа", "memory", "go", "memory"))}
-        ${group(tile("Разрешения Android", "Управляйте доступами по отдельности", "shield", "go", "permissions") +
+        ${group(tile("Разрешения Android", "", "shield", "go", "permissions") +
           tile("Помощь и поддержка", "", "help", "go", "support") +
           tile("О приложении", "Версия и конфиденциальность", "info", "go", "about"))}
         ${account ? button("Выйти из аккаунта", "logout", "logout", "", "quiet") : ""}
@@ -305,7 +319,7 @@ const CortexUI = (() => {
   }
   function models(ctx) {
     const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection.quota, M.state.account?.id || ctx.connection.guestId) + `<section class="panel stack">
+    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection.quota) + `<section class="panel stack">
       ${choices(M.models, model, "model-profile")}
       <p class="muted">${({
         auto: "Автоматический выбор подходящей бесплатной модели.",
@@ -397,13 +411,30 @@ const CortexUI = (() => {
       tile("Сообщить об ошибке", "Опишите, что произошло, и приложите скриншот", "alert", "support-form", "bug") +
       tile("Предложить функцию", "Расскажите, чего не хватает", "spark", "support-form", "idea") +
       tile("Отправить жалобу", "Опишите ситуацию для поддержки", "shield", "support-form", "complaint")
-    ) +
-    label("ЧАСТЫЕ ВОПРОСЫ") +
-    `<section class="panel faq">
-      <details><summary>Где хранятся чаты?${icon("chevron", 15)}</summary><p>Сохранённые диалоги остаются на устройстве. Экспорт доступен в разделе «Чаты и данные».</p></details>
-      <details><summary>Что делать, если чат не отвечает?${icon("chevron", 15)}</summary><p>Проверьте интернет и нажмите «Повторить» в чате. Если ошибка повторяется, напишите в поддержку.</p></details>
-      <details><summary>Чем отличается диктовка от разговора?${icon("chevron", 15)}</summary><p>Микрофон вставляет распознанный текст в поле ввода. Кнопка с волной открывает разговор и отправляет реплику после паузы.</p></details>
-    </section>`);
+    ) + faq());
+  }
+
+  const questions = [
+    ["Команды", "Что работает без интернета?", "Открытие приложений, проверка заряда, громкость, напоминания и сохранённые сценарии выполняются на устройстве. Для сложного диалога и облачного планирования нужно подключение."],
+    ["Команды", "Чем отличаются диктовка и разговор?", "Диктовка вставляет распознанный текст в поле ввода. Голосовой разговор отправляет реплику после паузы. Доступность распознавания без сети зависит от службы Android."],
+    ["Разрешения", "Как включить управление экраном?", "Откройте «Вызов», затем «Управление экраном». В специальных возможностях Android включите службу CORTEX. На защищённых экранах завершите действие вручную."],
+    ["Разрешения", "Почему островок пропал?", "Проверьте разрешение «Поверх других окон» и режим островка в разделе «Вызов». При режиме «По вызову» островок появляется после команды или запуска."],
+    ["Токены", "Что расходует токены ИИ?", "Сервер считает входные и выходные токены облачной модели. Локальные команды и обычный запуск сценария токенов не расходуют."],
+    ["Токены", "Почему ИИ временно недоступен при наличии токенов?", "У OpenRouter есть общий дневной и минутный бюджет. Пока облако недоступно, локальные команды остаются доступны."],
+    ["Сценарии", "Как запустить сценарий голосом?", "Сохраните сценарий и скажите «Запусти сценарий» и его название. Можно также указать свою фразу в конструкторе."],
+    ["Сценарии", "Когда сработает отложенное действие?", "Срок и статус видны в «Расписании». Android может задержать запуск. Если экран заблокирован или Android ограничил запуск в фоне, нажмите уведомление после разблокировки."],
+    ["Аккаунт", "Где хранятся чаты и заметки?", "Сохранённые диалоги и заметки остаются на этом устройстве. Чаты можно экспортировать в разделе «Данные и чаты»."],
+    ["Аккаунт", "Как вернуться в старый аккаунт?", "Выберите «Вход по почте», затем «Забыли пароль?», и укажите прежнюю почту. После кода из письма установите пароль для этого аккаунта."]
+  ];
+  function faq() {
+    const categories = [...new Set(questions.map(([category]) => category))];
+    return `<section class="panel stack faq" data-faq><h2>Частые вопросы</h2>
+      <label class="field"><span>Поиск</span><input type="search" id="faq-search" placeholder="Например, токены" maxlength="80"></label>
+      <div class="faq-filters" aria-label="Категории">${["Все", ...categories].map(category =>
+        pill(category, "faq-category", category, category === "Все")).join("")}</div>
+      ${questions.map(([category, question, answer]) => `<details data-faq-category="${esc(category)}">
+        <summary>${esc(question)}${icon("chevron", 15)}</summary><p>${esc(answer)}</p></details>`).join("")}
+      <p class="muted" data-faq-empty hidden>Совпадений нет.</p></section>`;
   }
   function about() {
     return detail("О приложении", "CORTEX для Android", `<section class="panel about-card">
@@ -415,7 +446,7 @@ const CortexUI = (() => {
   }
   function privacy(ctx) {
     return detail("Конфиденциальность", "Данные, необходимые для работы", `<section class="panel stack prose">
-      <h2>Профиль</h2><p>Для входа CORTEX получает имя, email и фото профиля Google. Имя и фото сохраняются на устройстве для отображения профиля.</p>
+      <h2>Профиль</h2><p>CORTEX получает имя и адрес почты при входе. При входе через Яндекс ID профиль привязывается к идентификатору Яндекса. Пароли обрабатывает Supabase Auth.</p>
       <h2>Сообщения</h2><p>Сохранённые чаты и заметки остаются на устройстве. Команды, которые выполняет локальный движок, остаются на телефоне. Для разговорных ответов и сложных задач CORTEX передаёт серверу запрос и нужный контекст. Сервер обращается к OpenRouter.</p>
       <h2>Голос и команды</h2><p>Речь распознаёт служба Android. Распознанная команда проходит ту же обработку, что и текстовая. CORTEX читает элементы и распознаёт текст на телефоне. При вашем согласии для сложной задачи сервер и OpenRouter могут получить краткое описание экрана. Снимки экрана остаются на телефоне.</p>
       ${window.CortexDevice ? button(ctx.connection.visualPrivacy ? "Отключить передачу текста экрана ИИ" : "Разрешить передачу текста экрана ИИ", "shield", "visual-privacy", "", "outline") : ""}

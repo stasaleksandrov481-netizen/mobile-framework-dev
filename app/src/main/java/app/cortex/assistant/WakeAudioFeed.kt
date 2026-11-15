@@ -9,6 +9,7 @@ import android.os.Process
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import androidx.annotation.RequiresApi
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -24,6 +25,7 @@ internal class WakeAudioFeed private constructor(
     private val connection = AtomicReference<Port?>()
     private val worker = Thread(::capture, "cortex-wake-audio").apply { start() }
 
+    @RequiresApi(30)
     fun connect(replay: Boolean): ParcelFileDescriptor {
         check(open.get())
         val pipe = ParcelFileDescriptor.createPipe()
