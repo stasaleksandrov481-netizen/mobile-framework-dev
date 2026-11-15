@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/notify-beta",
+      "schedule": "0 9 * * *"
+    }
+  ]
+}
