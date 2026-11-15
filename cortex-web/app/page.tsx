@@ -45,7 +45,6 @@ export default function Home() {
             <div className="hero-visual">
               <div className="backdrop-halo" aria-hidden="true" />
               <InteractivePhone />
-              <div className="visual-index"><span>01 / 04</span><span>ИНТЕРАКТИВНАЯ 3D-МОДЕЛЬ</span></div>
             </div>
             <div className="hero-rail" aria-hidden="true"><span>УПРАВЛЕНИЕ БЕЗ ЛИШНИХ ДВИЖЕНИЙ</span><span>SCROLL TO EXPLORE ↓</span></div>
           </section>
