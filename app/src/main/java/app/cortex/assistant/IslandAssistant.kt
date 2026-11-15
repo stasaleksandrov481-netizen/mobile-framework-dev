@@ -31,8 +31,8 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
                 if (turn == generation) finished(result.text, result.ok)
             }) return
         val messages = JSONArray().put(message("system",
-            CortexDeviceContext.IDENTITY + " Ответь кратко и на языке пользователя. " +
-                "Это разговорный ответ. Утверждай, что действие выполнено, только если локальный движок уже его подтвердил. " +
+            CortexDeviceContext.IDENTITY + " Ответь кратко и на языке пользователя. На островке удобны короткие абзацы и списки. " +
+                "Движок уже проверил этот запрос на действия. Для неоднозначной команды уточни цель и приложение. " +
                 (if (address.isBlank()) "" else "Обращение к пользователю — ${JSONObject.quote(address)}. ") +
                 "Возможности сейчас: " + CortexDeviceContext.runtime(context, CortexScreenService.connected, tools)))
         history.forEach { (input, output) -> messages.put(message("user", input)).put(message("assistant", output)) }
@@ -85,7 +85,7 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
     private fun errorMessage(code: String, retryAfter: Int): String {
         val delay = if (retryAfter in 1..3600) " Повторите через " + ceil(retryAfter / 60.0).toInt() + " мин." else ""
         return when (code) {
-            "daily_limit" -> "Суточный лимит CORTEX исчерпан. Запросы обновятся в 03:00 по Москве."
+            "daily_limit" -> "Токены ИИ обновятся в 03:00 по Москве. Локальные команды доступны."
             "provider_quota_daily" -> "Дневная квота бесплатных запросов OpenRouter исчерпана."
             "provider_quota", "provider_limit", "rate_limit" -> "Бесплатные модели сейчас перегружены." + delay
             "provider_key" -> "OpenRouter отклонил серверный ключ."

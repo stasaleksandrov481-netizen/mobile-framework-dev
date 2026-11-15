@@ -234,18 +234,34 @@ const CortexPlanner = (() => {
         ${action("Проверить", "scenario-check")}${action("Сохранить черновик", "draft-save", "", "quiet")}
         ${action("К списку", "scenario-close", "", "quiet")}</div>
     </form>`);
-    return detail("Сценарии", "Цепочки действий для телефона", `<div class="actions">${action("Создать", "scenario-edit", "", "primary")}
-      ${action("Импорт JSON", "native", "scenario-import")}${action("Журнал шагов", "native", "action-history")}
-      ${storedDraft() ? action("Открыть черновик", "draft-open") : ""}</div>
-      <form class="panel stack" id="plan-ai-form">
-        ${label("Описать сценарий своими словами", '<textarea name="goal" rows="2" maxlength="1200" placeholder="Открой настройки и дождись раздела «Дисплей»" required></textarea>')}
-        ${submit(scenarioBusy ? "Готовлю черновик…" : "Предложить шаги через ИИ")}
-      </form>` + (items.length ? items.map(item => `<article class="panel plan-card">
-      <h2>${esc(item.name)}</h2><p class="muted">${esc(item.triggers.join(" · ") || `Запусти сценарий «${item.name}»`)}</p>
-      <div class="actions">${action("Изменить", "scenario-edit", item.id)}${action("Тестовый запуск", "scenario-run", item.id, "primary")}
-        ${action("Копировать", "scenario-copy", item.id, "quiet")}${action("Экспорт", "scenario-export", item.id, "quiet")}
-        ${action("Удалить", "scenario-delete", item.id, "quiet")}</div></article>`).join("") :
-      `<p class="muted">${scenarioReady ? "Сохранённых сценариев пока нет." : "Загружаю сценарии…"}</p>`));
+    const draft = storedDraft();
+    const newScenario = action("Новый сценарий", "scenario-edit", "", "primary");
+    const saved = items.map(item => `<article class="scenario-card">
+      <button type="button" class="scenario-name" data-plan="scenario-edit" data-value="${esc(item.id)}">
+        <span class="section-symbol">${icon("layers", 21)}</span><span><strong>${esc(item.name)}</strong>
+        <small>${esc(item.triggers[0] || `Запусти сценарий «${item.name}»`)}</small></span>${icon("chevron", 16)}</button>
+      <footer>${action("Запустить", "scenario-run", item.id)}
+        <details class="scenario-options"><summary aria-label="Действия со сценарием">${icon("dots", 19)}</summary>
+          <div class="scenario-option-menu">${action("Дублировать", "scenario-copy", item.id, "quiet")}
+            ${action("Сохранить копию", "scenario-export", item.id, "quiet")}
+            ${action("Удалить", "scenario-delete", item.id, "quiet")}</div></details>
+      </footer></article>`).join("");
+    const list = saved ? `<section class="scenario-list"><header><h2>Мои сценарии</h2>${newScenario}</header>${saved}</section>` :
+      `<section class="scenario-empty glass-card">
+        <div class="scenario-illustration" aria-hidden="true">
+          <span>${icon("bolt", 20)}</span><i></i><span>${icon("layers", 24)}</span><i></i><span>${icon("check", 20)}</span>
+        </div><h2>Соберите цепочку действий</h2>
+        <p>Добавьте шаги и фразу для запуска голосом.</p>${newScenario}
+      </section>`;
+    return detail("Сценарии", "", list +
+      (draft ? `<div class="scenario-draft">${icon("note", 20)}<span><strong>Черновик</strong><small>${esc(draft.name || "Без названия")}</small></span>
+        ${action("Продолжить", "draft-open")}</div>` : "") +
+      `<details class="scenario-assist"${scenarioBusy ? " open" : ""}><summary>
+          <span class="section-symbol">${icon("spark", 20)}</span><span><strong>Черновик с ИИ</strong></span>${icon("chevron", 16)}</summary>
+        <form id="plan-ai-form" class="stack">
+          ${label("Что нужно сделать?", '<textarea name="goal" rows="2" maxlength="1200" placeholder="Открой настройки и найди раздел «Дисплей»" required></textarea>')}
+          ${submit(scenarioBusy ? "Готовлю черновик…" : "Предложить шаги")}
+        </form></details>`);
   }
 
   function style() {
@@ -265,13 +281,13 @@ const CortexPlanner = (() => {
     const size = Math.max(80, Math.min(125, data.size));
     return `<span class="plan-camera"></span>
       <div class="plan-island-wrap" style="transform:translate(${clamp(data.offsetX, -75, 75) / 2}px,${clamp(data.offsetY, 0, 80) / 3}px)">
-        ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}">•ᴗ•</span>` : ""}
+        ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}"><i></i><i></i><b></b></span>` : ""}
         <div class="plan-island-sample" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
           --island-accent:${data.accent};--island-opacity:${Math.max(40, Math.min(100, data.opacity))}%;--island-size:${size}%;
           --island-radius:${Math.max(12, Math.min(32, data.corner))}px;--island-weight:${Math.max(0, Math.min(3, data.borderWidth))}px">
           <span class="plan-logo" aria-hidden="true"></span>${data.status ? "<span>Слушаю…</span>" : ""}
           ${data.progress ? '<i aria-hidden="true"></i>' : ""}</div>
-        <span class="plan-size-grip" aria-hidden="true">↘</span>
+        <span class="plan-size-grip" aria-hidden="true"></span>
       </div>`;
   }
 
@@ -284,7 +300,7 @@ const CortexPlanner = (() => {
       <input type="range" id="range-${key}" min="${min}" max="${max}" step="${increments}" data-style="${key}" value="${esc(data[key])}">
     </div>`;
     const widget = (key, title) => planSwitch(title, `data-style="${key}"`, data[key]);
-    return detail("Оформление островка", "", `<div class="plan-island-preview" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
+    return detail("Островок", "Оформление", `<div class="plan-island-preview glass-card" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
       <p class="muted plan-hint">Перетащите островок. Потяните за угол, чтобы изменить размер.</p>
       <div class="actions">${Object.keys(islandPresets).map(title => action(title, "island-preset", title)).join("")}</div>
       <section class="panel stack"><h2>Положение и форма</h2>${slider("size", "Размер", 80, 125)}
@@ -657,7 +673,7 @@ const CortexPlanner = (() => {
     } finally {
       scenarioBusy = false;
       control.disabled = false;
-      control.textContent = "Предложить шаги через ИИ";
+      control.textContent = "Предложить шаги";
     }
   }
 

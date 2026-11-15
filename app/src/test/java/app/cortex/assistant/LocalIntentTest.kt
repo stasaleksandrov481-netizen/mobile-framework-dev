@@ -68,6 +68,18 @@ class LocalIntentTest {
         assertTrue(VisualRequest.isAction("Кортекс, открой Telegram"))
         assertEquals("Telegram", VisualRequest.singleApp("Кортекс, открой Telegram"))
         assertNull(VisualRequest.singleApp("Открой Telegram и найди Анну"))
+        assertTrue(VisualRequest.isAction("Кортекс, что сейчас на экране?"))
+        assertTrue(VisualRequest.readsScreen("Кортекс, что сейчас на экране?"))
+        assertFalse(VisualRequest.isAction("Напиши текст про настройки телефона"))
+    }
+
+    @Test fun cortexExplainsRealCapabilitiesWithoutSendingACloudRequest() {
+        val enabled = requireNotNull(CortexDeviceContext.capabilities("Кортекс, что ты умеешь?", true, true))
+        assertTrue(enabled.startsWith("Я CORTEX"))
+        assertTrue(enabled.contains("запускать сценарии"))
+        assertTrue(requireNotNull(CortexDeviceContext.capabilities("Кто ты?", false, false))
+            .contains("можно включить"))
+        assertNull(CortexDeviceContext.capabilities("Кортекс, открой Telegram", true, true))
     }
 
     @Test fun localSettingsBrightnessAndLaunchUnderstandSynonyms() {
@@ -77,6 +89,8 @@ class LocalIntentTest {
         assertEquals("system", settings.getString("target"))
         val launch = requireNotNull(CortexLocalCommands.parse("Telegram открой", resolve)).single()
         assertEquals("org.telegram.messenger", launch.getString("target"))
+        val polite = requireNotNull(CortexLocalCommands.parse("Кортекс, можешь мне открыть Telegram?", resolve)).single()
+        assertEquals("org.telegram.messenger", polite.getString("target"))
         val brightness = requireNotNull(CortexLocalCommands.parse("Яркость экрана уменьши на 15 процентов", resolve)).single()
         assertEquals("brightness", brightness.getString("kind"))
         assertEquals("down", brightness.getString("mode"))

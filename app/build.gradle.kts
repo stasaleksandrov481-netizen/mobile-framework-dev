@@ -21,8 +21,8 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 108
-        versionName = "1.0.8"
+        versionCode = 109
+        versionName = "1.0.9"
     }
     buildFeatures { buildConfig = true }
     signingConfigs {

@@ -83,5 +83,25 @@ const CortexMarkdown = (() => {
 
   const render = value => parser.render(String(value ?? ""));
 
-  return { render, webUrl };
+  function renderStream(value) {
+    const source = String(value ?? "");
+    const start = source.lastIndexOf("\n") + 1;
+    const tail = source.slice(start);
+    if ((source.match(/^ {0,3}(?:\x60{3,}|~{3,})/gm) || []).length % 2) return render(source);
+    if (/^ {0,3}[#*_\x60>|\-]{1,6}\s*$/.test(tail)) return render(source.slice(0, start));
+    let strong = false, code = "";
+    for (const token of tail.matchAll(/\\[\s\S]|\*{2,}|\x60+/g)) {
+      const mark = token[0], index = token.index;
+      if (mark[0] === "\x60") {
+        if (!code) code = mark;
+        else if (code === mark) code = "";
+      } else if (mark === "**" && !code) {
+        if (strong && /\S/.test(tail[index - 1] || "")) strong = false;
+        else if (!strong && /\S/.test(tail[index + 2] || "")) strong = true;
+      }
+    }
+    return render(code || strong ? source.trimEnd() + code + (strong ? "**" : "") : source);
+  }
+
+  return { render, renderStream, webUrl };
 })();

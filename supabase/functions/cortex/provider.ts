@@ -17,6 +17,10 @@ export type Account = { id: string; name: string; email: string; provider: "Goog
 
 const LIMITS = { brief: 740, balanced: 1450, deep: 2200 };
 const OUTPUT_LIMIT = 20_000;
+const CORTEX_IDENTITY = "Ты CORTEX, встроенный помощник приложения. Контекст клиента сообщает платформу, доступные действия и разрешения. " +
+  "Если доступны инструменты для запрошенного действия, используй их. Приложение выполняет и проверяет действия. " +
+  "Сообщай об изменении на устройстве после подтверждения. Назови конкретный недостающий доступ или задай один вопрос о цели. " +
+  "Соблюдай формат, указанный для задачи, включая ответы JSON для планировщика.";
 const SUPPORT_KINDS = new Set(["contact", "bug", "idea", "complaint"]);
 const TICKET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RETRYABLE_MODEL_ERRORS = new Set(["empty", "model", "provider", "provider_access", "provider_limit", "provider_limit_unknown", "timeout"]);
@@ -178,14 +182,14 @@ export async function completion(
     throw new Failure("unconfigured", 503);
   }
   const tools = plan ? (repair ? planRepairTools : planTools) : (repair ? repairTools : deviceTools);
-  if (plan) {
-    const guide = "\n\nWhen the user explicitly asks for device actions, call execute_phone_plan with every step in order. " +
-      "Each step has kind and only the applicable parameters. A question, hypothetical example, or request for instructions should get a text answer.\n" + planGuide;
-    const first = messages[0];
-    messages = first?.role === "system"
-      ? [{ role: "system", content: first.content + guide }, ...messages.slice(1)]
-      : [{ role: "system", content: guide.trim() }, ...messages];
-  }
+  const guide = plan
+    ? "\n\nWhen the user explicitly asks for device actions, call execute_phone_plan with every step in order. " +
+      "Each step has kind and only the applicable parameters. A question, hypothetical example, or request for instructions should get a text answer.\n" + planGuide
+    : "";
+  const first = messages[0];
+  messages = first?.role === "system"
+    ? [{ role: "system", content: CORTEX_IDENTITY + "\n\n" + first.content + guide }, ...messages.slice(1)]
+    : [{ role: "system", content: CORTEX_IDENTITY + guide }, ...messages];
   const toolInput = device ? { tools, tool_choice: repair ? "required" : "auto" } : {};
   const requested = plan ? Math.max(limit, 1600) : limit;
   // Only provider-reported usage is charged. The estimate protects concurrent in-flight calls.

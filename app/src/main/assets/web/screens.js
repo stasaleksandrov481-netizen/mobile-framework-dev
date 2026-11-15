@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.8";
+  let version = "1.0.9";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
@@ -12,7 +12,8 @@ const CortexUI = (() => {
     settings: "profile", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
     support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
-    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", "island-editor": "phone-tools", energy: "settings"
+    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", "island-editor": "phone-tools", energy: "settings",
+    account: "profile"
   };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -107,17 +108,19 @@ const CortexUI = (() => {
         <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action)}</small></span></div>`;
   }
 
+  const replyMark = `<span class="reply-mark" aria-hidden="true">${sign}</span>`;
+
   function chat(ctx) {
     const item = ctx.chat;
     const messages = (item?.messages || []).map((message, index) => message.role === "user"
       ? `<article class="message user${ctx.messageEnter && index === item.messages.length - 1 ? " new-turn" : ""}" aria-label="Вы">${esc(message.text)}</article>`
       : `<article class="message assistant${ctx.messageEnter && index === item.messages.length - 1 ? " new-response" : ""}" aria-label="Ответ CORTEX">
-        <div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
+        ${replyMark}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
         </div></article>`).join("");
-    const pending = ctx.pending ? `<article class="message assistant pending" aria-label="Ответ CORTEX">
-      <div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.render(ctx.pending.text) :
+    const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
+      ${replyMark}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
     const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">
@@ -176,22 +179,31 @@ const CortexUI = (() => {
   const tokenNumber = new Intl.NumberFormat("ru-RU");
   const resetTime = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
   const usageDate = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "numeric", timeZone: "UTC" });
-  function quotaPanel(quota) {
+  function quotaPanel(connection) {
+    const quota = connection.quota;
     const available = quota?.unit === "tokens";
     const percent = quota?.unlimited ? 100 : quota?.limit > 0 ? Math.max(0, Math.min(100, 100 * quota.remaining / quota.limit)) : 0;
     const reset = new Date(quota?.reset_at);
     const history = (Array.isArray(quota?.history) ? quota.history : []).filter(item =>
       /^\d{4}-\d{2}-\d{2}$/.test(item.day) && Number.isFinite(Date.parse(item.day)) && Number.isFinite(item.used)).slice(-7);
-    return `<section class="panel stack quota-panel"><h2>Токены ИИ</h2>
+    const maxUsed = Math.max(1, ...history.map(item => item.used));
+    const balanceStatus = !connection.checked && connection.status !== "offline" ? "Проверяем баланс…" :
+      connection.status === "offline" ? "Сервер сейчас не отвечает." :
+      connection.guest === false && !M.state.account ? "Войдите, чтобы увидеть баланс." : "Баланс временно недоступен.";
+    return `<section class="panel stack quota-panel"><header class="quota-heading">
+      <span class="section-symbol">${icon("spark", 20)}</span><h2>Токены ИИ</h2>
+      ${available ? `<span class="quota-reset">${connection.status === "offline" ? "Последние данные" : "Суточный лимит"}</span>` : ""}</header>
       ${available ? `<p class="quota-balance"><strong>${quota.unlimited ? "Безлимит" : esc(tokenNumber.format(quota.remaining))}</strong>
       ${quota.unlimited ? "" : `<small>из ${esc(tokenNumber.format(quota.limit))}</small>`}</p>
       <div class="quota-track" role="progressbar" aria-label="Осталось токенов" aria-valuemin="0" aria-valuemax="100"
         aria-valuenow="${Math.round(percent)}"><span style="--quota-progress:${percent}%"></span></div>
       ${Number.isFinite(reset.getTime()) ? `<small class="muted">Обновление в ${esc(resetTime.format(reset))} по Москве</small>` : ""}
-      ${history.length ? `<details class="quota-history"><summary>Использование за неделю</summary>
+      ${history.length ? `<details class="quota-history"><summary><span>Расход за неделю</span><span class="quota-bars" aria-hidden="true">
+        ${history.map(item => `<i style="--bar:${Math.round(14 + 86 * item.used / maxUsed)}%"></i>`).join("")}</span></summary>
         <ul>${history.map(item => `<li><time datetime="${item.day}">${esc(usageDate.format(new Date(item.day)))}</time>
           <span>${esc(tokenNumber.format(item.used))}</span></li>`).join("")}</ul></details>` : ""}` :
-      '<p class="muted">Остаток появится после подключения к серверу.</p>'}</section>`;
+      `<p class="muted" role="status">${balanceStatus}</p>${connection.status !== "loading" && connection.status !== "preview" ?
+        button("Обновить", "refresh", "refresh-connection", "", "quiet") : ""}`}</section>`;
   }
 
   function profile(ctx) {
@@ -199,17 +211,17 @@ const CortexUI = (() => {
     const type = { Email: "Вход по почте", Yandex: "Яндекс ID", Google: "Существующий аккаунт" }[account?.provider];
     return `<header class="profile-header"><h1>Профиль</h1></header>
       <div class="scroll profile-scroll stack">
-        <section class="profile-identity">
+        <section class="profile-identity glass-card">
           ${portrait(account, "large")}
           <div class="account-copy"><strong>${esc(account?.name || "Гость")}</strong>
-            <p>${esc(account?.email || "Локальные данные на этом устройстве")}</p>
+            <p>${esc(account?.email || "Данные хранятся на устройстве")}</p>
             ${type ? `<small class="muted">${esc(type)}</small>` : ""}
           </div>
           ${!account && ctx.native ? `<div class="profile-signin actions">
             ${button("Войти", "user", "account-options", "", "primary")}
-            ${button("Регистрация", "", "email-auth", "signup", "quiet")}</div>` : ""}
+            ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
         </section>
-        ${quotaPanel(ctx.connection.quota)}
+        ${quotaPanel(ctx.connection)}
         ${group(tile("Настройки", "Интерфейс, модели и уведомления", "sliders", "go", "settings") +
           tile("Данные и чаты", "История, экспорт и заметки", "folder", "go", "data") +
           tile("Память и персонализация", "Факты, контекст и стиль ответа", "memory", "go", "memory"))}
@@ -218,6 +230,59 @@ const CortexUI = (() => {
           tile("О приложении", "Версия и конфиденциальность", "info", "go", "about"))}
         ${account ? button("Выйти из аккаунта", "logout", "logout", "", "quiet") : ""}
       </div>`;
+  }
+
+  const accountModes = {
+    password: ["Войдите в CORTEX", "Войдите по почте или через Яндекс ID.", "Войти"],
+    signup: ["Создайте аккаунт", "Код подтверждения придёт на почту.", "Получить код"],
+    verify: ["Подтвердите почту", "Введите код из письма CORTEX.", "Подтвердить и войти"],
+    recover: ["Восстановите доступ", "Получите код для смены пароля.", "Получить код"],
+    reset: ["Задайте новый пароль", "Введите код из письма и новый пароль.", "Сменить пароль"]
+  };
+
+  function accountAvailability(connection) {
+    if (connection.status === "preview") return "Вход доступен в Android-приложении.";
+    if (connection.status === "offline") return "Проверьте подключение к интернету и повторите попытку.";
+    if (connection.status === "loading") return "Проверяем доступность входа…";
+    return connection.email ? "" : "Сервер CORTEX пока не принимает вход по почте.";
+  }
+
+  function account(ctx) {
+    const { connection, login, email, accountMode } = ctx;
+    const [title, description, submit] = accountModes[accountMode];
+    const newPassword = accountMode === "signup" || accountMode === "reset";
+    const code = accountMode === "verify" || accountMode === "reset";
+    const password = (name, caption) => `<label class="field"><span>${caption}</span><span class="account-password">
+      <input name="${name}" type="password" required maxlength="72" ${newPassword ? 'minlength="10" autocomplete="new-password"' : 'autocomplete="current-password"'}>
+      ${iconButton("eye", "Показать пароль", "password-visibility")}</span></label>`;
+    return `<header class="section-header account-top">${iconButton("back", "К профилю", "back", "", "section-back")}
+      <span class="brand">${sign}<span>CORTEX</span></span></header>
+      <div class="scroll account-scroll"><div class="account-page">
+        <div class="account-hero"><div class="account-art glass-card" aria-hidden="true">${sign}<i></i><i></i></div>
+          <section class="account-heading"><h1>${title}</h1><p>${description}</p></section></div>
+        ${login ? `<section class="account-fields glass-card" aria-label="Яндекс ID"><span class="section-symbol">${icon("globe", 23)}</span>
+          <h2>Вход через Яндекс ID</h2><p class="muted" role="status" data-login-status>${esc(login.browser ? "Подтвердите вход в браузере и вернитесь в CORTEX." : "Открываем Яндекс ID…")}</p>
+          ${button("Отмена", "close", "cancel-login", "", "outline")}</section>` : `
+        ${["password", "signup"].includes(accountMode) ? `<div class="account-tabs" aria-label="Способ входа">
+          ${pill("Вход", "email-auth", "password", accountMode === "password")}${pill("Регистрация", "email-auth", "signup", accountMode === "signup")}</div>` : ""}
+        <form id="account-form" class="account-fields" data-mode="${accountMode}">
+          ${accountMode === "signup" ? '<label class="field"><span>Имя</span><input name="name" type="text" autocomplete="name" maxlength="100" placeholder="По желанию"></label>' : ""}
+          <label class="field"><span>Электронная почта</span><input name="email" type="email" maxlength="254" required autocomplete="email"
+            placeholder="name@example.com" value="${esc(email)}" autocapitalize="none" spellcheck="false"></label>
+          ${code ? '<label class="field"><span>Код из письма</span><input name="code" type="text" inputmode="numeric" required autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10"></label>' : ""}
+          ${accountMode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : ""}
+          ${newPassword ? password("confirmation", "Повторите пароль") + '<small class="muted">Минимум 10 символов.</small>' : ""}
+          <p class="account-availability" data-auth-status role="status" ${accountAvailability(connection) ? "" : "hidden"}>${accountAvailability(connection)}</p>
+          <p class="form-error" role="alert" hidden></p>
+          <button class="action primary account-submit" type="submit"><span>${submit}</span>${icon("chevron", 18)}</button>
+          ${accountMode === "password" ? `<div class="account-links">${button("Забыли пароль?", "", "email-auth", "recover", "quiet")}
+            ${button("Подтвердить почту", "", "email-auth", "verify", "quiet")}</div>` : ""}
+        </form>
+        ${accountMode === "password" ? `<div class="account-provider" data-yandex-area>
+          ${button("Войти через Яндекс ID", "globe", "login", "", "outline")}
+          <small class="muted" data-yandex-status ${connection.checked && !connection.yandex ? "" : "hidden"}>Яндекс ID пока не подключён.</small></div>` : ""}
+        ${!["password", "signup"].includes(accountMode) ? button("Вернуться ко входу", "back", "email-auth", "password", "quiet") : ""}`}
+      </div></div>`;
   }
   function settings() {
     return detail("Настройки", "", group(
@@ -319,7 +384,7 @@ const CortexUI = (() => {
   }
   function models(ctx) {
     const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection.quota) + `<section class="panel stack">
+    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection) + `<section class="panel stack">
       ${choices(M.models, model, "model-profile")}
       <p class="muted">${({
         auto: "Автоматический выбор подходящей бесплатной модели.",
@@ -455,7 +520,7 @@ const CortexUI = (() => {
   }
 
   function page(route, ctx) {
-    const pages = { home, chat, chats, profile, settings, motion, "phone-tools": phoneTools, language, notifications,
+    const pages = { home, chat, chats, profile, account, settings, motion, "phone-tools": phoneTools, language, notifications,
       data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
@@ -469,5 +534,5 @@ const CortexUI = (() => {
   }
   return { esc, icon, iconButton, button, tile, detail, get version() { return version; },
     setVersion(value) { if (/^\d+\.\d+\.\d+(?:[-.][a-z0-9.]+)?$/i.test(value)) version = value; },
-    tabs, parent, page, composer, navigation, history, chatItems };
+    tabs, parent, page, composer, navigation, history, chatItems, accountModes, accountAvailability };
 })();

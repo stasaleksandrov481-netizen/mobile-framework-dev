@@ -9,7 +9,7 @@ internal object CortexLocalCommands {
         "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи"
     private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)\b))\s*""", RegexOption.IGNORE_CASE)
     private val unpunctuated = Regex("""\s+(?=(?:$verbs)\b)""", RegexOption.IGNORE_CASE)
-    private val prefix = Regex("""^(?:кортекс|cortex)[,\s]+|^(?:можешь|не мог бы ты|давай|нужно|надо)\s+""", RegexOption.IGNORE_CASE)
+    private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
     private val infinitives = mapOf("включить" to "включи", "выключить" to "выключи", "отключить" to "отключи",
         "погасить" to "погаси", "открыть" to "открой", "закрыть" to "закрой", "запустить" to "запусти",
         "свернуть" to "сверни", "заблокировать" to "заблокируй", "сфотографировать" to "сфотографируй")
@@ -25,7 +25,7 @@ internal object CortexLocalCommands {
     private val spaces = Regex("""\s+""")
 
     fun parse(raw: String, resolveApp: (String) -> String?): List<JSONObject>? {
-        val original = raw.trim().trimEnd('.', '!', '?').replace(prefix, "").replace(prefix, "").trim()
+        val original = (CortexHotword.command(raw) ?: raw).trim().trimEnd('.', '!', '?').replaceFirst(prefix, "").trim()
             .replace(Regex("""^пожалуйста,?\s+|,?\s+пожалуйста$""", RegexOption.IGNORE_CASE), "")
         val request = normalized(original)
         if (request.isBlank() || instruction.containsMatchIn(request)) return null
@@ -61,8 +61,8 @@ internal object CortexLocalCommands {
             "переключи фонарик" -> command("torch", "mode" to "toggle")
             "убери громкость", "выключи звук", "отключи звук", "убери звук", "поставь без звука" ->
                 command("volume", "mode" to "mute", "stream" to "media")
-            "прибавь громкость", "увеличь громкость", "сделай погромче" -> command("volume", "mode" to "up")
-            "убавь громкость", "уменьши громкость", "сделай потише" -> command("volume", "mode" to "down")
+            "прибавь громкость", "увеличь громкость", "прибавь звук", "сделай погромче" -> command("volume", "mode" to "up")
+            "убавь громкость", "уменьши громкость", "убавь звук", "сделай потише" -> command("volume", "mode" to "down")
             "который час", "который сейчас час", "сколько сейчас времени", "сколько времени", "скажи время" ->
                 command("read_device", "target" to "time")
             "сколько заряда", "сколько процентов заряда", "проверь заряд", "сколько заряда осталось", "покажи заряд" ->

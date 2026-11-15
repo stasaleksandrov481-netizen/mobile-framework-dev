@@ -33,14 +33,22 @@ window.CortexSetup = (() => {
   }
 
   function prologue(id) {
-    if (id === "welcome") return '<div class="intro-stage hero-intro"><div class="intro-orbit"><i></i><i></i><i></i>' +
-      mark + '</div><h1>Скажите, что<br>нужно сделать.</h1><p>CORTEX принимает голосовые команды, управляет Android и показывает ответы текстом.</p></div>';
-    return '<div class="intro-stage capability-intro"><div class="intro-illustration intro-demo" data-demo="' + demo + '">' +
-      '<span class="intro-prompt">Включи фонарик</span><div class="intro-beam"></div><span class="intro-action">' +
-      (demo === 2 ? icon("check", 16) + " Android подтвердил" :
-        demo === 1 ? '<b class="intro-mini-dots"><i></i><i></i><i></i></b> Проверяю фонарик…' : "Задача ещё не запущена") +
-      '</span></div><h1>Видно каждый шаг.</h1><p>Островок показывает, что делает CORTEX. Задачу можно остановить с экрана или из уведомления.</p>' +
-      '<button type="button" class="action outline" data-intro-action="demo">Проиграть пример</button></div>';
+    const face = '<span class="plan-face intro-face" aria-hidden="true"><i></i><i></i><b></b></span>';
+    if (id === "welcome") return `<div class="intro-stage hero-intro"><div class="intro-orbit">
+      <i></i><i></i><div class="intro-lens glass-card">${mark}</div>${face}</div>
+      <h1>Голосом или текстом</h1><p>Скажите, что сделать. CORTEX выполнит команду на телефоне или ответит в чате.</p>
+      <ul class="intro-capabilities"><li>${icon("folder", 20)}<span>Открыть приложение</span></li>
+        <li>${icon("bolt", 20)}<span>Изменить яркость или звук</span></li>
+        <li>${icon("bell", 20)}<span>Поставить напоминание</span></li>
+        <li>${icon("layers", 20)}<span>Запустить цепочку действий</span></li></ul></div>`;
+    const state = demo === 2 ? icon("check", 17) + " Фонарик включён" : demo === 1 ?
+      '<span class="intro-mini-dots"><i></i><i></i><i></i></span> Проверяю фонарик…' : "Ожидание команды";
+    return `<div class="intro-stage capability-intro">
+      <div class="intro-command glass-card" data-demo="${demo}">
+        <div class="intro-command-island">${face}<span>CORTEX</span>${icon("wave", 20)}</div>
+        <p class="intro-command-question">Включи фонарик</p><p class="intro-command-result" role="status">${state}</p>
+        <button type="button" class="action outline" data-intro-action="demo">${icon("play", 16)}${demo ? "Повторить пример" : "Показать пример"}</button>
+      </div><h1>Каждый шаг на виду</h1><p>Островок показывает ход задачи. Нажмите на него для мини-чата, остановите выполнение с экрана или из уведомления.</p></div>`;
   }
 
   function access(item) {
@@ -87,13 +95,13 @@ window.CortexSetup = (() => {
     const oldWidth = view.querySelector(".intro-meter i")?.style.width;
     const previous = direction === 0 ? view.querySelector(".intro-content")?.scrollTop || 0 : 0;
     view.innerHTML = '<div class="intro-top"><span class="intro-wordmark">CORTEX</span>' +
-      (!single ? '<span class="intro-progress" aria-label="Шаг ' + (page + 1) + ' из ' + pages.length + '">' + (page + 1) + ' / ' + pages.length + '</span>' : '') +
-      '<button type="button" data-intro-action="close" aria-label="Закрыть">×</button></div><section class="intro-content">' + content +
-      '</section><div class="intro-bottom">' + (!single ? '<div class="intro-meter"><i style="width:' + (100 * (page + 1) / pages.length) + '%"></i></div>' : '') +
+      '<button type="button" data-intro-action="close">' + (single ? 'Закрыть' : 'Пропустить') + '</button></div><section class="intro-content">' + content +
+      '</section><div class="intro-bottom">' + (!single ? '<div class="intro-meter" role="progressbar" aria-label="Первый запуск" aria-valuemin="0" aria-valuemax="' +
+      pages.length + '" aria-valuenow="' + (page + 1) + '"><i style="width:' + (100 * (page + 1) / pages.length) + '%"></i></div>' : '') +
       '<div class="intro-nav"><button type="button" class="intro-back" data-intro-action="back" ' + (page === 0 || single ? "hidden" : "") + '>Назад</button>' +
       '<button type="button" class="intro-next" data-intro-action="next">' +
       (single ? "Готово" : id === "finish" ? "Открыть CORTEX" : "Далее") +
-      ' <span aria-hidden="true">↗</span></button></div></div>';
+      ' ' + icon("chevron", 19) + '</button></div></div>';
     const bar = view.querySelector(".intro-meter i");
     if (bar && oldWidth && direction && !reduced()) {
       bar.animate([{ width: oldWidth }, { width: bar.style.width }], { duration: 370, easing: "cubic-bezier(.16,1,.3,1)" });
@@ -194,7 +202,7 @@ window.CortexSetup = (() => {
   return {
     start: () => show(0),
     autoStart: () => { if (localStorage.getItem(key) !== "done") show(0); },
-    openPermission(id) { const index = pages.indexOf(id); if (index >= 2) show(index, true); },
+    openPermission(id) { const index = pages.indexOf(id); if (accesses.some(item => item.id === id)) show(index, true); },
     updatePermissions(value) {
       const id = pages[page];
       const before = permissions[id];

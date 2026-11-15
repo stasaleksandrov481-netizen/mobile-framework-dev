@@ -103,6 +103,8 @@ internal object VisualRequest {
     private val explain = Regex("""^(?:как|зачем|почему|можно ли|что (?:такое|будет|умеешь)|объясни|расскажи|подскажи,? как|how|why|explain)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
     private val device = Regex("""(?:(?<![\p{L}\p{N}_])(?:телефон|экран|android|приложени|браузер|настройк|вкладк|фонарик|проводник|кнопк|ярлык|папк|камер|файл|фото|частот[ау]|герцовк|шторк|рабочий стол|тест на|сайт|переписк|личк|контакт|сообщени|памят[ьи]|аккумулятор|заряд|батаре|хранилищ|яркост|громкост|bluetooth|desktop|settings|app|browser|screen|folder|flashlight|http|https)|\w+\.(?:ru|com|org)(?![\p{L}\p{N}_]))""", RegexOption.IGNORE_CASE)
     private val generic = Regex("""^(?:напиши|сделай|найди|покажи|прочитай|реши|запиши|исправь|выполни|настрой|напиши мне|write|show|read|find)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
+    private val writeInChat = Regex("""^(?:напиши|придумай|сочини|составь)\s+(?:мне\s+)?(?:текст|пост|историю|сценарий|письмо|описание|план)\s+(?:про|о|об|по теме|на тему)\s""", RegexOption.IGNORE_CASE)
+    private val screenQuestion = Regex("""^(?:что (?:сейчас )?на (?:мо[её]м )?экране|что ты видишь на экране|what(?:'s| is) on (?:my|the) screen)$""", RegexOption.IGNORE_CASE)
     private val resume = Regex("""^(?:(?:давай\s+)?продолж(?:и|ай)(?:\s+(?:задачу|действия))?|возобнови(?:\s+задачу)?|resume(?:\s+task)?)[.!]?$""", RegexOption.IGNORE_CASE)
     private val open = Regex("""^(?:открой|открыть|запусти|запустить|open|launch)\s+(?:приложение\s+|the\s+app\s+)?(.+)$""", RegexOption.IGNORE_CASE)
     private val toggle = Regex("""^(включи|включить|выключи|выключить|отключи|отключить)\s+(.+)$""", RegexOption.IGNORE_CASE)
@@ -134,7 +136,7 @@ internal object VisualRequest {
         }
     }
 
-    fun readsScreen(text: String): Boolean = Regex(
+    fun readsScreen(text: String): Boolean = screenQuestion.matches(cleanCommand(text)) || Regex(
         """(?:прочитай|что на экране|проанализируй|реши|учи[. ]?ру|read screen|on screen)""", RegexOption.IGNORE_CASE
     ).containsMatchIn(text)
 
@@ -153,8 +155,9 @@ internal object VisualRequest {
 
     private fun actionCommand(text: String, command: String): Boolean {
         if (text.startsWith("действие:", true) || isResume(text) || home.matches(command) ||
-            back.matches(command) || swipe.matches(command) || lock.matches(command) || takePhoto.matches(command)) return true
-        if (explain.containsMatchIn(command) || !action.containsMatchIn(command)) return false
+            back.matches(command) || swipe.matches(command) || lock.matches(command) || takePhoto.matches(command) ||
+            screenQuestion.matches(command)) return true
+        if (explain.containsMatchIn(command) || writeInChat.containsMatchIn(command) || !action.containsMatchIn(command)) return false
         return !generic.containsMatchIn(command) || device.containsMatchIn(command)
     }
 

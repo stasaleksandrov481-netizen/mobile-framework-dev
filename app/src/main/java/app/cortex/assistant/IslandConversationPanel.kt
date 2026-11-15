@@ -13,8 +13,12 @@ import android.os.SystemClock
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -41,7 +45,7 @@ internal class IslandConversationPanel(
     private val status = label(10.5f, 0xFFC6C6C6.toInt())
     private val brand = label(12f, Color.WHITE)
     private val signal = Signal()
-    private val response = label(14.5f, 0xFFF0F0F0.toInt())
+    private val response = label(15f, 0xFFF0F0F0.toInt())
     private val answerScroll = ScrollView(context)
     private val header = LinearLayout(context)
     private val editor = EditText(context)
@@ -99,10 +103,12 @@ internal class IslandConversationPanel(
             addView(response, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
         response.apply {
-            setPadding(dp(4), dp(9), dp(4), dp(10))
-            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(13), dp(11), dp(13), dp(11))
+            setLineSpacing(dp(2).toFloat(), 1.1f)
+            letterSpacing = .006f
             setTextIsSelectable(true)
         }
+        decorateReply()
         addView(answerScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6) })
         addView(widgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
 
@@ -165,7 +171,8 @@ internal class IslandConversationPanel(
     }
 
     fun status(phase: String, label: String) {
-        if (signal.phase != phase) {
+        val changed = signal.phase != phase
+        if (changed) {
             signal.phase = phase
             signal.invalidate()
         }
@@ -173,6 +180,11 @@ internal class IslandConversationPanel(
         status.visibility = if (appearance.status || phase == "reminder") VISIBLE else GONE
         if (status.text.toString() == message) return
         status.text = message
+        if (changed && motion) {
+            status.animate().cancel()
+            status.alpha = .64f
+            status.animate().alpha(1f).setDuration(190L).start()
+        }
     }
 
     fun animateSignal(animate: Boolean) {
@@ -200,20 +212,59 @@ internal class IslandConversationPanel(
     fun answer(value: String) {
         if (answer == value) return
         val wasEmpty = answer.isBlank()
+        val appended = value.startsWith(answer)
+        val pinned = answerScroll.scrollY >= response.height - answerScroll.height - dp(22)
         answer = value
         val hasAnswer = value.isNotBlank()
-        response.text = value
+        response.text = styledReply(value)
         answerScroll.visibility = if (hasAnswer) VISIBLE else INVISIBLE
         if (wasEmpty == hasAnswer) renderWidgets()
         if (wasEmpty && hasAnswer) {
             answerScroll.scrollTo(0, 0)
             if (motion) {
-                response.alpha = 0f
-                response.translationY = dp(8).toFloat()
-                response.scaleX = .986f
-                response.animate().alpha(1f).translationY(0f).scaleX(1f).setDuration(330)
+                response.animate().cancel()
+                response.alpha = .52f
+                response.translationY = dp(6).toFloat()
+                response.animate().alpha(1f).translationY(0f).setDuration(275)
                     .setInterpolator(android.view.animation.PathInterpolator(.18f, 1f, .32f, 1f)).start()
             }
+        } else if (hasAnswer && appended && pinned) {
+            answerScroll.post {
+                if (answer == value) answerScroll.scrollTo(0, (response.height - answerScroll.height).coerceAtLeast(0))
+            }
+        }
+    }
+
+    private fun styledReply(value: String): CharSequence = SpannableStringBuilder().apply {
+        value.lineSequence().forEachIndexed { index, raw ->
+            if (index > 0) append('\n')
+            val lineStart = length
+            val heading = HEADING.find(raw)
+            val line = if (heading != null) raw.substring(heading.range.last + 1)
+                else raw.replaceFirst(BULLET, "•  ")
+            var consumed = 0
+            for (match in EMPHASIS.findAll(line)) {
+                append(line.substring(consumed, match.range.first))
+                val start = length
+                append(match.groupValues[1])
+                setSpan(StyleSpan(Typeface.BOLD), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                consumed = match.range.last + 1
+            }
+            append(line.substring(consumed))
+            if (heading != null && length > lineStart) {
+                setSpan(StyleSpan(Typeface.BOLD), lineStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(RelativeSizeSpan(1.11f), lineStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+
+    private fun decorateReply() {
+        val tint = appearance.text and 0x00FFFFFF
+        answerScroll.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+            tint or 0x16000000, tint or 0x0A000000
+        )).apply {
+            cornerRadius = dp(16).toFloat()
+            setStroke(dp(1), tint or 0x24000000)
         }
     }
 
@@ -230,6 +281,7 @@ internal class IslandConversationPanel(
     fun appearance(value: IslandAppearance) {
         if (appearance == value) return
         appearance = value
+        decorateReply()
         response.setTextColor(value.text)
         brand.setTextColor(value.text)
         status.setTextColor(value.text)
@@ -240,6 +292,12 @@ internal class IslandConversationPanel(
         sendButton.invalidate()
         for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
         renderWidgets()
+    }
+
+    private companion object {
+        val HEADING = Regex("""^#{1,4}\s+""")
+        val BULLET = Regex("""^\s*[-*]\s+""")
+        val EMPHASIS = Regex("""\*\*([^*\n]+)(?:\*\*|$)""")
     }
 
     fun reminder(action: ((String) -> Unit)?) {

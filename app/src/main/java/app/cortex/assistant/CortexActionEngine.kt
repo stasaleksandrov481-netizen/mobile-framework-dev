@@ -47,6 +47,13 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         finished: (Result) -> Unit
     ): Boolean {
         val text = raw.trim().take(2400)
+        if (!scheduled && !force && explicitScenario == null) {
+            val screen = CortexScreenService.connected
+            CortexDeviceContext.capabilities(text, allowPhone, screen != null && !screen.locked())?.let {
+                finished(Result(it, true))
+                return true
+            }
+        }
         if (!scheduled) {
             CortexIslandService.handleControl(context, text)?.let {
                 finished(Result(it, true))

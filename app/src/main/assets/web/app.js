@@ -19,11 +19,13 @@
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
   const filters = { search: "" };
-  const connection = { yandex: false, email: false, profiles: false, checked: false, visualPrivacy: false };
+  const connection = { yandex: false, email: false, profiles: false, checked: false, visualPrivacy: false,
+    status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
-  let pending, login, voice, activeSheet, ghost, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
+  let accountMode = "password", accountEmail = "";
+  let pending, login, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
   let connectionLoad, loginCleanup;
   let keyboardBaseline = 0, keyboardObserved = false, historySearchTimer = 0;
   let statusEpoch = 0, splashFrame = 0, splashTimer = 0, splashPrevious = null;
@@ -141,10 +143,9 @@
   }
 
   function mountWave() {
-    if (app.classList.contains("in-onboarding")) { Wave.stop(); return; }
+    if (!splash.hidden || app.classList.contains("in-onboarding")) { Wave.stop(); return; }
     const main = route === "home" || route === "chat" && app.dataset.chatContent === "empty";
-    const host = !splash.hidden ? splash.querySelector("[data-splash-host]") :
-      main ? ambient : screen.querySelector("[data-wave-host]");
+    const host = main ? ambient : screen.querySelector("[data-wave-host]");
     if (!host) { Wave.stop(); return; }
     const kind = host === ambient ? route : host.dataset.waveHost || "splash";
     Wave.mount(host, {
@@ -182,6 +183,7 @@
     const previousChat = screen.dataset.chat;
     const same = previousRoute === route && (route !== "chat" || previousChat === chatId);
     app.dataset.route = route;
+    document.body.classList.toggle("account-route", route === "account");
     app.dataset.chatContent = route === "chat" && (current()?.messages.length || errors.has(chatId)) ? "filled" : "empty";
     screen.dataset.route = route;
     screen.dataset.chat = route === "chat" ? chatId : "";
@@ -190,9 +192,10 @@
       connection, permissions, wakeState, islandCamera, native: Boolean(device), login, chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
-      rule, ruleDraft: ruleDrafts.get(rule)
+      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail
     });
     renderNav();
+    nav.hidden = route === "account";
     composition.hidden = route !== "home" && route !== "chat";
     if (!composition.hidden) {
       const draft = drafts.get(draftKey()) || "";
@@ -217,29 +220,6 @@
     headingMotion?.cancel();
     clearMorph?.();
     clearMorph = null;
-    ghost?.remove();
-    ghost = null;
-  }
-
-  function fadeOldPage(duration, leavingHome, direction = 0) {
-    const r = localRect(screen.getBoundingClientRect());
-    const old = screen.cloneNode(true);
-    old.removeAttribute("id");
-    old.removeAttribute("data-route");
-    old.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
-    if (leavingHome) for (const node of old.querySelectorAll(".home-header, .hero-copy")) node.style.visibility = "hidden";
-    old.classList.add("page-ghost");
-    old.inert = true;
-    old.setAttribute("aria-hidden", "true");
-    old.style.cssText = "left:" + r.x + "px;top:" + r.y + "px;width:" + r.w + "px;height:" + r.h + "px";
-    app.append(old);
-    const prevScroll = screen.querySelector(".scroll");
-    if (prevScroll) old.querySelector(".scroll").scrollTop = prevScroll.scrollTop;
-    ghost = old;
-    const remove = () => { old.remove(); if (ghost === old) ghost = null; };
-    old.animate([{ opacity: 1, transform: "none" },
-      { opacity: 0, transform: `translate3d(${-direction * 10}px,-3px,0) scale(.996)` }],
-      { duration, easing: "cubic-bezier(.24,.62,.24,1)", fill: "forwards" }).finished.then(remove, remove);
   }
 
   const box = node => node ? localRect(node.getBoundingClientRect()) : null;
@@ -251,11 +231,9 @@
     const mark = screen.querySelector("[data-chat-logo] .brand-mark");
     clearMorph?.();
     clearMorph = Motion.core(app, from, box(mark));
-    if (mark && clearMorph) mark.animate(
-      [{ opacity: .16, transform: "scale(.84)" }, { opacity: .35, offset: .55 },
-        { opacity: 1, transform: "scale(1)" }],
-      { duration: 875, easing: "cubic-bezier(.26,.71,.24,1)" }
-    );
+    if (mark && clearMorph) headingMotion = mark.animate(
+      [{ opacity: 0, transform: "scale(.87)" }, { opacity: 0, offset: .70 }, { opacity: 1, transform: "none" }],
+      { duration: Motion.coreDuration, easing: "linear" });
   }
 
   function moveComposer(from, to, cinematic) {
@@ -269,13 +247,13 @@
     ], { duration: cinematic ? 520 : 275, easing: "cubic-bezier(.21,.8,.18,1)" });
   }
 
-  function navigate(next, { id, replace = false, origin, newChat = false, messageEnter = false, cinematic = false } = {}) {
+  function navigate(next, { id, replace = false, origin, newChat = false, messageEnter = false, cinematic = false, animate = true } = {}) {
     if (!routes.has(next)) return;
     const previous = route;
     const previousId = chatId;
     if (next === "chat") id = id && M.chat(id) ? id : current()?.id || M.createChat().id;
     if (previous === next && (next !== "chat" || id === chatId)) return;
-    if (login && !sheet.open) stopLogin();
+    if (login && next !== "account") stopLogin();
     closeVoice();
     closeSheet();
     closeHistory(true);
@@ -287,13 +265,10 @@
     const title = box(screen.querySelector(".hero-copy h1"));
     if (next !== "chat" && document.activeElement === input) input.blur();
     if (next !== "chat") app.classList.remove("composer-active");
-    const animated = !reduced() && typeof screen.animate === "function";
+    const animated = animate && !reduced() && typeof screen.animate === "function";
     const intoChat = next === "chat" && previous === "home";
     const intoHome = next === "home";
     const switchesTab = rootTab(previous) !== rootTab(next, id);
-    if (animated && (route === "home" || route === "chat" && (current()?.messages.length || 0) < 15)) {
-      fadeOldPage(switchesTab ? 240 : 176, intoChat, switchesTab ? tabDirection : 0);
-    }
     route = next;
     if (next === "chat") chatId = id;
     if (previous === "chat" && (next !== "chat" || chatId !== previousId)) discardTemporary(previousId);
@@ -302,7 +277,7 @@
     render({ bottom: next === "chat", messageEnter });
     if (animated) {
       const after = !composition.hidden ? box(form) : null;
-      if (intoChat || intoHome) moveComposer(before, after, intoChat);
+      if (intoChat || intoHome || cinematic) moveComposer(before, after, cinematic || intoChat);
       const heading = screen.querySelector(".chat-empty h1");
       const to = box(heading);
       if (intoChat && title && to) {
@@ -311,7 +286,7 @@
           { transform: `translate(${x}px,${y}px) scale(${title.w / to.w})` }, { transform: "none" }
         ], { duration: 460, easing: "cubic-bezier(.22,.74,.21,1)" });
       }
-      pageMotion = Motion.page(screen, tabDirection, switchesTab);
+      pageMotion = cinematic ? Motion.revealChat(screen.querySelector(".conversation")) : Motion.page(screen, tabDirection, switchesTab);
       if (cinematic) playCore(source);
       if (switchesTab) Motion.dock(nav.querySelector("[aria-current=page]"));
       if (newChat && origin) {
@@ -331,6 +306,7 @@
     const [name, id] = location.hash.slice(1).split("/");
     const resolved = { appearance: "motion", connection: "settings", voice: "phone-tools" }[name] || name;
     route = routes.has(resolved) ? resolved : "home";
+    if (login && route !== "account") stopLogin();
     if (route !== "chat" && document.activeElement === input) input.blur();
     if (route !== "chat") app.classList.remove("composer-active");
     if (route === "chat") {
@@ -558,15 +534,30 @@
     const epoch = ++statusEpoch;
     try {
       const data = await Api.request("status");
-      if (epoch !== statusEpoch || data.fault) return;
+      if (epoch !== statusEpoch) return;
+      if (data.fault) throw Api.failure(data.fault);
       connection.checked = true;
+      connection.status = "ready";
       connection.yandex = data.yandex === true;
       connection.email = data.email_auth === true;
+      connection.guest = data.guest === true;
       connection.profiles = data.device_profiles === true;
       if (!login) setAccount(data.account);
       connection.quota = data.quota || null;
-      if (["profile", "models"].includes(route)) render();
-    } catch {}
+    } catch {
+      if (epoch !== statusEpoch) return;
+      connection.status = "offline";
+    }
+    if (["profile", "models"].includes(route)) render();
+    if (route === "account") {
+      const status = screen.querySelector("[data-auth-status]");
+      if (status) {
+        status.textContent = U.accountAvailability(connection);
+        status.hidden = !status.textContent;
+      }
+      const yandexStatus = screen.querySelector("[data-yandex-status]");
+      if (yandexStatus) yandexStatus.hidden = !connection.checked || connection.yandex;
+    }
   }
 
   addEventListener("cortex-quota", event => {
@@ -577,7 +568,7 @@
   });
 
   function updateLogin(message) {
-    const text = sheet.querySelector("[data-login-status]");
+    const text = screen.querySelector("[data-login-status]");
     if (text) text.textContent = message;
   }
 
@@ -586,13 +577,12 @@
     clearTimeout(login.timer);
     login = null;
     loginCleanup = Api.request("auth-cancel").catch(() => {});
-    if (route === "profile") render();
   }
 
   function showLogin(attempt) {
-    showSheet("Вход через Яндекс ID", `<div class="stack">
-      <p class="muted" data-login-status>Подтвердите вход в браузере. CORTEX проверит результат после возврата.</p>
-      <div class="actions">${button("Отмена", "", "close")}</div></div>`, { cleanup: stopLogin });
+    attempt.browser = true;
+    if (route === "account") render();
+    else navigate("account");
     attempt.timer = setTimeout(pollLogin, 1500);
   }
 
@@ -613,7 +603,7 @@
     if (!attempt || attempt.busy || !appVisible()) return;
     if (Date.now() >= attempt.expires) {
       stopLogin();
-      closeSheet();
+      render();
       flash(Api.failure("auth_expired").message);
       return;
     }
@@ -627,8 +617,7 @@
         ++statusEpoch;
         setAccount(result.account);
         window.CortexControl?.refresh();
-        closeSheet();
-        render();
+        navigate("profile", { replace: true });
         refreshConnection();
         flash("Вход выполнен");
         return;
@@ -638,7 +627,7 @@
       if (login !== attempt) return;
       if (["auth_expired", "auth_denied", "account_forbidden"].includes(error.code)) {
         stopLogin();
-        closeSheet();
+        render();
         flash(error.message);
         return;
       }
@@ -652,6 +641,9 @@
   async function startLogin() {
     if (login) return;
     if (!Api.available || !device) { flash(Api.failure(Api.android ? "webview" : "preview").message); return; }
+    if (!connection.yandex || connection.status === "offline") await refreshConnection();
+    if (route !== "account" || login) return;
+    if (!connection.yandex) { flash("Вход через Яндекс ID пока не настроен."); return; }
     const attempt = { busy: true, expires: Infinity, timer: 0 };
     login = attempt;
     render();
@@ -666,7 +658,7 @@
     } catch (error) {
       if (login === attempt) {
         login = null;
-        if (route === "profile") render();
+        if (route === "account") render();
         flash(error.message);
       }
     }
@@ -675,64 +667,72 @@
   function loginBrowserFailed() {
     if (!login) return;
     stopLogin();
-    closeSheet();
+    if (route === "account") render();
     flash("Не удалось открыть браузер Android.");
   }
 
   function accountOptions() {
-    showSheet("Войти в CORTEX", `<div class="stack auth-options">
-      ${button("По электронной почте", "user", "email-auth", "password", "primary")}
-      ${connection.yandex || !connection.checked ? button("Через Яндекс ID", "", "login", "", "outline") : ""}
-      ${button("Создать аккаунт", "", "email-auth", "signup", "quiet")}
-    </div>`);
+    emailForm("password");
   }
 
   function emailForm(mode, email = "") {
-    const forms = {
-      password: ["Вход по почте", "Войти"], signup: ["Создание аккаунта", "Отправить код"],
-      verify: ["Подтверждение почты", "Подтвердить"], recover: ["Восстановление пароля", "Отправить код"],
-      reset: ["Новый пароль", "Изменить пароль"]
-    };
-    if (!Object.hasOwn(forms, mode)) return;
-    const [title, label] = forms[mode];
-    const newPassword = mode === "signup" || mode === "reset";
-    const code = mode === "verify" || mode === "reset";
-    const password = (name, title) => `<label class="field"><span>${title}</span>
-      <input name="${name}" type="password" required maxlength="72" ${newPassword ? 'minlength="10" autocomplete="new-password"' :
-        'autocomplete="current-password"'}></label>`;
-    editor(title, (mode === "signup" ? field("name", "Имя", "", { optional: true }) : "") +
-      `<label class="field"><span>Электронная почта</span><input name="email" type="email" maxlength="254" required
-      autocomplete="email" autocapitalize="none" spellcheck="false" value="${esc(email)}"></label>` +
-      (code ? '<label class="field"><span>Код из письма</span><input name="code" type="text" inputmode="numeric" required ' +
-        'autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10"></label>' : "") +
-      (mode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : "") +
-      (newPassword ? password("confirmation", "Повторите пароль") : "") +
-      (newPassword ? '<small class="muted">Пароль должен содержать от 10 символов.</small>' : ""),
-    async values => {
-      const active = activeSheet;
-      if (newPassword && values.password !== values.confirmation) throw new Error("Пароли не совпадают.");
+    if (!Object.hasOwn(U.accountModes, mode)) return;
+    if (route === "account" && screen.querySelector("#account-form")?.getAttribute("aria-busy") === "true") return;
+    if (route === "account" && accountMode === mode && !login) return;
+    if (login) stopLogin();
+    accountMode = mode;
+    accountEmail = email;
+    if (route === "account") render();
+    else navigate("account");
+    if (!connection.checked && connection.status !== "loading") refreshConnection();
+  }
+
+  async function submitAccount(form, values) {
+    const mode = form.dataset.mode;
+    const error = form.querySelector(".form-error");
+    const submit = form.querySelector("[type=submit]");
+    if (submit.disabled || login) return;
+    error.hidden = true;
+    submit.disabled = true;
+    form.setAttribute("aria-busy", "true");
+    const label = submit.firstElementChild;
+    const previousLabel = label.textContent;
+    label.textContent = "Подождите…";
+    try {
+      if (mode === "signup" || mode === "reset") {
+        if (values.password !== values.confirmation) throw new Error("Пароли не совпадают.");
+        if (new TextEncoder().encode(values.password).length > 72) throw Api.failure("invalid_password");
+      }
+      if (!Api.available) throw Api.failure(Api.android ? "webview" : "preview");
+      if (!connection.email || connection.status === "offline") await refreshConnection();
+      if (!form.isConnected) return;
+      if (connection.status === "offline") throw Api.failure("offline");
+      if (!connection.email) throw new Error(U.accountAvailability(connection));
       const result = await Api.request("auth-" + mode, { payload: {
         name: values.name, email: values.email, password: values.password, code: values.code
       } });
+      form.removeAttribute("aria-busy");
       if (result.state === "signed_in" && M.account(result.account)) {
         ++statusEpoch;
         setAccount(result.account);
-        if (activeSheet === active) closeSheet();
-        render();
+        if (form.isConnected) navigate("profile", { replace: true });
         refreshConnection();
         window.CortexControl?.refresh();
         flash("Вход выполнен");
-      } else if (activeSheet === active) {
-        if (result.state === "check_email") emailForm(mode === "signup" ? "verify" : "reset", values.email);
-        if (result.state === "password_changed") {
-          setAccount(null);
-          emailForm("password", values.email);
-          flash("Пароль изменён");
-        }
+      } else if (result.state === "check_email" && form.isConnected) {
+        emailForm(mode === "signup" ? "verify" : "reset", values.email);
+      } else if (result.state === "password_changed" && form.isConnected) {
+        setAccount(null);
+        emailForm("password", values.email);
+        flash("Пароль изменён");
       }
-    }, { label, extra: mode === "password" ? '<div class="actions">' +
-      button("Забыли пароль?", "", "email-auth", "recover", "quiet") +
-      button("Подтвердить почту", "", "email-auth", "verify", "quiet") + "</div>" : "" });
+    } catch (failure) {
+      if (form.isConnected) { error.textContent = failure.message; error.hidden = false; }
+    } finally {
+      submit.disabled = false;
+      label.textContent = previousLabel;
+      form.removeAttribute("aria-busy");
+    }
   }
 
   window.cortexAdminLogin = accountOptions;
@@ -756,14 +756,15 @@
   }
 
   function drawDelta(job) {
-    if (job !== pending || !job.text) return;
+    if (job !== pending || !job.text.trim() || !appVisible()) return;
     const node = route === "chat" && chatId === job.chatId ? screen.querySelector("[data-stream]") : null;
     if (!node) return;
     const scroll = screen.querySelector(".conversation");
     const stick = pinned(scroll);
-    node.classList.add("live");
-    if (!appVisible()) return; // Don't render expensive Markdown while backgrounded.
-    node.innerHTML = Markdown.render(job.text);
+    node.closest(".message").classList.add("has-reply");
+    node.innerHTML = Markdown.renderStream(job.text);
+    if (!job.streamPainted && !reduced()) Motion.reply(node);
+    job.streamPainted = true;
     if (stick) scroll.scrollTop = scroll.scrollHeight;
     updateJumpLatest();
   }
@@ -820,9 +821,9 @@
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
     };
-    const policy = "Ты персональный помощник на телефоне Android. Локальные команды выполняет и проверяет приложение. " +
-      "Этот ответ в чате предназначен для разговора и объяснения. Опирайся на доступы и реальные результаты. " +
-      "Уточни один недостающий факт, если без него нельзя диагностировать проблему. Не выдавай предположение за результат проверки. " +
+    const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
+      "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
+      "Опирайся на доступы и реальные результаты Android. " +
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
     const result = await Api.request("chat", {
       payload: { messages: M.turns(chat, policy), style: M.profile().style,
@@ -839,6 +840,7 @@
         if (pending !== job) return;
         job.action = "";
         job.text += delta;
+        if (!job.streamPainted && job.text.trim() && appVisible() && activeChat(job)) { drawDelta(job); return; }
         const cadence = job.text.length > 12000 ? 260 : job.text.length > 3500 ? 155 : 78;
         if (!job.renderTimer) job.renderTimer = setTimeout(() => { job.renderTimer = 0; drawDelta(job); }, cadence);
       }
@@ -887,7 +889,7 @@
       if (pending === job) {
         pending = null;
         clearTimeout(job.renderTimer);
-        if (activeChat(job)) render({ bottom: pinned(screen.querySelector(".conversation")), messageEnter: job.completed });
+        if (activeChat(job)) render({ bottom: pinned(screen.querySelector(".conversation")), messageEnter: job.completed && !job.streamPainted });
         else if (route === "home") Wave.state(waveMode());
         historyItems();
       }
@@ -1339,17 +1341,11 @@
 
   const actions = {
     tab(value, control) {
-      // The central CORTEX control always opens the conversation, from any tab.
       if (value === "home") {
-        haptic();
-        if (route !== "chat" || current()?.saved) navigate("chat", { id: homeChat().id, origin: control, cinematic: true });
-        else if (document.activeElement !== input) {
-          playCore(box(dockCore()));
-          const effect = clearMorph;
-          setTimeout(() => {
-            if (route === "chat" && clearMorph === effect && !voice && !sheet.open && !drawer.open) input.focus();
-          }, effect ? 780 : 0);
-        }
+        if (route === "chat" && !current()?.saved) return;
+        const switchToCore = rootTab(route) !== "home";
+        if (switchToCore) haptic();
+        navigate("chat", { id: homeChat().id, origin: control, cinematic: switchToCore, animate: switchToCore });
         return;
       }
       if (route === value) return;
@@ -1406,7 +1402,7 @@
       refreshScreen();
     },
     "drop-screen"() { screenContext = null; refreshScreen(); },
-    capabilities: (_, control) => submitExample("Что ты умеешь?", control, true),
+    capabilities: (_, control) => submitExample("Что ты умеешь?", control),
     "try-tool": (text, control) => submitExample(text, control),
     "resume-visual"() { const chat = current(); if (chat) return answer(chat, "Продолжи", { force: true }); },
     "visual-privacy"() { sendDevice("visual-privacy", { enabled: !connection.visualPrivacy }); },
@@ -1435,8 +1431,17 @@
     },
     "model-profile"(value) { if (Object.hasOwn(M.models, value)) preference("model", value); },
     login: startLogin,
+    "cancel-login": () => { stopLogin(); render(); },
     "account-options": accountOptions,
-    "email-auth": (mode, control) => emailForm(mode, control.closest("form")?.elements.email?.value || ""),
+    "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),
+    "refresh-connection": refreshConnection,
+    "password-visibility": (_, control) => {
+      const field = control.parentElement.querySelector("input");
+      const show = field.type === "password";
+      field.type = show ? "text" : "password";
+      control.setAttribute("aria-label", show ? "Скрыть пароль" : "Показать пароль");
+      control.setAttribute("aria-pressed", String(show));
+    },
     "faq-category": filterFaq,
     logout,
     export: exportChats,
@@ -1503,6 +1508,7 @@
 
   document.addEventListener("click", event => {
     const control = event.target.closest?.("button, summary");
+    if (control?.matches('.dock-core[aria-current="page"]')) return;
     if (control && !reduced()) Motion.press(control);
   }, { capture: true });
 
@@ -1523,6 +1529,7 @@
     const form = event.target;
     const data = Object.fromEntries(Array.from(new FormData(form), ([key, value]) =>
       [key, ["password", "confirmation"].includes(key) ? String(value) : String(value).trim()]));
+    if (form.id === "account-form") { await submitAccount(form, data); return; }
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
     if (form.id === "rule-form") {
       const rules = S.instructions.cortex ||= {};
@@ -1620,6 +1627,7 @@
     document.documentElement.classList.toggle("app-background", hidden);
     if (!hidden) {
       pollLogin();
+      if (["profile", "models", "account"].includes(route)) refreshConnection();
       if (route === "schedule") Planner.enter(route);
     }
   }

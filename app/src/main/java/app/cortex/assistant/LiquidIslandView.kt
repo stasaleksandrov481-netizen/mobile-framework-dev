@@ -47,7 +47,7 @@ internal class LiquidIslandView(
     private var style = IslandAppearance.parse()
     private var level = 0f
     private var levelAt = 0L
-    private var reactionAt = 0L
+    private var reactionAt = SystemClock.uptimeMillis()
     private var audioFrameAt = 0L
     private var press = false
     private var activeStop = false
@@ -260,7 +260,10 @@ internal class LiquidIslandView(
             ink.alpha = ((mix(80f, 164f, t) + pulse) * fade).roundToInt().coerceIn(0, 255)
             canvas.drawRoundRect(body, radius, radius, ink)
         }
-        if (style.face) drawFace(canvas, body.left - 13f * density, mix(body.centerY(), body.top + dp(27), t), fade * scale)
+        val idleFace = moving && style.face && phase == "idle" && disappearance == 0f
+        val idleTime = if (idleFace) elapsed % 10_800L else 0L
+        if (style.face) drawFace(canvas, body.left - 13f * density, mix(body.centerY(), body.top + dp(27), t),
+            fade * scale, idleTime, if (moving) elapsed else -1)
         if (style.progress && phase in setOf("thinking", "executing")) {
             val width = body.width() * .28f
             val start = body.left + body.width() * if (moving) (.36f + .20f * kotlin.math.sin(time * 4f)) else .36f
@@ -304,19 +307,42 @@ internal class LiquidIslandView(
         }
         if (moving && (phase in setOf("listening", "thinking", "executing") || phase == "done" && elapsed < 550L)) {
             postInvalidateDelayed(33L)
+        } else if (idleFace) {
+            val next = when {
+                idleTime < 1750 -> 1750 - idleTime
+                idleTime < 1980 -> 33L
+                idleTime < 4710 -> 4710 - idleTime
+                idleTime < 5530 -> 45L
+                idleTime < 8250 -> 8250 - idleTime
+                idleTime < 8490 -> 33L
+                else -> 10_800L - idleTime + 1750
+            }
+            postInvalidateDelayed(next.coerceAtLeast(16L))
         }
     }
 
-    private fun drawFace(canvas: Canvas, x: Float, y: Float, alpha: Float) {
+    private fun drawFace(canvas: Canvas, x: Float, y: Float, alpha: Float, idleTime: Long, elapsed: Long) {
         val unit = density * alpha.coerceAtLeast(.2f)
+        val blink = maxOf(
+            ease(1750f, 1850f, idleTime.toFloat()) * (1f - ease(1850f, 1980f, idleTime.toFloat())),
+            ease(8250f, 8350f, idleTime.toFloat()) * (1f - ease(8350f, 8490f, idleTime.toFloat()))
+        )
+        val curiosity = ease(4710f, 4970f, idleTime.toFloat()) * (1f - ease(5200f, 5530f, idleTime.toFloat()))
+        val glance = (curiosity * 1.3f - if (phase == "thinking") .6f else 0f) * unit
+        val wink = if (phase == "done") ease(105f, 185f, elapsed.toFloat()) * (1f - ease(230f, 360f, elapsed.toFloat())) else 0f
+        val eyeY = y - 1.9f * unit
+        val eyeHeight = (if (phase == "listening") 1.36f else 1.04f) * (1f - .88f * blink) * unit
         ink.style = Paint.Style.FILL
         ink.color = style.faceColor
         ink.alpha = (230 * alpha).roundToInt()
         canvas.drawCircle(x, y, 8.4f * unit, ink)
         ink.color = style.background
         ink.alpha = (255 * alpha).roundToInt()
-        canvas.drawCircle(x - 2.8f * unit, y - 1.9f * unit, .9f * unit, ink)
-        canvas.drawCircle(x + 2.8f * unit, y - 1.9f * unit, .9f * unit, ink)
+        val left = x - 2.8f * unit + glance
+        val right = x + 2.8f * unit + glance
+        val rightEye = eyeHeight * (1f - .88f * wink)
+        canvas.drawOval(left - unit, eyeY - eyeHeight, left + unit, eyeY + eyeHeight, ink)
+        canvas.drawOval(right - unit, eyeY - rightEye, right + unit, eyeY + rightEye, ink)
         ink.style = Paint.Style.STROKE
         ink.strokeWidth = 1.1f * unit
         ink.strokeCap = Paint.Cap.ROUND
@@ -324,7 +350,10 @@ internal class LiquidIslandView(
             "listening", "thinking" -> canvas.drawOval(x - 1.3f * unit, y + .6f * unit, x + 1.3f * unit, y + 3.5f * unit, ink)
             "error" -> canvas.drawArc(x - 3f * unit, y + 1.2f * unit, x + 3f * unit, y + 6f * unit, 207f, 126f, false, ink)
             "executing", "stopped" -> canvas.drawLine(x - 2.2f * unit, y + 2.5f * unit, x + 2.2f * unit, y + 2.5f * unit, ink)
-            else -> canvas.drawArc(x - 3.2f * unit, y - 1f * unit, x + 3.2f * unit, y + 4.6f * unit, 20f, 140f, false, ink)
+            else -> {
+                val smile = (3.2f + curiosity * .8f + if (phase == "done") .8f else 0f) * unit
+                canvas.drawArc(x - smile, y - unit, x + smile, y + 4.6f * unit, 20f, 140f, false, ink)
+            }
         }
         ink.strokeCap = Paint.Cap.BUTT
     }
