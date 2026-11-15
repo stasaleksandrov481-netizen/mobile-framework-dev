@@ -199,3 +199,10 @@ h1,h2,h3,p{margin:0}
 @media(max-width:800px){.phone-stage{--phone-scale:.91}}
 @media(max-width:530px){.phone-stage{--phone-scale:.73}.phone-pointer-area{inset:0 0 31px}.scene-caption{gap:9px;flex-wrap:wrap;bottom:0}.scene-caption button{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.phone-model{transition:none}}
+
+/* Keep the 3D preview and its controls in separate visual lanes on laptops. */
+@media (min-width:801px) and (max-width:1130px){
+  .hero{min-height:790px}
+  .hero-visual{min-height:695px}
+  .phone-stage{height:700px}
+}
