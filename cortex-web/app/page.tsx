@@ -35,6 +35,7 @@ export default function Home() {
         <span>© 2026 CORTEX</span>
         <div className="footer-links">
           <a href="/privacy"><UiIcon name="shield" size={15} />Конфиденциальность</a>
+          <a href="/terms">Условия</a>
           <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer"><UiIcon name="telegram" size={15} />Telegram</a>
         </div>
       </footer>

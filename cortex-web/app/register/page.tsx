@@ -25,13 +25,21 @@ export default function RegisterPage() {
 
       <footer className="auth-footer">
         <span>© 2026 CORTEX</span>
-        <Link href="/privacy">Конфиденциальность</Link>
+        <div className="auth-footer-links">
+          <Link href="/privacy">Конфиденциальность</Link>
+          <Link href="/terms">Условия</Link>
+        </div>
       </footer>
 
       <aside className="auth-art" aria-hidden="true">
         <InteractiveGrid />
         <div className="grid-topline"><span>VOICE FIRST INTERFACE</span><span>2026 / BETA</span></div>
-        <div className="grid-core"><img src="/cortex-mark.svg" alt="" /></div>
+        <div className="grid-statement">
+          <span className="grid-statement-number">01 / INTELLIGENT INTERFACE</span>
+          <strong>CORTEX<span className="grid-statement-caret">_</span></strong>
+          <span className="grid-statement-rule" />
+          <span className="grid-statement-description">ГОЛОС → ДЕЙСТВИЕ</span>
+        </div>
         <div className="grid-bottomline">
           <p>Слова становятся действиями.</p>
           <span>CORTEX / ANDROID</span>
