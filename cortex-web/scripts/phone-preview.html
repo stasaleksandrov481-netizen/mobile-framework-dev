@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CORTEX — исходный экран Android</title>
+  <!-- Keep this preview bound to the ACTUAL Android WebView UI, not a hand-drawn mock. -->
+  <link rel="stylesheet" href="../../app/src/main/assets/web/style.css">
+  <style>
+    html, body { width: 390px; height: 854px; overflow: hidden; }
+    .app-shell { width: 390px; height: 854px; }
+  </style>
+  <script src="../../app/src/main/assets/web/icons.js"></script>
+  <script src="../../app/src/main/assets/web/model.js"></script>
+  <script src="../../app/src/main/assets/web/screens.js"></script>
+</head>
+<body>
+  <main class="app-shell" id="app" data-route="home" aria-label="CORTEX">
+    <div id="ambient" class="ambient" aria-hidden="true"></div>
+    <div id="screen" class="screen home-screen" data-route="home"></div>
+    <div id="composition" class="composition"></div>
+    <nav id="navigation" class="navigation" data-center="true" aria-label="Основная навигация"></nav>
+  </main>
+  <script>
+    document.querySelector('#screen').innerHTML = CortexUI.page('home', {});
+    document.querySelector('#composition').innerHTML = CortexUI.composer();
+    document.querySelector('#composer-input').placeholder = 'Напишите Кортексу…';
+    document.querySelector('#navigation').innerHTML = CortexUI.navigation();
+    document.querySelector('[data-tab="home"]').setAttribute('aria-current', 'page');
+    // When opened outside /app/src/main/assets/web, the source logo has a new relative path.
+    for (const image of document.querySelectorAll('img.brand-mark')) {
+      image.src = '../../app/src/main/assets/web/art/mark.svg';
+    }
+  </script>
+</body>
+</html>
