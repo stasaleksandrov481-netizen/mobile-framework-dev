@@ -47,7 +47,13 @@ export function RegistrationForm() {
           password,
           options: {
             emailRedirectTo: window.location.origin + "/auth/callback",
-            data: { cortex_preregistration: true, cortex_notify_opt_in: notify },
+            data: {
+              cortex_preregistration: true,
+              cortex_notify_opt_in: notify,
+              cortex_privacy_acknowledged_version: "2026-11-15",
+              cortex_privacy_acknowledged_at: new Date().toISOString(),
+              cortex_launch_notify_opt_in_at: notify ? new Date().toISOString() : null,
+            },
           },
         });
         if (signupError) throw signupError;
@@ -147,7 +153,7 @@ export function RegistrationForm() {
               <label className="form-check">
                 <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
                 <span className="custom-check" aria-hidden="true"><UiIcon name="check" size={13} /></span>
-                <span className="check-label">Согласен с <Link href="/privacy" target="_blank" rel="noopener noreferrer">обработкой персональных данных</Link></span>
+                <span className="check-label">Согласен на обработку данных для создания аккаунта согласно <Link href="/privacy" target="_blank" rel="noopener noreferrer">политике конфиденциальности</Link></span>
               </label>
             )}
             {mode === "signup" && (
@@ -157,6 +163,7 @@ export function RegistrationForm() {
                 <span className="check-label">Уведомить меня по почте о запуске беты</span>
               </label>
             )}
+            {mode === "signup" && <p className="auth-legal-note">О раннем доступе и бонусах: <Link href="/terms" target="_blank" rel="noopener noreferrer">условия программы</Link>.</p>}
 
             {error && <p role="alert" className="form-error">{error}</p>}
             <button className="button button--primary auth-submit" type="submit" disabled={busy}>

@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 type Ripple = { x: number; y: number; start: number };
 
-/** Lightweight cursor/touch-reactive mesh. Drawn on a single canvas, without WebGL. */
+/** Event-driven cursor/touch mesh: no WebGL or idle animation loop. */
 export default function InteractiveGrid() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -50,8 +50,8 @@ export default function InteractiveGrid() {
       ctx.fillStyle = glow;
       ctx.fillRect(0, 0, width, height);
 
-      const cell = width < 600 ? 31 : 43;
-      const stride = 9;
+      const cell = width < 600 ? 36 : 49;
+      const stride = 14;
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(202, 202, 202, .12)";
 
@@ -101,8 +101,9 @@ export default function InteractiveGrid() {
     const tick = (now: number) => {
       frame = 0;
       if (!active || !inView || document.hidden) return;
-      if (now - lastDraw >= 28) { render(now); lastDraw = now; }
-      if (!reducedMotion || ripples.length) frame = requestAnimationFrame(tick);
+      if (now - lastDraw >= 33) { render(now); lastDraw = now; }
+      // Once the cursor has settled and all click ripples have faded, stop drawing.
+      if (Math.hypot(target.x - pointer.x, target.y - pointer.y) > .6 || ripples.length) schedule();
     };
 
     const schedule = () => {
@@ -113,7 +114,7 @@ export default function InteractiveGrid() {
       const rect = panel.getBoundingClientRect();
       width = Math.max(1, rect.width);
       height = Math.max(1, rect.height);
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
