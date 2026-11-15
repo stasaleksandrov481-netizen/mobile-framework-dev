@@ -1,46 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 854" width="390" height="854">
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="854" viewBox="0 0 390 854" role="img" aria-label="Главный экран Android-приложения CORTEX">
+  <!-- Faithful vector of the current Android WebView's home() and composer()/navigation() layouts.
+       Source: app/src/main/assets/web/{screens.js,style.css,art/mark.svg}. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#070707"/><stop offset="1" stop-color="#000000"/></linearGradient>
-    <radialGradient id="aura"><stop stop-color="#ffffff" stop-opacity=".35"/><stop offset=".25" stop-color="#a0a0a0" stop-opacity=".17"/><stop offset=".55" stop-color="#777" stop-opacity=".04"/><stop offset="1" stop-color="#555" stop-opacity="0"/></radialGradient>
-    <radialGradient id="core" cx=".31" cy=".27" r=".8"><stop stop-color="#fff"/><stop offset=".25" stop-color="#e4e4e4"/><stop offset=".59" stop-color="#6b6b6b"/><stop offset=".81" stop-color="#252525"/><stop offset="1" stop-color="#050505"/></radialGradient>
-    <linearGradient id="bubble" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#141414"/><stop offset="1" stop-color="#080808"/></linearGradient>
-    <filter id="blur"><feGaussianBlur stdDeviation="12"/></filter>
-    <clipPath id="screen"><rect width="390" height="854" rx="43"/></clipPath>
-  </defs>
-  <g clip-path="url(#screen)">
-    <rect width="390" height="854" fill="url(#bg)"/>
-    <path d="M-25 150C100 104 231 204 419 140M-18 690C139 640 232 749 417 676" fill="none" stroke="#343434" stroke-opacity=".25"/>
-    <text x="33" y="54" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="600">9:41</text>
-    <g fill="#fff" transform="translate(317 39)"><rect x="0" y="8" width="4" height="5" rx="1"/><rect x="6" y="5" width="4" height="8" rx="1"/><rect x="12" y="2" width="4" height="11" rx="1"/><path d="M25 5C30 1 36 1 41 5L33 14Z"/><rect x="49" y="2" width="21" height="12" rx="3" fill="none" stroke="#fff" stroke-width="2"/><rect x="72" y="6" width="2" height="4" rx="1"/></g>
-    <path d="M48 99L58 93L69 96M48 99V111L58 117L69 114" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="64" cy="105" r="2.6" fill="#fff"/>
-    <text x="82" y="108" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700" letter-spacing="3">CORTEX</text>
-    <circle cx="340" cy="104" r="19" fill="#212121" stroke="#404040"/><path d="M335 103a5 5 0 0110 0M332 114a8 8 0 0116 0" fill="none" stroke="#ddd" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M27 144h335" stroke="#353535" stroke-opacity=".6"/>
-    <text x="31" y="190" fill="#929292" font-family="Arial,Helvetica,sans-serif" font-size="13" letter-spacing="1.8">ГЛАВНЫЙ ЭКРАН</text>
-    <text x="31" y="230" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="30" font-weight="600">Привет, Константин.</text>
-    <text x="31" y="263" fill="#b8b8b8" font-family="Arial,Helvetica,sans-serif" font-size="17">Чем займёмся сегодня?</text>
-    <circle cx="195" cy="419" r="140" fill="url(#aura)"/>
-    <circle cx="195" cy="415" r="91" fill="#fff" opacity=".13" filter="url(#blur)"/>
-    <circle cx="195" cy="415" r="67" fill="url(#core)" stroke="#a0a0a0" stroke-opacity=".55" stroke-width=".7"/>
-    <path d="M151 388c27-35 72-42 96-19" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.6" stroke-linecap="round"/>
-    <path d="M148 440c15 33 45 50 78 42" fill="none" stroke="#aaa" stroke-opacity=".35" stroke-width="1.4"/>
-    <text x="195" y="529" fill="#fff" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="600">CORTEX слушает</text>
-    <text x="195" y="552" fill="#9d9d9d" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="13">Произнесите команду</text>
-    <rect x="25" y="592" width="340" height="113" rx="21" fill="url(#bubble)" stroke="#3b3b3b" stroke-opacity=".7"/>
-    <circle cx="54" cy="622" r="11" fill="#eaeaea"/><path d="M51 622l3 3 4-6" fill="none" stroke="#111" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="76" y="627" fill="#fff" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="600">Готов к действию</text>
-    <text x="48" y="656" fill="#b0b0b0" font-family="Arial,Helvetica,sans-serif" font-size="13">«Напомни мне позвонить завтра»</text>
-    <text x="48" y="681" fill="#8e8e8e" font-family="Arial,Helvetica,sans-serif" font-size="12">Голос · сценарии · автоматизация</text>
-    <rect x="25" y="725" width="340" height="65" rx="32" fill="#fafafa"/>
-    <circle cx="62" cy="757" r="19" fill="#101010"/><rect x="59" y="748" width="6" height="15" rx="3" fill="#fff"/><path d="M54 758a8 8 0 0016 0" fill="none" stroke="#fff" stroke-width="1.7"/><path d="M62 766v4" stroke="#fff" stroke-width="1.7"/>
-    <text x="92" y="762" fill="#121212" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="600">Говорить с CORTEX</text>
-    <path d="M322 750l8 8-8 8" fill="none" stroke="#161616" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M26 814h337" stroke="#303030"/>
-    <g font-family="Arial,Helvetica,sans-serif" font-size="11" text-anchor="middle">
-      <circle cx="70" cy="833" r="6" fill="#f5f5f5"/><text x="70" y="854" fill="#fff">Домой</text>
-      <rect x="158" y="827" width="13" height="12" rx="3" stroke="#777" fill="none"/><text x="165" y="854" fill="#aaa">Сценарии</text>
-      <path d="M253 828v11m-5-5.5h10" stroke="#777" stroke-width="2"/><text x="253" y="854" fill="#aaa">Создать</text>
-      <circle cx="330" cy="833" r="6" stroke="#777" fill="none"/><text x="330" y="854" fill="#aaa">Ещё</text>
+    <clipPath id="display"><rect width="390" height="854" rx="39"/></clipPath>
+    <linearGradient id="orbitOne" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff" stop-opacity=".96"/><stop offset=".28" stop-color="#fff" stop-opacity=".07"/><stop offset=".66" stop-color="#fff" stop-opacity=".63"/><stop offset="1" stop-color="#fff" stop-opacity=".03"/></linearGradient>
+    <linearGradient id="orbitTwo" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#fff" stop-opacity=".13"/><stop offset=".44" stop-color="#fff" stop-opacity=".7"/><stop offset=".77" stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-color="#fff" stop-opacity=".55"/></linearGradient>
+    <radialGradient id="coreGlass" cx=".31" cy=".06" r="1.14"><stop stop-color="#fff" stop-opacity=".26"/><stop offset=".36" stop-color="#b8b8b8" stop-opacity=".075"/><stop offset=".78" stop-color="#fff" stop-opacity=".055"/><stop offset="1" stop-color="#fff" stop-opacity=".15"/></radialGradient>
+    <linearGradient id="dockFill" x1="0" y1="0" x2=".7" y2="1"><stop stop-color="#272727"/><stop offset=".26" stop-color="#090909"/><stop offset=".8" stop-color="#000"/><stop offset="1" stop-color="#1a1a1a"/></linearGradient>
+    <radialGradient id="emblem" cx=".4" cy=".12" r=".8"><stop stop-color="#777" stop-opacity=".4"/><stop offset=".7" stop-color="#111" stop-opacity=".15"/><stop offset="1" stop-color="#000"/></radialGradient>
+    <filter id="coreGlow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="8"/></filter>
+    <g id="mark" fill="none">
+      <path d="M36 13.7 23 10 11 17v14l12 7 13-3.7" stroke="#fff" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="29" cy="24" r="2.4" fill="#fff"/><circle cx="38" cy="24" r="1.55" fill="#fff"/>
     </g>
+    <g id="micIcon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.12">
+      <rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-3 0h6"/>
+    </g>
+    <g id="waveIcon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.12">
+      <path d="M3 10v4m4-7v10m5-14v18m5-14v10m4-7v4"/>
+    </g>
+  </defs>
+  <g clip-path="url(#display)">
+    <rect width="390" height="854" fill="#000"/>
+
+    <!-- Header: same mark, wordmark, spacing and weight as .home-header .brand. -->
+    <use href="#mark" transform="translate(17 12) scale(.563)"/>
+    <text x="63" y="43" fill="#fff" font-family="Roboto,Segoe UI,Arial,sans-serif" font-weight="780" font-size="12" letter-spacing="2.6">CORTEX</text>
+
+    <!-- Android home hero: the mark sits inside three elliptical glass orbits. -->
+    <ellipse cx="195" cy="338" rx="112" ry="112" fill="none" stroke="#fff" stroke-opacity=".045" stroke-width=".7"/>
+    <g fill="none" stroke-linecap="round">
+      <ellipse cx="195" cy="338" rx="109" ry="77" transform="rotate(-30 195 338)" stroke="url(#orbitOne)" stroke-width="1.9" stroke-dasharray="220 70 55 170"/>
+      <ellipse cx="195" cy="338" rx="100" ry="71" transform="rotate(43 195 338)" stroke="url(#orbitTwo)" stroke-width="1.45" stroke-dasharray="115 77 95 195" opacity=".79"/>
+      <ellipse cx="195" cy="338" rx="88" ry="76" transform="rotate(-64 195 338)" stroke="#fff" stroke-width="1.25" stroke-opacity=".36" stroke-dasharray="94 123 80 140"/>
+      <path d="M112 264c48-50 115-48 164 2" stroke="#fff" stroke-width=".8" opacity=".16"/>
+    </g>
+    <rect x="135" y="278" width="120" height="120" rx="53" transform="rotate(-31 195 338)" fill="url(#coreGlass)" stroke="#fff" stroke-width="1.1" stroke-opacity=".25"/>
+    <use href="#mark" transform="translate(157 300) scale(1.58)" opacity=".3" filter="url(#coreGlow)"/>
+    <use href="#mark" transform="translate(157 300) scale(1.58)"/>
+    <text x="195" y="516" text-anchor="middle" fill="#fff" font-family="Roboto,Segoe UI,Arial,sans-serif" font-size="39" letter-spacing="-2.3" font-weight="760">Чем помочь?</text>
+
+    <!-- Exact Android bottom composer layout and actual controls. -->
+    <rect x="21" y="681" width="348" height="60" rx="27" fill="#000" stroke="#fff" stroke-opacity=".34"/>
+    <path d="M40 683H345" stroke="#fff" stroke-opacity=".105" stroke-linecap="round"/>
+    <text x="40" y="717" fill="#fff" fill-opacity=".59" font-family="Roboto,Segoe UI,Arial,sans-serif" font-size="16">Напишите Кортексу…</text>
+    <circle cx="287" cy="711" r="22" fill="#000" stroke="#fff" stroke-opacity=".27"/>
+    <g color="#fff"><use href="#micIcon" transform="translate(277 701) scale(.84)"/></g>
+    <circle cx="339" cy="711" r="22" fill="#fff"/>
+    <g color="#000"><use href="#waveIcon" transform="translate(329 701) scale(.87)"/></g>
+
+    <!-- The same 5-tab rounded dark glass dock as CortexUI.navigation(). -->
+    <rect x="12" y="778" width="366" height="66" rx="33" fill="url(#dockFill)" stroke="#fff" stroke-opacity=".32"/>
+    <path d="M33 780H356" stroke="#fff" stroke-width=".7" stroke-opacity=".16" stroke-linecap="round"/>
+    <g fill="none" stroke="#fff" stroke-opacity=".64" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <g transform="translate(38 794) scale(.86)">
+        <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l1.5-4A8.5 8.5 0 1 1 21 11.5Z"/><path d="M8 12h.01m4 0h.01m4 0h.01"/>
+      </g>
+      <g transform="translate(109 794) scale(.87)"><path d="m13 2-9 12h7l-1 8 10-12h-7z"/></g>
+      <g transform="translate(259 794) scale(.87)"><path d="M11 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-6M9 15l1-4L19 2l3 3-9 9z"/></g>
+      <g transform="translate(327 794) scale(.87)"><circle cx="12" cy="7.5" r="3.5"/><path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2z"/></g>
+    </g>
+    <g font-family="Roboto,Segoe UI,Arial,sans-serif" font-weight="620" font-size="10.5" text-anchor="middle" fill="#fff" fill-opacity=".64">
+      <text x="48" y="832">Чаты</text><text x="119" y="832">Вызов</text>
+      <text x="269" y="832">Заметки</text><text x="337" y="832">Профиль</text>
+    </g>
+    <circle cx="195" cy="811" r="25" fill="url(#emblem)" stroke="#fff" stroke-opacity=".74"/>
+    <ellipse cx="195" cy="811" rx="21" ry="21" fill="none" stroke="#fff" stroke-opacity=".21" stroke-width=".8"/>
+    <use href="#mark" transform="translate(178.5 794.5) scale(.6875)"/>
   </g>
 </svg>

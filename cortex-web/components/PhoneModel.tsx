@@ -6,8 +6,32 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 
 type Rotation = { x: number; y: number };
-const INITIAL: Rotation = { x: -0.12, y: -0.57 };
+const INITIAL: Rotation = { x: -0.095, y: -0.43 };
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+function roundedScreenGeometry(width: number, height: number, radius: number) {
+  const left = -width / 2;
+  const bottom = -height / 2;
+  const right = width / 2;
+  const top = height / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(left + radius, bottom);
+  shape.lineTo(right - radius, bottom);
+  shape.quadraticCurveTo(right, bottom, right, bottom + radius);
+  shape.lineTo(right, top - radius);
+  shape.quadraticCurveTo(right, top, right - radius, top);
+  shape.lineTo(left + radius, top);
+  shape.quadraticCurveTo(left, top, left, top - radius);
+  shape.lineTo(left, bottom + radius);
+  shape.quadraticCurveTo(left, bottom, left + radius, bottom);
+  const geometry = new THREE.ShapeGeometry(shape, 12);
+  const positions = geometry.getAttribute("position");
+  const uv = geometry.getAttribute("uv");
+  for (let index = 0; index < positions.count; index++) {
+    uv.setXY(index, (positions.getX(index) - left) / width, (positions.getY(index) - bottom) / height);
+  }
+  return geometry;
+}
 
 function createBackMark() {
   const canvas = document.createElement("canvas");
@@ -16,12 +40,9 @@ function createBackMark() {
   const ctx = canvas.getContext("2d");
   if (ctx) {
     ctx.textAlign = "center";
-    ctx.fillStyle = "#a8a8a8";
-    ctx.font = "700 61px Arial, sans-serif";
+    ctx.fillStyle = "#666666";
+    ctx.font = "700 58px Arial, sans-serif";
     ctx.fillText("CORTEX", 256, 95);
-    ctx.fillStyle = "#525252";
-    ctx.font = "19px Arial, sans-serif";
-    ctx.fillText("PERSONAL INTELLIGENCE", 256, 139);
   }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -31,67 +52,67 @@ function createBackMark() {
 function buildPhone(scene: THREE.Scene) {
   const phone = new THREE.Group();
   const metal = new THREE.MeshPhysicalMaterial({
-    color: 0x141414, metalness: 0.82, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.13,
+    color: 0x0c0c0c, metalness: 0.78, roughness: 0.3, clearcoat: 0.8, clearcoatRoughness: 0.2,
   });
   const polishedBlack = new THREE.MeshPhysicalMaterial({
-    color: 0x040404, metalness: 0.42, roughness: 0.19, clearcoat: 1, clearcoatRoughness: 0.11,
+    color: 0x030303, metalness: 0.38, roughness: 0.19, clearcoat: 0.9, clearcoatRoughness: 0.12,
   });
   const frostedBack = new THREE.MeshPhysicalMaterial({
-    color: 0x0b0b0b, metalness: 0.46, roughness: 0.29, clearcoat: 0.8,
+    color: 0x101010, metalness: 0.5, roughness: 0.34, clearcoat: 0.55,
   });
   const silver = new THREE.MeshPhysicalMaterial({
-    color: 0xfafafa, metalness: 0.76, roughness: 0.19, clearcoat: 0.65,
+    color: 0xdedede, metalness: 0.72, roughness: 0.22, clearcoat: 0.6,
   });
 
-  // Fully beveled solids: the sides have actual geometry, not CSS borders.
-  phone.add(new THREE.Mesh(new RoundedBoxGeometry(3.15, 6.52, 0.47, 9, 0.31), metal));
-  const frame = new THREE.Mesh(new RoundedBoxGeometry(3.08, 6.44, 0.085, 8, 0.29), polishedBlack);
-  frame.position.z = 0.246;
+  // A slim graphite unibody with real depth and a dark ceramic front.
+  phone.add(new THREE.Mesh(new RoundedBoxGeometry(3.15, 6.52, 0.41, 9, 0.31), metal));
+  const frame = new THREE.Mesh(new RoundedBoxGeometry(3.095, 6.47, 0.075, 8, 0.292), polishedBlack);
+  frame.position.z = 0.211;
   phone.add(frame);
-  const back = new THREE.Mesh(new RoundedBoxGeometry(3.07, 6.43, 0.07, 8, 0.29), frostedBack);
-  back.position.z = -0.253;
+  const back = new THREE.Mesh(new RoundedBoxGeometry(3.065, 6.44, 0.075, 8, 0.29), frostedBack);
+  back.position.z = -0.212;
   phone.add(back);
 
-  // The Cortex interface is rendered onto the glass as a high-resolution texture.
+  // The home interface mirrors app/src/main/assets/web/screens.js and style.css.
   const screen = new THREE.TextureLoader().load("/phone-ui.svg");
   screen.colorSpace = THREE.SRGBColorSpace;
-  screen.anisotropy = 8;
+  screen.anisotropy = 16;
   const display = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.95, 6.24),
-    new THREE.MeshBasicMaterial({ map: screen, transparent: true, toneMapped: false, depthWrite: false }),
+    roundedScreenGeometry(2.905, 6.36, 0.27),
+    new THREE.MeshBasicMaterial({ map: screen, toneMapped: false, depthWrite: false, side: THREE.DoubleSide }),
   );
-  display.position.z = 0.302;
+  display.position.z = 0.254;
   phone.add(display);
 
-  const island = new THREE.Mesh(new RoundedBoxGeometry(0.74, 0.145, 0.045, 5, 0.065), polishedBlack);
-  island.position.set(0, 2.99, 0.32);
+  const island = new THREE.Mesh(new RoundedBoxGeometry(0.66, 0.14, 0.028, 5, 0.065), polishedBlack);
+  island.position.set(0, 2.99, 0.274);
   phone.add(island);
-  const islandLens = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 10), silver);
-  islandLens.position.set(0.24, 2.99, 0.351);
+  const islandLens = new THREE.Mesh(new THREE.SphereGeometry(0.017, 12, 10), new THREE.MeshBasicMaterial({ color: 0x626b72 }));
+  islandLens.position.set(0.205, 2.99, 0.29);
   phone.add(islandLens);
 
-  // Rear optics sit beyond the rear glass. Their rings catch white studio light.
+  // The raised camera island and individual lenses are physically modeled.
   const cameraIsland = new THREE.Mesh(new RoundedBoxGeometry(1.13, 1.32, 0.16, 7, 0.21), polishedBlack);
-  cameraIsland.position.set(-0.76, 2.17, -0.354);
+  cameraIsland.position.set(-0.76, 2.17, -0.30);
   phone.add(cameraIsland);
-  const ringMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.92, roughness: 0.2 });
-  const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x020202, metalness: 0.72, roughness: 0.08, clearcoat: 1 });
-  const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.36 });
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x646464, metalness: 0.89, roughness: 0.22 });
+  const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x010307, metalness: 0.63, roughness: 0.065, clearcoat: 1 });
+  const glintMat = new THREE.MeshBasicMaterial({ color: 0xb7c2cc, transparent: true, opacity: 0.27 });
   for (const [x, y] of [[-1.02, 2.43], [-0.5, 2.43], [-1.02, 1.94]]) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.177, 0.031, 11, 50), ringMat);
-    ring.position.set(x, y, -0.444);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.177, 0.027, 11, 50), ringMat);
+    ring.position.set(x, y, -0.394);
     phone.add(ring);
     const optic = new THREE.Mesh(new THREE.CircleGeometry(0.154, 50), lensMat);
-    optic.position.set(x, y, -0.45);
+    optic.position.set(x, y, -0.401);
     optic.rotation.y = Math.PI;
     phone.add(optic);
-    const glint = new THREE.Mesh(new THREE.CircleGeometry(0.034, 20), glintMat);
-    glint.position.set(x - 0.05, y + 0.05, -0.456);
+    const glint = new THREE.Mesh(new THREE.CircleGeometry(0.03, 20), glintMat);
+    glint.position.set(x - 0.05, y + 0.05, -0.405);
     glint.rotation.y = Math.PI;
     phone.add(glint);
   }
-  const flash = new THREE.Mesh(new THREE.CircleGeometry(0.075, 32), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-  flash.position.set(-0.5, 1.94, -0.454);
+  const flash = new THREE.Mesh(new THREE.CircleGeometry(0.075, 32), new THREE.MeshBasicMaterial({ color: 0xdcdacb }));
+  flash.position.set(-0.5, 1.94, -0.398);
   flash.rotation.y = Math.PI;
   phone.add(flash);
 
@@ -100,13 +121,13 @@ function buildPhone(scene: THREE.Scene) {
     new THREE.PlaneGeometry(2.35, 0.83),
     new THREE.MeshBasicMaterial({ map: labelTexture, transparent: true, depthWrite: false }),
   );
-  rearMark.position.set(0, -0.40, -0.294);
+  rearMark.position.set(0, -0.40, -0.253);
   rearMark.rotation.y = Math.PI;
   phone.add(rearMark);
 
-  // Functional-looking physical buttons, bright white as requested.
-  for (const [x, y, length] of [[-1.58, 1.5, 0.65], [-1.58, 0.68, 0.65], [1.58, 1.0, 0.84]]) {
-    const key = new THREE.Mesh(new RoundedBoxGeometry(0.085, length, 0.22, 5, 0.034), silver);
+  // Distinct white-metal side controls, with curved ends like physical keys.
+  for (const [x, y, length] of [[-1.584, 1.5, 0.65], [-1.584, 0.68, 0.65], [1.584, 1.0, 0.84]]) {
+    const key = new THREE.Mesh(new RoundedBoxGeometry(0.072, length, 0.18, 5, 0.034), silver);
     key.position.set(x, y, 0);
     phone.add(key);
   }
@@ -139,18 +160,18 @@ export default function PhoneModel() {
     renderer.setClearColor(0x000000, 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.55;
+    renderer.toneMappingExposure = 1.3;
     renderer.domElement.setAttribute("aria-hidden", "true");
     container.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 2.05));
-    const key = new THREE.DirectionalLight(0xffffff, 5);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.55));
+    const key = new THREE.DirectionalLight(0xffffff, 4.2);
     key.position.set(-4, 6, 6);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 2.9);
+    const fill = new THREE.DirectionalLight(0xffffff, 2.2);
     fill.position.set(5, -1, 4);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffffff, 4.4);
+    const rim = new THREE.DirectionalLight(0xffffff, 3.3);
     rim.position.set(3, 5, -5);
     scene.add(rim);
 
