@@ -1,3 +1,4 @@
+-- Applied to the CORTEX production project under migration version 20261115171814.
 -- Pre-registration is bound to the same Supabase Auth identity used by the
 -- Cortex Android backend. Public clients never choose or grant token balances.
 create table public.cortex_preregistrations (

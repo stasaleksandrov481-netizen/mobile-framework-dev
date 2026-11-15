@@ -39,7 +39,7 @@ npm start
 
 ## Предрегистрация
 
-1. Применить SQL-миграцию `supabase/migrations/20261115170848_cortex_preregistration.sql` **к проекту CORTEX** (`jjcqrjztxohnifmziksy`), не к базе Сметры. Миграция создаёт таблицу, ограничивает доступ с помощью RLS и запрещает клиенту менять бонусные начисления.
+1. SQL-миграция `supabase/migrations/20261115171814_cortex_preregistration.sql` **применена к проекту CORTEX** (`jjcqrjztxohnifmziksy`). Миграция создаёт таблицу, ограничивает доступ с помощью RLS и запрещает клиенту менять бонусные начисления.
 2. В Supabase Auth разрешить email/password signup, включить подтверждение почты и добавить `https://cortexapp.ru/auth/callback` в список разрешённых Redirect URLs. Email-шаблон должен содержать ссылку подтверждения либо код OTP.
 3. При необходимости переопределить публичные значения `NEXT_PUBLIC_CORTEX_SUPABASE_URL` и `NEXT_PUBLIC_CORTEX_SUPABASE_PUBLISHABLE_KEY` (в коде уже заданы те же публичные значения, что используются в `cortex-control`).
 4. Перед стартом беты настроить почтового провайдера и **серверную** отправку уведомлений по `notify_opt_in`, не передавая email-список браузеру. Само наличие флага согласия ещё не отправляет письмо.
