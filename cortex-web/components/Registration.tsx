@@ -6,7 +6,8 @@ import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 
-type Mode = "signup" | "verify" | "signin" | "done";
+type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
+const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
 
 export function Registration() {
   return (
@@ -28,9 +29,9 @@ export function RegistrationForm() {
   const [wasSignin, setWasSignin] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("mode") === "signin") {
-      setMode("signin");
-    }
+    const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    if (requestedMode === "signin") setMode("signin");
+    if (requestedMode === "code" && emailOtpReady) setMode("signin_code");
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -72,6 +73,23 @@ export function RegistrationForm() {
         if (verifyError) throw verifyError;
         await savePreregistration(notify);
         setWasSignin(false);
+        setMode("done");
+      } else if (mode === "signin_code") {
+        if (!emailOtpReady) throw new Error("Вход по коду пока не подключён.");
+        const { error: otpError } = await cortexAuth.auth.signInWithOtp({
+          email: email.trim().toLowerCase(),
+          options: { shouldCreateUser: false },
+        });
+        if (otpError) throw otpError;
+        setCode("");
+        setMode("signin_code_verify");
+      } else if (mode === "signin_code_verify") {
+        if (!/^\d{6}$/.test(code)) throw new Error("Введите шестизначный код из письма.");
+        const { error: verifyError } = await cortexAuth.auth.verifyOtp({
+          email: email.trim().toLowerCase(), token: code, type: "email",
+        });
+        if (verifyError) throw verifyError;
+        setWasSignin(true);
         setMode("done");
       } else if (mode === "signin") {
         const { error: signinError } = await cortexAuth.auth.signInWithPassword({
@@ -120,34 +138,40 @@ export function RegistrationForm() {
         </div>
       ) : (
         <>
-          <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" ? "Проверь почту." : "С возвращением."}</h1>
+          <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" || mode === "signin_code_verify" ? "Проверь почту." : "С возвращением."}</h1>
           <p className="auth-description">{mode === "signup"
             ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
             : mode === "verify"
-              ? "Мы отправили письмо с подтверждением. Введи код из письма или перейди по ссылке."
+              ? emailOtpReady
+                ? "Мы отправили шестизначный код. Введи его из письма, чтобы завершить регистрацию."
+                : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
+            : mode === "signin_code_verify"
+              ? "Мы отправили шестизначный код. Введи его из письма, чтобы продолжить."
+              : mode === "signin_code"
+                ? "Войди без пароля. Отправим одноразовый код на твою почту."
               : "Войди в свой аккаунт CORTEX."}</p>
 
           <form onSubmit={submit} className="registration-form">
             <label htmlFor="registration-email">Электронная почта</label>
             <input id="registration-email" autoComplete="email" type="email" inputMode="email"
               value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254}
-              readOnly={mode === "verify"} placeholder="you@example.com" />
+              readOnly={mode === "verify" || mode === "signin_code_verify"} placeholder="you@example.com" />
 
-            {mode === "verify" ? (
+            {mode === "verify" || mode === "signin_code_verify" ? (
               <>
                 <label htmlFor="registration-code">Код из письма</label>
                 <input id="registration-code" className="verification-input" inputMode="numeric" autoComplete="one-time-code"
-                  value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 10))}
-                  required minLength={6} maxLength={10} placeholder="000000" />
+                  value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  required minLength={6} maxLength={6} placeholder="000000" />
               </>
-            ) : (
+            ) : mode !== "signin_code" ? (
               <>
                 <label htmlFor="registration-password">Пароль</label>
                 <input id="registration-password" autoComplete={mode === "signup" ? "new-password" : "current-password"}
                   type="password" value={password} onChange={(event) => setPassword(event.target.value)}
                   required minLength={8} placeholder="Не менее 8 символов" />
               </>
-            )}
+            ) : null}
 
             {mode === "signup" && (
               <label className="form-check">
@@ -167,15 +191,21 @@ export function RegistrationForm() {
 
             {error && <p role="alert" className="form-error">{error}</p>}
             <button className="button button--primary auth-submit" type="submit" disabled={busy}>
-              <span>{busy ? "Подождите..." : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : "Войти"}</span>
+              <span>{busy ? "Подождите..." : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : "Войти"}</span>
               {!busy && <UiIcon name="arrow-right" size={18} />}
             </button>
           </form>
 
           <div className="auth-switch">
             {mode === "signup" ? <>Уже есть аккаунт? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
-              : <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
+              : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
+                : <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
           </div>
+          {emailOtpReady && (mode === "signin" || mode === "signin_code") && (
+            <button type="button" className="auth-code-switch" onClick={() => switchMode(mode === "signin" ? "signin_code" : "signin")}>
+              {mode === "signin" ? "Войти по коду из почты" : "Войти с паролем"}
+            </button>
+          )}
         </>
       )}
     </section>

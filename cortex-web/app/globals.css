@@ -296,6 +296,8 @@ svg { display: block; flex-shrink: 0; }
 .auth-switch { margin-top: 25px; color: #8d8d8d; font-size: 12px; text-align: center; }
 .auth-switch button { margin-left: 4px; padding: 5px; background: transparent; border: 0; color: #f3f3f3; font-size: 12px; font-weight: 700; }
 .auth-switch button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.auth-code-switch { display: block; margin: 14px auto 0; padding: 6px 10px; border: 0; background: transparent; color: #bcbcbc; font-size: 12px; font-weight: 590; text-decoration: underline; text-underline-offset: 4px; }
+.auth-code-switch:hover { color: #fff; }
 .auth-success-mark { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 27px; border-radius: 50%; background: #f7f7f7; color: #090909; }
 .auth-footer {
   grid-area: auth-footer;
