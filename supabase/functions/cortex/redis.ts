@@ -5,6 +5,7 @@ const MODEL_KEY = "cortex:v1:openrouter:free-tools";
 const FREE_MODEL = /^[a-z0-9._-]+\/[a-z0-9._-]+:free$/;
 const REDIS_TIMEOUT_MS = 1200;
 const LOCAL_TTL_MS = 10 * 60_000;
+const STALE_TTL_MS = 6 * 60 * 60_000;
 
 /** Redis is an optional model-catalog cache; PostgreSQL owns all quota accounting. */
 type RedisCredentials = { url?: string; token?: string } | null;
@@ -26,7 +27,8 @@ export function createRedisCache(env: Record<string, string | undefined>, networ
   const token = (env.UPSTASH_REDIS_REST_TOKEN || "").trim();
   const enabled = UPSTASH_ENDPOINT.test(url) && token.length >= 24;
   let loaded: { value: Promise<RedisCredentials>; until: number } | undefined;
-  let cached: { models: string[]; until: number } | undefined;
+  let cached: { models: string[]; until: number; staleUntil: number } | undefined;
+  let pendingGet: Promise<string[] | null> | undefined;
   let consecutiveFailures = 0;
   let circuitOpenUntil = 0;
 
@@ -70,28 +72,41 @@ export function createRedisCache(env: Record<string, string | undefined>, networ
     }
   }
 
-  function localFallback(validate: (model: string) => boolean): string[] | null {
-    return cached && cached.until > Date.now() && cached.models.every(validate)
+  function localFallback(validate: (model: string) => boolean, stale = false): string[] | null {
+    return cached && (stale ? cached.staleUntil : cached.until) > Date.now() && cached.models.every(validate)
       ? [...cached.models] : null;
+  }
+
+  async function readRedis(): Promise<string[] | null> {
+    const data = await command(["GET", MODEL_KEY]);
+    if (typeof data !== "string" || data.length > 3000) return null;
+    let models: unknown;
+    try { models = JSON.parse(data); } catch { return null; }
+    if (!Array.isArray(models) || !models.length || models.length > 12 ||
+        !models.every(item => typeof item === "string" && FREE_MODEL.test(item))) return null;
+    const now = Date.now();
+    cached = { models: [...models], until: now + LOCAL_TTL_MS, staleUntil: now + STALE_TTL_MS };
+    return [...models];
   }
 
   return {
     enabled,
     async getFreeModels(validate: (model: string) => boolean): Promise<string[] | null> {
-      const data = await command(["GET", MODEL_KEY]);
-      if (typeof data !== "string" || data.length > 3000) return localFallback(validate);
-      let models: unknown;
-      try { models = JSON.parse(data); } catch { return localFallback(validate); }
-      if (!Array.isArray(models) || !models.length || models.length > 12 ||
-          !models.every(item => typeof item === "string" && FREE_MODEL.test(item) && validate(item))) {
-        return localFallback(validate);
+      // An isolate handles many requests: don't issue a Redis GET on each one.
+      const fresh = localFallback(validate);
+      if (fresh) return fresh;
+      if (!pendingGet) {
+        const request = readRedis();
+        pendingGet = request;
+        void request.finally(() => { if (pendingGet === request) pendingGet = undefined; });
       }
-      cached = { models: [...models], until: Date.now() + LOCAL_TTL_MS };
-      return [...models];
+      const models = await pendingGet;
+      return models?.every(validate) ? [...models] : localFallback(validate, true);
     },
     async putFreeModels(models: string[]): Promise<void> {
       if (!models.length || models.length > 12 || !models.every(model => FREE_MODEL.test(model))) return;
-      cached = { models: [...models], until: Date.now() + LOCAL_TTL_MS };
+      const now = Date.now();
+      cached = { models: [...models], until: now + LOCAL_TTL_MS, staleUntil: now + STALE_TTL_MS };
       await command(["SET", MODEL_KEY, JSON.stringify(models), "EX", 600]);
     },
   };
