@@ -6,6 +6,8 @@ const CortexIcons = (() => {
     newChat: '<path d="M20.5 11.8a8.5 8.5 0 0 1-8.5 8.5H4l1.4-3.8A8.5 8.5 0 0 1 12 3.4c1 0 1.9.1 2.8.4M18 3v6m-3-3h6"/>',
     core: '<g fill="currentColor" stroke="none"><circle cx="12" cy="12" r="2.45"/><circle cx="5.5" cy="12" r="1.55"/><circle cx="18.5" cy="12" r="1.55"/><circle cx="12" cy="5.5" r="1.55"/><circle cx="12" cy="18.5" r="1.55"/><circle cx="7.4" cy="7.4" r="1.1"/><circle cx="16.6" cy="16.6" r="1.1"/><circle cx="7.4" cy="16.6" r="1.1"/><circle cx="16.6" cy="7.4" r="1.1"/></g>',
     copy: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 4H6a2 2 0 0 0-2 2v10"/>',
+    "thumb-up": '<path d="M7 10v11H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3Zm0 0 5-7c1.4-2 3.4-.5 3.1 1.1L14.4 8H20a2 2 0 0 1 2 2.5l-2 8A3 3 0 0 1 17 21H7"/>',
+    "thumb-down": '<path d="M7 14V3H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3Zm0 0 5 7c1.4 2 3.4.5 3.1-1.1L14.4 16H20a2 2 0 0 0 2-2.5l-2-8A3 3 0 0 0 17 3H7"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
     help: '<path d="M3 13v-2a9 9 0 0 1 18 0v2M8 14a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2Zm8 0a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2Zm5 2v2a3 3 0 0 1-3 3h-5"/>',
     logout: '<path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5m5-13 5 5-5 5m-6-5h11"/>',

@@ -18,6 +18,16 @@
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
+  const supportStore = () => "cortex.support.chat.v1:" + (S.account?.id || "guest");
+  const loadSupport = () => {
+    try {
+      const items = JSON.parse(localStorage.getItem(supportStore()) || "[]");
+      return Array.isArray(items) ? items.filter(item => ["user", "assistant"].includes(item?.role) &&
+        typeof item.text === "string" && item.text.length <= 3000).slice(-30) : [];
+    } catch { return []; }
+  };
+  const supportThread = loadSupport();
+  let supportPending = false, supportEpoch = 0;
   const filters = { search: "" };
   const connection = { email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
     status: Api.available ? "loading" : "preview" };
@@ -42,7 +52,6 @@
   const send = form.querySelector(".send-button");
   const quotaRing = form.querySelector(".quota-ring");
   const modelPicker = form.querySelector(".ai-model-picker");
-  const microphone = form.querySelector(".mic-button");
   const voiceButton = form.querySelector(".voice-button");
   const stop = form.querySelector(".stop-button");
   const voicePanel = form.querySelector("#voice-inline");
@@ -106,6 +115,27 @@
     }
     saved();
     return control.reply;
+  }
+
+  function wakeCommand(text) {
+    const match = /^(?:кортекс[, ]*)?(включи|выключи) (?:фоновое )?(?:голосовое обращение|активацию по имени|вызов по имени|реакцию на слово кортекс)[.!?]*$/iu.exec(text.trim());
+    if (!match) return null;
+    if (!window.CortexIslandControl) return "Голосовая активация доступна только в Android-приложении.";
+    const enabled = match[1].toLowerCase() === "включи";
+    if (enabled && !permissions.microphone) return "Сначала разрешите микрофон в настройках Android.";
+    if (enabled && !permissions.overlay) return "Сначала разрешите отображение поверх приложений.";
+    const old = S.preferences.hotwordEnabled;
+    S.preferences.hotwordEnabled = enabled;
+    if (!sendDevice("wake-config", { enabled })) {
+      S.preferences.hotwordEnabled = old;
+      return "Не удалось изменить голосовую активацию.";
+    }
+    if (enabled && S.preferences.overlayMode === "off") {
+      S.preferences.overlayMode = "wake";
+      sendDevice("overlay-config", { mode: "wake", hideLandscape: S.preferences.hideLandscape, resume: true });
+    }
+    saved(); syncIslandOptions();
+    return enabled ? "Голосовая активация включена." : "Голосовая активация выключена.";
   }
 
   function applyEnergy(mode) {
@@ -179,7 +209,8 @@
 
   function mountWave() {
     if (!splash.hidden || app.classList.contains("in-onboarding")) { Wave.stop(); return; }
-    const main = route === "home" || route === "chat" && app.dataset.chatContent === "empty";
+    // The empty chat is intentionally calm: do not render an invisible canvas.
+    const main = route === "home";
     const host = main ? ambient : screen.querySelector("[data-wave-host]");
     if (!host) { Wave.stop(); return; }
     const kind = host === ambient ? route : host.dataset.waveHost || "splash";
@@ -231,6 +262,10 @@
       rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail,
       resendWait: Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000))
     });
+    if (route === "support") {
+      paintSupport();
+      if (previousRoute !== "support") void refreshSupportReplies();
+    }
     updateCodeCells();
     renderNav();
     nav.hidden = route === "account";
@@ -271,7 +306,7 @@
       { transform: `translate(${x}px,${y}px) scale(${from.w / to.w},${from.h / to.h})` },
       ...(cinematic ? [{ transform: `translate(${x * .23}px,${y * .23}px) scale(1.014,.92)`, offset: .55 }] : []),
       { transform: "none" }
-    ], { duration: cinematic ? 520 : 275, easing: "cubic-bezier(.21,.8,.18,1)" });
+    ], { duration: cinematic ? 320 : 190, easing: "cubic-bezier(.21,.8,.18,1)" });
   }
 
   function navigate(next, { id, replace = false, origin, newChat = false, messageEnter = false, cinematic = false, animate = true } = {}) {
@@ -312,7 +347,7 @@
         ], { duration: 460, easing: "cubic-bezier(.22,.74,.21,1)" });
       }
       pageMotion = cinematic ? Motion.revealChat(screen) : Motion.page(screen, tabDirection, switchesTab);
-      if (cinematic) clearMorph = Motion.core(app);
+      // No full-screen curtain for ordinary navigation.
       if (switchesTab && !cinematic) Motion.dock(nav.querySelector("[aria-current=page]"));
       if (newChat && origin) {
         const point = box(origin);
@@ -372,9 +407,18 @@
       const selected = M.aiModels.find(item => item.id === S.preferences.aiModel) || M.aiModels[0];
       const summary = modelPicker.querySelector("summary");
       const icon = summary?.querySelector("img");
-      const url = selected.domain ? `https://www.google.com/s2/favicons?domain=${selected.domain}&sz=64` : "art/mark.svg";
-      if (icon && icon.getAttribute("src") !== url) icon.src = url;
+      const url = selected.domain ? `/favicons/${selected.domain}` : "art/mark.svg";
+      if (icon && icon.getAttribute("src") !== url) {
+        icon.hidden = false;
+        if (icon.nextElementSibling?.classList.contains("ai-provider-initials")) {
+          icon.nextElementSibling.hidden = true;
+          icon.nextElementSibling.textContent = selected.brand.slice(0, 1);
+        }
+        icon.src = url;
+      }
       if (summary) summary.title = `Модель: ${selected.name}`;
+      const label = summary?.querySelector(".ai-model-label");
+      if (label) label.textContent = selected.name;
       modelPicker.querySelectorAll(".ai-model-option").forEach(button =>
         button.setAttribute("aria-pressed", String(button.dataset.value === selected.id)));
     }
@@ -386,7 +430,7 @@
         const fraction = quota.unlimited ? 1 : Math.max(0, Math.min(1, Number(quota.remaining) / Number(quota.limit)));
         quotaRing.style.setProperty("--quota-fraction", `${Math.round(fraction * 100)}%`);
         const label = quota.unlimited ? "Токены без лимита" : `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")} токенов`;
-        quotaRing.setAttribute("aria-label", label + ". Открыть использование");
+        quotaRing.setAttribute("aria-label", label + ". Подробнее");
         quotaRing.title = label;
       }
     }
@@ -403,12 +447,104 @@
     form.classList.toggle("working", working);
     send.disabled = !filled || working;
     send.hidden = !filled || working;
-    microphone.hidden = !device || working || Boolean(voice);
     voiceButton.hidden = !device || filled || working || Boolean(voice);
     stop.hidden = !working || Boolean(voice);
     app.style.setProperty("--composer-h", form.offsetHeight + "px");
     if (scroll && stick) scroll.scrollTop = scroll.scrollHeight;
     updateJumpLatest();
+  }
+
+  app.addEventListener("error", event => {
+    const image = event.target;
+    if (image instanceof HTMLImageElement && image.classList.contains("ai-provider-icon") &&
+        image.nextElementSibling?.classList.contains("ai-provider-initials")) {
+      image.hidden = true;
+      image.nextElementSibling.hidden = false;
+    }
+  }, true);
+
+  function rememberSupport(role, text, id = "") {
+    supportThread.push({ role, text: String(text).slice(0, 3000), ...(id && { id }) });
+    if (supportThread.length > 30) supportThread.splice(0, supportThread.length - 30);
+    try { localStorage.setItem(supportStore(), JSON.stringify(supportThread)); }
+    catch { /* The support chat remains usable in memory. */ }
+  }
+
+  function paintSupport() {
+    const host = screen.querySelector("#support-messages");
+    if (!host) return;
+    host.replaceChildren();
+    const entries = supportThread.length ? supportThread : [
+      { role: "assistant", text: "Напишите, что случилось. Я помогу разобраться." },
+    ];
+    for (const entry of entries) {
+      const bubble = document.createElement("div");
+      bubble.className = "support-message " + (entry.role === "user" ? "support-user" : "support-assistant");
+      bubble.textContent = entry.text;
+      host.append(bubble);
+    }
+    if (supportPending) {
+      const indicator = document.createElement("div");
+      indicator.className = "support-message support-assistant";
+      indicator.textContent = "Печатает…";
+      host.append(indicator);
+    }
+    host.scrollTop = host.scrollHeight;
+    const submit = screen.querySelector("#support-compose button");
+    if (submit) submit.disabled = supportPending;
+  }
+
+  async function refreshSupportReplies() {
+    if (!Api.available) return;
+    const epoch = supportEpoch;
+    try {
+      const data = await Api.request("support-inbox");
+      if (epoch !== supportEpoch) return;
+      const known = new Set(supportThread.map(item => item.id).filter(Boolean));
+      const replies = Array.isArray(data.replies) ? data.replies : [];
+      for (const reply of replies.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
+        if (typeof reply.id !== "string" || typeof reply.message !== "string" || known.has(reply.id)) continue;
+        known.add(reply.id);
+        rememberSupport("assistant", reply.message, reply.id);
+      }
+      if (route === "support") paintSupport();
+    } catch { /* Keep local messages if the support server is unavailable. */ }
+  }
+
+  async function sendSupport(message) {
+    if (supportPending || !message?.trim()) return;
+    const epoch = supportEpoch;
+    const text = message.trim().slice(0, 2000);
+    const operator = /^(?:оператор|сотрудник|человек|поддержка человека)$/iu.test(text);
+    rememberSupport("user", text);
+    supportPending = true;
+    paintSupport();
+    try {
+      if (operator) {
+        const previous = supportThread.slice(0, -1).filter(entry => entry.role === "user").slice(-2)
+          .map(entry => entry.text).join("\n");
+        const result = await Api.request("support", { payload: { id: crypto.randomUUID(),
+          kind: "contact", text: (previous || "Нужна помощь специалиста.").slice(0, 4000),
+          email: "", diagnostics: false, app_version: "", screenshot: "" } });
+        if (!result.sent) throw Api.failure("support_delivery");
+        if (supportEpoch !== epoch) return;
+        rememberSupport("assistant", "Обращение передано специалисту. Ответ появится здесь после обработки.");
+      } else {
+        const turns = supportThread.slice(-7).map(entry => ({ role: entry.role, content: entry.text }));
+        // The dedicated support model is free for the user and has separate abuse limits.
+        const result = await Api.request("support-ai", { payload: { messages: turns } });
+        if (supportEpoch !== epoch) return;
+        if (typeof result.text !== "string" || !result.text.trim()) throw Api.failure("empty");
+        rememberSupport("assistant", result.text);
+      }
+    } catch (error) {
+      if (supportEpoch === epoch) rememberSupport("assistant", error.message + " Если нужен специалист, напишите «оператор».");
+    } finally {
+      if (supportEpoch === epoch) {
+        supportPending = false;
+        if (route === "support") paintSupport();
+      }
+    }
   }
 
   function historyItems() {
@@ -564,6 +700,9 @@
     if (changed && pending) stopAnswer(false);
     M.useAccount(account);
     if (changed) {
+      supportEpoch++;
+      supportPending = false;
+      supportThread.splice(0, supportThread.length, ...loadSupport());
       connection.quota = null;
       connection.subscription = null;
       connection.subscriptionError = "";
@@ -881,8 +1020,10 @@
       "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
       "Опирайся на доступы и реальные результаты Android. " +
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
+    const sharedQuestion = !job.screen && M.canSharePublicQuestion(chat, request);
     const result = await Api.request("chat", {
-      payload: { messages: M.turns(chat, policy), style: M.profile().style, web_search: true,
+      payload: { messages: sharedQuestion ? [{ role: "user", content: request }] : M.turns(chat, policy),
+        style: M.profile().style, web_search: !sharedQuestion,
         ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }),
         ...(S.preferences.aiModel !== "auto" && { model_id: S.preferences.aiModel }) },
       notify: S.preferences.notifyReplies
@@ -928,7 +1069,7 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const localReply = retry ? null : islandCommand(text) ?? M.memoryCommand(text);
+      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text) ?? M.noteCommand(text);
       const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
@@ -1009,6 +1150,30 @@
     closeVoice();
     haptic();
     void answer(chat, text, { from: home ? control : null });
+  }
+
+  function rateAnswer(index, rating) {
+    const chat = current();
+    const message = chat?.messages[Number(index)];
+    if (message?.role !== "assistant" || !["up", "down"].includes(rating)) return;
+    message.feedback = message.feedback === rating ? undefined : rating;
+    if (chat.saved) saved();
+    render();
+    flash(message.feedback === "down" ? "Учту оценку в следующих ответах." :
+      message.feedback === "up" ? "Буду придерживаться этого стиля." : "Оценка снята.");
+  }
+
+  function regenerate(index) {
+    const chat = current(), position = Number(index);
+    if (!chat || pending || chat.messages[position]?.role !== "assistant") return;
+    const previous = chat.messages.slice(0, position).reverse().find(item => item.role === "user");
+    if (!previous) return;
+    if (position === chat.messages.length - 1) {
+      chat.messages.pop();
+      if (chat.saved) saved();
+      void answer(chat, previous.text, { retry: true });
+    } else void answer(chat, "Ответь заново на мой предыдущий вопрос: " + previous.text.slice(0, 2800) +
+      ". Учти контекст беседы, не дублируй предыдущий ответ.");
   }
 
   function submitExample(text, control, explain = false) {
@@ -1484,6 +1649,8 @@
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
     "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
+      supportThread.length = 0;
+      localStorage.removeItem(supportStore());
       sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
       drafts.clear(); errors.clear(); ruleDrafts.clear();
@@ -1496,6 +1663,24 @@
       if (last?.role === "user") void answer(chat, last.text, { retry: true, explain: errors.get(chat.id)?.explain });
     },
     copy(index) { return copyText(current()?.messages[Number(index)]?.text); },
+    regenerate,
+    "feedback-up": index => rateAnswer(index, "up"),
+    "feedback-down": index => rateAnswer(index, "down"),
+    "refine-answer": index => {
+      const message = current()?.messages[Number(index)];
+      if (!message || message.role !== "assistant") return;
+      drafts.set(draftKey(), "Уточни предыдущий ответ: ");
+      input.value = drafts.get(draftKey());
+      syncComposer();
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    },
+    "quota-detail": () => {
+      const quota = connection.quota;
+      if (!quota || quota.unit !== "tokens") return flash("Баланс пока недоступен.");
+      showSheet("Использование", `<p>${quota.unlimited ? "Без лимита" :
+        `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")}`}</p>`);
+    },
     "copy-code"(_, control) { return copyText(control.closest(".code-block")?.querySelector("code")?.textContent); },
     dictate: (_, control) => startVoice(true, control),
     "voice-chat": (_, control) => startVoice(false, control),
@@ -1648,6 +1833,13 @@
     const data = Object.fromEntries(Array.from(new FormData(form), ([key, value]) =>
       [key, ["password", "confirmation"].includes(key) ? String(value) : String(value).trim()]));
     if (form.id === "account-form") { await submitAccount(form, data); return; }
+    if (form.id === "support-compose") {
+      const field = form.querySelector("textarea");
+      if (!data.message || supportPending) return;
+      field.value = "";
+      void sendSupport(data.message);
+      return;
+    }
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
     if (form.id === "rule-form") {
       const rules = S.instructions.cortex ||= {};

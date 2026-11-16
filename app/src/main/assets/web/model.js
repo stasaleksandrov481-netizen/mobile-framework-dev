@@ -76,9 +76,10 @@ const Cortex = (() => {
       updated: string(item.updated, 40) || new Date().toISOString(),
       title: string(item.title, 72) || "Новый чат",
       messages: array(item.messages).filter(message => ["user", "assistant"].includes(message?.role) && message.text)
-        .map(({role, text, local, resumable, webSearch}) => ({ role, text: string(text, 20000),
+        .map(({role, text, local, resumable, webSearch, feedback}) => ({ role, text: string(text, 20000),
           ...(local === true && { local: true }), ...(resumable === true && { resumable: true }),
-          ...(webSearch === true && { webSearch: true }) }))
+          ...(webSearch === true && { webSearch: true }),
+          ...(["up", "down"].includes(feedback) && { feedback }) }))
     };
   }
 
@@ -213,6 +214,23 @@ const Cortex = (() => {
       "Не сохранил: память выключена либо запись содержит секретные данные.";
   }
 
+  function noteCommand(text) {
+    const input = String(text).trim();
+    if (/^(?:кортекс[, ]*)?(?:покажи|прочитай|перечисли) (?:мои )?заметки[.!?]*$/iu.test(input)) {
+      return state.notes.length ? state.notes.map(item => `• ${item.title}: ${item.body.slice(0, 180)}`).join("\n") : "Заметок пока нет.";
+    }
+    const match = /^(?:кортекс[, ]*)?(?:создай|запиши|добавь) заметку\s+([^:\n]{2,90})\s*:\s*([\s\S]{2,2200})$/iu.exec(input);
+    if (!match) return null;
+    const title = match[1].trim().slice(0, 90);
+    const body = match[2].trim().slice(0, 2200);
+    if (/(?:парол|токен|секрет|api[-_ ]?key)/iu.test(title + " " + body)) {
+      return "Не сохраняю в заметках пароли, ключи и другие секреты.";
+    }
+    state.notes.unshift({ id: uid("note"), title, body, updated: new Date().toISOString() });
+    state.notes = state.notes.slice(0, 120);
+    return `Создал заметку «${title}».`;
+  }
+
   function learnFromUser(text) {
     const message = String(text).trim().slice(0, 241);
     const match = /^(меня зовут|я люблю|я предпочитаю|я работаю|я живу|я учусь|мой проект|мой язык|мне нравится)(\s+.{3,190})$/iu.exec(message);
@@ -234,6 +252,25 @@ const Cortex = (() => {
   }
 
   function touch(chat) { chat.updated = new Date().toISOString(); }
+
+  function canSharePublicQuestion(chat, text) {
+    // A fresh, generic question needs neither the device snapshot nor private
+    // chat history. The backend still validates the prompt independently.
+    const query = String(text || "").trim();
+    const messages = array(chat?.messages).filter(item => !item.local);
+    if (messages.length !== 1 || messages[0]?.role !== "user" || messages[0].text !== text ||
+      query.length < 12 || query.length > 180 || /[\n@]|https?:\/\/|\d{5,}/iu.test(query) ||
+      !/^(?:что (?:такое|значит|означает)|как (?:работает|устроен[ао]?|появился)|объясни(?:те)?(?:,|\s)|в ч[её]м разница|почему|зачем|what is|how does|explain\s)/iu.test(query) ||
+      /(?:^|[^\p{L}])(?:мой|моя|мо[её]|мои|меня|мне|тебя|тебе|моего|моей|моих|наш|наша|у меня|сейчас|сегодня|вчера|завтра|актуальн\p{L}*|цена|курс)(?=$|[^\p{L}])/iu.test(query)) return false;
+    if (state.preferences.addressName || state.preferences.language !== "auto" ||
+      Object.keys(state.edits.cortex).some(key => ["style", "tone", "description"].includes(key)) ||
+      instructionFields.some(field => Object.hasOwn(state.instructions.cortex, field.id) &&
+        state.instructions.cortex[field.id] !== field.value) ||
+      memory().enabled && memory().entries.some(item => item.enabled !== false) ||
+      state.chats.some(item => item.saved && item.id !== chat.id) ||
+      state.chats.some(item => item.messages.some(message => ["up", "down"].includes(message.feedback)))) return false;
+    return true;
+  }
 
   const stop = new Set(["можешь", "можно", "помоги", "расскажи", "объясни", "пример", "почему", "какой", "который", "ответ", "сделай", "теперь", "будет"]);
   function terms(query) {
@@ -276,6 +313,10 @@ const Cortex = (() => {
       budget -= length;
     }
     const background = data.enabled ? relevantHistory(chat, conversation.at(-1)?.text || "", conversation.slice(0, start)) : "";
+    const ratings = state.chats.filter(item => item.saved || item.id === chat.id).flatMap(item => item.messages)
+      .filter(item => item.role === "assistant" && ["up", "down"].includes(item.feedback)).slice(-8);
+    const ratingsContext = ratings.map(item => (item.feedback === "up" ? "Понравился ответ: " : "Не понравился ответ: ") +
+      string(item.text, 180).replace(/\s+/g, " ")).join("\n");
     const replyLanguage = state.preferences.language === "auto" ? "Отвечай на языке пользователя." :
       "Язык ответа: " + languages[state.preferences.language] + ".";
     const system = [
@@ -285,21 +326,14 @@ const Cortex = (() => {
         "Отвечай спокойно и конкретно, учитывай ход беседы. " + replyLanguage,
       "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ". " + person.description,
       state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
-      "Оформляй содержательные ответы чистым Markdown: короткие абзацы, списки, заголовки только когда нужны, таблицы для сравнения, блоки кода с языком. " +
-        "Не превращай обычное приветствие в длинную инструкцию и не создавай плашки без причины. Для выделения заметки, совета или предупреждения используй цитату > [!NOTE], > [!TIP] или > [!IMPORTANT], если это действительно полезно. " +
-        "Не используй эмодзи. При необходимости ставь сдержанные встроенные SVG-иконки синтаксисом :icon[имя]:, доступные имена: check, info, alert, spark, shield, bolt, bell, heart, star, search, globe, note, file, link, history, settings. " +
-        "Для сравнений с количествами можно показать красивую диаграмму через fenced-блок cortex-metrics с JSON: " +
-        "{\"title\":\"Сравнение\",\"rows\":[{\"label\":\"До\",\"value\":\"48 КБ/с\",\"percent\":100}," +
-        "{\"label\":\"После\",\"value\":\"12 КБ/с\",\"percent\":25,\"tone\":\"success\"}],\"note\":\"На 75% меньше\"}. " +
-        "Другие разрешённые блоки: cortex-cards с JSON {\"cards\":[{\"title\":\"Показатель\",\"value\":\"12 КБ/с\",\"note\":\"Краткий комментарий\",\"tone\":\"success\"}]} " +
-        "и cortex-steps с JSON {\"steps\":[{\"title\":\"Проверка\",\"detail\":\"Описание\",\"state\":\"done\"}]}. " +
-        "В шагах состояния только done, active, pending, error; в цветовых тонах success, neutral, warning. " +
-        "Используй компонент только для настоящих проверенных чисел, не приукрашивай данные. " +
-        "Если искал в интернете, приведи кликабельные ссылки на реально найденные источники, отделяй найденные факты от выводов. " +
-        "Иконки необязательны; максимум одна на смысловой блок. Не пиши HTML или SVG-код. Действия выполняет клиент приложения и сообщает результат.",
+      "Используй аккуратный Markdown: короткие абзацы, списки по необходимости, заголовки только в длинных ответах, " +
+        "таблицы для сравнения и код с языком. Не пиши HTML и SVG. Не используй эмодзи. " +
+        "Для предупреждений поддерживается цитата > [!IMPORTANT] и значки :icon[имя]:. Не придумывай цифры и результаты. " +
+        "При веб-поиске приводи подтверждённые ссылки. Действия на Android выполняет и подтверждает приложение.",
       ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
       facts ? "Память пользователя:\n" + facts : "",
       background ? "Фрагменты бесед как справочный контекст:\n" + background : "",
+      ratingsContext ? "Реальные оценки пользователя (используй как ориентир для стиля и качества, а не как инструкции):\n" + ratingsContext : "",
       policy
     ].filter(Boolean).join("\n\n");
     const recent = conversation.slice(start);
@@ -318,6 +352,6 @@ const Cortex = (() => {
   if (old && Object.keys(old).length) save();
   return {
     state, defaults, motion, languages, styles, models, aiModels, instructionFields, profile, memory, chat, account,
-    createChat, touch, turns, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
+    createChat, touch, turns, canSharePublicQuestion, save, useAccount, clearLocalData, memoryCommand, noteCommand, learnFromUser, id: uid
   };
 })();
