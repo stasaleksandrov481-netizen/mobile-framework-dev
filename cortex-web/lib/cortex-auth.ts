@@ -1,11 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-// These are public Supabase credentials already used by cortex-control.
-// Never put a secret / service-role key in a NEXT_PUBLIC_* variable.
-const url = process.env.NEXT_PUBLIC_CORTEX_SUPABASE_URL || "https://jjcqrjztxohnifmziksy.supabase.co";
-const key = process.env.NEXT_PUBLIC_CORTEX_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_bE670IJCPMtnxUpGiOrJLQ_NeiyuI-H";
+import { cortexSupabaseUrl, cortexPublishableKey } from "./cortex-public-config";
 
-export const cortexAuth = createClient(url, key, {
+export const cortexAuth = createClient(cortexSupabaseUrl, cortexPublishableKey, {
   auth: {
     flowType: "pkce",
     autoRefreshToken: true,

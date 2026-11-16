@@ -16,7 +16,7 @@ const roles = { owner: "Владелец", admin: "Разработчик", supp
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
-let quotaId = "", supportFilter = "active";
+let quotaId = "", supportFilter = "active", ownId = "";
 
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -93,10 +93,10 @@ function showMfa(list) {
 
 async function initialize() {
   const { session } = data(await db.auth.getSession());
-  if (!session) { user = role = factor = enrollment = null; signIn(); return; }
+  if (!session) { user = role = factor = enrollment = null; ownId = ""; signIn(); return; }
   const previous = user?.id;
   user = data(await db.auth.getUser()).user;
-  if (!user) { signIn(); return; }
+  if (!user) { ownId = ""; signIn(); return; }
   if (previous !== user.id) { factor = enrollment = ticket = null; quotaId = ""; }
   if (!data(await db.rpc("cortex_control_signin"))) {
     role = null;
@@ -120,6 +120,8 @@ async function initialize() {
       button("Выйти", "logout"));
     return;
   }
+  const identity = await db.rpc("cortex_admin_public_id");
+  ownId = typeof identity.data === "string" && /^@id\d{6,17}$/.test(identity.data) ? identity.data : "";
   drawShell();
   await loadTab();
 }
@@ -135,7 +137,8 @@ function drawShell() {
   const navigation = allowedTabs().map(key => '<button type="button" data-action="tab" data-value="' + key + '"' +
     (key === tab ? ' aria-current="page"' : '') + '>' + labels[key] + '</button>').join("");
   app.innerHTML = '<header class="top"><div class="wordmark">CORTEX CONTROL</div><span class="role">' +
-    escape(roles[role]) + '</span><button type="button" class="menu-button" data-action="menu" aria-controls="mobile-nav" aria-expanded="false">Меню</button></header>' +
+    escape(roles[role]) + '</span>' + (ownId ? button("Мой ID · " + ownId, "copy-my-id") : "") +
+    '<button type="button" class="menu-button" data-action="menu" aria-controls="mobile-nav" aria-expanded="false">Меню</button></header>' +
     '<div class="layout"><aside><nav aria-label="Разделы">' + navigation + '</nav>' + button("Выйти", "logout") + '</aside>' +
     '<main id="dashboard"><h1>' + labels[tab] + '</h1><p>Загрузка…</p></main></div>' +
     '<dialog id="mobile-nav" aria-label="Меню"><div class="dialog-head"><strong>CORTEX Control</strong>' +
@@ -172,7 +175,7 @@ async function overview() {
     .map(([key, label]) => card(label, '<strong class="count">' + dateNumber(summary[key]) + '</strong>')).join("");
   const seen = activity.today.map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
     date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
-  return '<div class="cards">' + cards + other + '</div><p class="muted">Сегодня по Москве. Учёт устройств начинается с обновления.</p>' +
+  return '<div class="cards">' + cards + other + '</div><p class="muted">Сегодня по Москве. Устройства считаются по постоянному идентификатору.</p>' +
     card("Кто открыл CORTEX сегодня", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Сегодня пока нет входов с аккаунтом.</p>');
 }
 
@@ -367,6 +370,11 @@ app.addEventListener("click", async event => {
         if (allowedTabs().includes(value)) { tab = value; drawShell(); await loadTab(); }
         break;
       case "refresh": await loadTab(); break;
+      case "copy-my-id":
+        if (!ownId) break;
+        try { await navigator.clipboard.writeText(ownId); flash("ID скопирован."); }
+        catch { flash(ownId); }
+        break;
       case "ticket": ticket = value; await loadTab(); break;
       case "ticket-filter": supportFilter = value; ticket = null; await loadTab(); break;
       case "billing-revoke":

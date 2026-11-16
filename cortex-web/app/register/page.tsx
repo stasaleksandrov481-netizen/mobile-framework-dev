@@ -28,6 +28,8 @@ export default function RegisterPage() {
         <div className="auth-footer-links">
           <Link href="/privacy">Конфиденциальность</Link>
           <Link href="/terms">Условия</Link>
+          <Link href="/pricing">Тарифы</Link>
+          <Link href="/support">Поддержка</Link>
         </div>
       </footer>
 
