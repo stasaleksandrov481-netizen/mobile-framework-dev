@@ -4,6 +4,7 @@ import {
   supportInput, verifyCompletion,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
+import { createRedisCache } from "./redis.ts";
 import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
 
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
@@ -119,6 +120,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
   const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
+  const haikuModel = "anthropic/claude-haiku-5.5";
+  const speechModel = "google/gemini-3.8-flash-lite-tts";
   const paidFast = env.CORTEX_PAID_FAST_MODEL?.trim() || "";
   const paidDeep = env.CORTEX_PAID_DEEP_MODEL?.trim() || "";
   const paidModelId = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
@@ -181,25 +184,42 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (environmentModelKey) return environmentModelKey;
         throw error;
       });
-    providerCache = { value, until: Date.now() + 30_000 };
+    providerCache = { value, until: Date.now() + 90_000 };
     return value;
   }
 
   const control = createControl(database);
+  const redis = createRedisCache(env, network, () =>
+    database<{ url?: string; token?: string } | null>("rpc/cortex_redis_config", "POST", {}));
+  const bonusClaims = new Map<string, number>();
+  async function claimEarlyBonus(account: Account): Promise<void> {
+    const now = Date.now();
+    if (now < Date.parse("2026-11-20T00:00:00+03:00") || (bonusClaims.get(account.id) || 0) > now) return;
+    try {
+      await database("rpc/cortex_ai_claim_early_bonus", "POST", { p_subject: account.id, p_email: account.email });
+      if (bonusClaims.size >= 2048) bonusClaims.clear();
+      bonusClaims.set(account.id, now + 4 * 60 * 60 * 1000);
+    } catch { /* Bonus lookup must not block the account. */ }
+  }
   let catalog: { value: Promise<string[]>; until: number } | undefined;
   function freeCatalog(): Promise<string[]> {
     if (catalog && catalog.until > Date.now()) return catalog.value;
-    const value = network("https://openrouter.ai/api/v1/models", {
-      redirect: "error", signal: AbortSignal.timeout(3500),
-    }).then(async response => {
+    const value = (async () => {
+      const cached = await redis.getFreeModels(model => FREE_MODEL.test(model)).catch(() => null);
+      if (cached) return cached;
+      const response = await network("https://openrouter.ai/api/v1/models", {
+        redirect: "error", signal: AbortSignal.timeout(3500),
+      });
       if (!response.ok) throw new Error("model_catalog");
       const { data } = await response.json();
       if (!Array.isArray(data)) return [];
-      return data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
+      const models = data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
         String(item.pricing?.prompt) === "0" && String(item.pricing?.completion) === "0" &&
         item.architecture?.output_modalities?.includes("text") && item.supported_parameters?.includes("tools"))
         .slice(0, 12).map(item => String(item.id));
-    }).catch(() => []);
+      await redis.putFreeModels(models).catch(() => {});
+      return models;
+    })().catch(() => []);
     catalog = { value, until: Date.now() + 600_000 };
     return value;
   }
@@ -306,6 +326,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     const previous = bearer(request);
     if (previous) await database("cortex_sessions?token_hash=eq." + await hash(previous), "DELETE");
     await claimGuest(request, account);
+    await claimEarlyBonus(account);
     return json({ state: "signed_in", token, account });
   }
 
@@ -354,6 +375,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function usage(request: Request, account: Account | null): Promise<Quota | null> {
+    if (account) await claimEarlyBonus(account);
     const id = await subject(request, account);
     return id ? await database<Quota>("rpc/cortex_ai_usage", "POST", { p_subject: id }) : null;
   }
@@ -376,7 +398,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (aiSettings && aiSettings.until > Date.now()) return aiSettings.value;
     const value = database<Array<{ model?: string }>>("cortex_ai_settings?select=model&singleton=eq.true&limit=1")
       .then(rows => rows[0]?.model || "");
-    aiSettings = { value, until: Date.now() + 5000 };
+    aiSettings = { value, until: Date.now() + 45_000 };
     void value.catch(() => { if (aiSettings?.value === value) aiSettings = undefined; });
     return value;
   }
@@ -465,6 +487,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (result.state === "forbidden") throw new Failure("account_forbidden", 403);
     if (result.state !== "signed_in" || !result.account) return json({ state: "pending" });
     await claimGuest(request, result.account);
+    await claimEarlyBonus(result.account);
     return json({ ...result, token });
   }
 
@@ -545,8 +568,60 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (token) await database("cortex_sessions?token_hash=eq." + await hash(token), "DELETE");
         return json({ ok: true });
       }
+      if (method === "POST" && path === "/v1/speech") {
+        // PCM is kept server-side until the upstream response is validated. Never
+        // proxy the OpenRouter credential or allow arbitrary model selection.
+        const caller = await actor(request);
+        if (!caller.account) throw new Failure("sign_in", 401);
+        const gate = await control.gate(request, caller.account);
+        if (gate.mode !== "open") throw new Failure(gate.mode, 403);
+        const input = await body(request, 2200);
+        const text = input.text;
+        if (Object.keys(input).some(field => field !== "text") || typeof text !== "string" ||
+          !text.trim() || text.length > 550 || /[\u0000-\u0008\u000b\u000e-\u001f]/u.test(text)) throw new Failure("invalid", 400);
+        await reserve(
+          { bucket: "speech:" + caller.bucket, seconds: 60, maximum: 4 },
+          { bucket: "speech:" + caller.bucket, seconds: 86_400, maximum: 30 },
+          { bucket: "speech:all", seconds: 60, maximum: 80 },
+        );
+        const key = paidKey || await providerKey().catch(() => "");
+        if (!key) throw new Failure("unconfigured", 503);
+        const upstream = await network("https://openrouter.ai/api/v1/audio/speech", {
+          method: "POST", redirect: "error", signal: AbortSignal.timeout(26_000),
+          headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: speechModel, input: text.trim(), voice: "Kore", response_format: "pcm" }),
+        });
+        if (!upstream.ok) {
+          await upstream.body?.cancel();
+          throw new Failure(upstream.status === 429 ? "provider_limit" : "speech_unavailable", 502);
+        }
+        if ((upstream.headers.get("content-type") || "").includes("json")) {
+          await upstream.body?.cancel();
+          throw new Failure("speech_unavailable", 502);
+        }
+        const parts: Uint8Array[] = [];
+        let size = 0;
+        const reader = upstream.body?.getReader();
+        if (!reader) throw new Failure("speech_unavailable", 502);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > 2_400_000) throw new Failure("speech_unavailable", 502);
+            parts.push(value);
+          }
+        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        if (!size || size % 2) throw new Failure("speech_unavailable", 502);
+        const pcm = new Uint8Array(size);
+        let offset = 0;
+        for (const part of parts) { pcm.set(part, offset); offset += part.length; }
+        return new Response(pcm, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+          "X-Cortex-Audio-Format": "pcm_s16le_24000_mono" } });
+      }
       if (method === "POST" && (path === "/v1/chat" || path === "/v1/check")) {
         const caller = await actor(request);
+        if (caller.account) await claimEarlyBonus(caller.account);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
           messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
@@ -603,9 +678,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 5_200 : quick ? 5_500 : 15_000;
+        const firstTokenMs = input.visual ? 7_000 : quick ? 4_500 : 13_000;
         const signal = AbortSignal.any([request.signal, upstream.signal,
-          AbortSignal.timeout(input.visual ? 12_500 : quick ? 29_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 46_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
@@ -615,8 +690,15 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         ] : ready;
         if (!ordered.length && choices[0]) ordered.push(choices[0]);
         // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
-        const paidCandidates = [ ...(premium ? [{ model: paidDeep, advanced: true }] : []),
-          ...(basic && (!premium || paidFast !== paidDeep) ? [{ model: paidFast, advanced: false }] : []) ];
+        // Haiku 5.5 is a paid model. Reserve it against the advanced-token and
+        // $0.60/M-token liability ceiling; never silently bill free users.
+        // A rotated Vault key may serve both free and paid routes. Only accounts
+        // with an advanced-token budget can spend against Haiku's paid ceiling.
+        const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
+        const paidCandidates = [ ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
+          ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
+          ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
+            ? [{ model: paidFast, advanced: false }] : []) ];
         const routeModels = [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
         const maxAttempts = paidCandidates.length + (input.visual ? 2 : 3);
         const messages = [...input.messages];
@@ -674,8 +756,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               }
               const format = !input.visual ? undefined : visualTools.includes(model)
                 ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
-              const result = await completion(network, paid ? paidKey : key, [model], messages, isChat && !input.visual,
-                input.limit, signal, input.device, input.repair, firstTokenMs, quick, input.plan,
+              const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
+                input.limit, signal, input.device, input.repair,
+                paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
               modelCooldown.delete(scope + model);
               return result;

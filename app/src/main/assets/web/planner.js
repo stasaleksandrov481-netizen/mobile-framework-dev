@@ -23,9 +23,9 @@ const CortexPlanner = (() => {
   };
   const directions = { down: "Вниз", up: "Вверх", left: "Влево", right: "Вправо" };
   const islandDefaults = {
-    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
-    opacity: 82, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .9, motion: "liquid",
-    face: true, status: true, progress: true, quick: true, results: true, music: true, battery: false
+    background: "#080808", text: "#ffffff", border: "#c6c6c6", accent: "#ffffff", faceColor: "#ffffff",
+    opacity: 96, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .65, motion: "liquid",
+    face: false, status: true, progress: true, results: true
   };
   const islandPresets = {
     "Монохром": islandDefaults,
@@ -317,9 +317,8 @@ const CortexPlanner = (() => {
       <section class="panel stack"><h2>Цвета</h2><div class="plan-color-grid">${Object.entries(colorNames).map(([key, title]) =>
         `<button type="button" class="plan-swatch" data-plan="palette" data-value="${key}">
           <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></section>
-      <section class="panel stack"><h2>Виджеты</h2>${widget("face", "Смайлик со статусом")}${widget("status", "Статус")}
-        ${widget("progress", "Полоса прогресса")}${widget("quick", "Быстрые команды")}${widget("results", "Результат действий")}
-        ${widget("music", "Индикатор воспроизведения") }${widget("battery", "Заряд устройства")}</section>`);
+      <section class="panel stack"><h2>Содержимое</h2>${widget("face", "Анимированный символ")}${widget("status", "Статус")}
+        ${widget("progress", "Полоса прогресса")}${widget("results", "Результат действий")}</section>`);
   }
 
   function hsvFromHex(hex) {

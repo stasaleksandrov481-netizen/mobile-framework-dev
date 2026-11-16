@@ -155,6 +155,49 @@ const Cortex = (() => {
     return data;
   }
 
+  const blockedMemory = /парол|password|токен|секрет|api[ _-]?key|cvv|cvc|otp|пин.?код|код из|номер карт|bearer|sk-or-v1-|-----begin|@|https?:\/\//iu;
+  const sensitiveValue = /\b(?:\d{6}|\d{12,19}|[A-Za-z0-9_-]{35,})\b/u;
+  function addMemoryFact(value, title) {
+    const data = memory();
+    const fact = value.trim().replace(/[.!?]+$/u, "").slice(0, 240);
+    if (!data.enabled || fact.length < 5 || blockedMemory.test(fact) || sensitiveValue.test(fact)) return false;
+    const existing = data.entries.find(entry => entry.title === title);
+    if (existing && existing.value.toLowerCase() === fact.toLowerCase()) return false;
+    if (existing) existing.value = fact;
+    else data.entries.unshift({ id: uid("fact"), enabled: true, title, value: fact });
+    data.entries = data.entries.slice(0, 16);
+    return true;
+  }
+
+  function memoryCommand(text) {
+    const input = String(text).trim();
+    if (/^(?:кортекс[, ]*)?(?:очисти память|удали память|забудь всё|забудь все)[.!?]*$/iu.test(input)) {
+      memory().entries = [];
+      return "Удалил все сохранённые факты обо мне. История чатов удаляется отдельно в настройках.";
+    }
+    if (/^(?:кортекс[, ]*)?(?:что ты обо мне помнишь|покажи мою память)[.!?]*$/iu.test(input)) {
+      const items = memory().entries.filter(item => item.enabled !== false);
+      return items.length ? "Я помню:\n" + items.map(item => "• " + item.value).join("\n") :
+        "Пока ничего о вас не запомнил.";
+    }
+    const explicit = /^(?:кортекс[, ]*)?запомни(?: пожалуйста)?[, ]+(?:что\s+)?(.+)$/iu.exec(input);
+    if (!explicit) return null;
+    return addMemoryFact(explicit[1], "По просьбе пользователя") ? "Запомнил. Этот факт можно удалить в разделе «Память»." :
+      "Не сохранил: память выключена либо запись содержит секретные данные.";
+  }
+
+  function learnFromUser(text) {
+    const message = String(text).trim().slice(0, 241);
+    const match = /^(меня зовут|я люблю|я предпочитаю|я работаю|я живу|я учусь|мой проект|мой язык|мне нравится)(\s+.{3,190})$/iu.exec(message);
+    if (!match) return false;
+    const name = match[1].toLowerCase();
+    const category = name === "меня зовут" ? "Имя" :
+      name === "мой проект" ? "Проект" : name === "мой язык" ? "Язык" :
+      name === "я работаю" ? "Работа" : name === "я живу" ? "Город" :
+      name === "я учусь" ? "Учёба" : "Предпочтения";
+    return addMemoryFact(message, category);
+  }
+
   function chat(id) { return state.chats.find(item => item.id === id); }
 
   function createChat(saved = false) {
@@ -237,6 +280,6 @@ const Cortex = (() => {
   if (old && Object.keys(old).length) save();
   return {
     state, defaults, motion, languages, styles, models, instructionFields, profile, memory, chat, account,
-    createChat, touch, turns, save, useAccount, clearLocalData, id: uid
+    createChat, touch, turns, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

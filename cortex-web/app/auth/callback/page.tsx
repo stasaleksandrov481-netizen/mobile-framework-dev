@@ -28,7 +28,14 @@ export default function AuthCallback() {
           throw new Error("Регистрация не найдена.");
         }
         await savePreregistration(user.user_metadata?.cortex_notify_opt_in === true);
-        if (active) setState("done");
+        if (active) {
+          setState("done");
+          if (typeof BroadcastChannel !== "undefined") {
+            const channel = new BroadcastChannel("cortex-email-confirmed");
+            channel.postMessage({ confirmed: true });
+            channel.close();
+          }
+        }
       } catch {
         if (active) setState("error");
       }
@@ -43,7 +50,7 @@ export default function AuthCallback() {
       <p>{state === "loading"
         ? "Подождите несколько секунд."
         : state === "done"
-          ? "Регистрация завершена. Мы зарезервировали 5 000 бонусных ИИ-токенов к запуску беты 20 ноября."
+          ? "Регистрация завершена. Вернитесь к исходной вкладке: она обновится автоматически. Мы зарезервировали 5 000 ИИ-токенов к запуску беты 20 ноября."
           : "Возможно, ссылка истекла или регистрация пока недоступна. Попробуйте ещё раз на странице регистрации."}</p>
       <p><Link href={state === "error" ? "/register" : "/"}>{state === "error" ? "Повторить регистрацию" : "На главную"}</Link></p>
     </main>

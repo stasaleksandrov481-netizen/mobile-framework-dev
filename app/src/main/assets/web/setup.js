@@ -7,7 +7,7 @@ window.CortexSetup = (() => {
   const reduced = () => prefs().reduceMotion || matchMedia("(prefers-reduced-motion: reduce)").matches;
   const { icon, esc } = CortexUI;
   const mark = '<img src="art/mark.svg" alt="" class="intro-mark">';
-  let view, page = 0, single = false, permissions = {}, notice = "", demo = 0, demoTimer = 0;
+  let view, page = 0, single = false, permissions = {}, notice = "";
   const accesses = [
     { id: "microphone", name: "Микрофон", icon: "mic", action: "microphone-permission",
       description: "Продиктуйте вопрос или задачу. Доступ используется для записи речи и голосового вызова, если вы его включите." },
@@ -22,7 +22,8 @@ window.CortexSetup = (() => {
     { id: "notifications", name: "Уведомления", icon: "bell", action: "notification-permission",
       description: "Уведомления показывают шаг задачи и позволяют её остановить. Также можно получать уведомления о новых ответах поддержки." }
   ];
-  const pages = ["welcome", "demo", ...accesses.map(x => x.id), "personalize", "finish"];
+  // Keep first run focused: no simulated command execution and no extra demo step.
+  const pages = ["welcome", ...accesses.map(x => x.id), "personalize", "finish"];
 
   function native(operation, data = {}) {
     const island = window.CortexIslandControl;
@@ -32,23 +33,19 @@ window.CortexSetup = (() => {
     catch { return false; }
   }
 
-  function prologue(id) {
-    const face = '<span class="plan-face intro-face" aria-hidden="true"><i></i><i></i><b></b></span>';
-    if (id === "welcome") return `<div class="intro-stage hero-intro"><div class="intro-orbit">
-      <i></i><i></i><div class="intro-lens glass-card">${mark}</div>${face}</div>
-      <h1>Голосом или текстом</h1><p>Скажите, что сделать. CORTEX выполнит команду на телефоне или ответит в чате.</p>
-      <ul class="intro-capabilities"><li>${icon("folder", 20)}<span>Открыть приложение</span></li>
-        <li>${icon("bolt", 20)}<span>Изменить яркость или звук</span></li>
-        <li>${icon("bell", 20)}<span>Поставить напоминание</span></li>
-        <li>${icon("layers", 20)}<span>Запустить цепочку действий</span></li></ul></div>`;
-    const state = demo === 2 ? icon("check", 17) + " Фонарик включён" : demo === 1 ?
-      '<span class="intro-mini-dots"><i></i><i></i><i></i></span> Проверяю фонарик…' : "Ожидание команды";
-    return `<div class="intro-stage capability-intro">
-      <div class="intro-command glass-card" data-demo="${demo}">
-        <div class="intro-command-island">${face}<span>CORTEX</span>${icon("wave", 20)}</div>
-        <p class="intro-command-question">Включи фонарик</p><p class="intro-command-result" role="status">${state}</p>
-        <button type="button" class="action outline" data-intro-action="demo">${icon("play", 16)}${demo ? "Повторить пример" : "Показать пример"}</button>
-      </div><h1>Каждый шаг на виду</h1><p>Островок показывает ход задачи. Нажмите на него для мини-чата, остановите выполнение с экрана или из уведомления.</p></div>`;
+  function prologue() {
+    return `<div class="intro-stage hero-intro intro-welcome">
+      <div class="intro-hero-art" aria-hidden="true">
+        <div class="intro-hero-halo"></div>
+        <div class="intro-hero-pill">${mark}<span>CORTEX</span><i></i></div>
+        <div class="intro-hero-task"><span>ПРИМЕР КОМАНДЫ</span><strong>Напомни позвонить завтра в 10</strong>
+          <small>${icon("check", 15)} CORTEX подготовит напоминание</small></div>
+      </div>
+      <span class="intro-eyebrow">ВАШ АССИСТЕНТ</span>
+      <h1>От команды<br>к результату.</h1>
+      <p>Говорите или пишите, что нужно сделать. CORTEX помогает управлять телефоном, а каждый шаг остаётся под вашим контролем.</p>
+      <div class="intro-promise">${icon("shield", 16)} Действие можно остановить в любой момент</div>
+    </div>`;
   }
 
   function access(item) {
@@ -65,17 +62,19 @@ window.CortexSetup = (() => {
 
   function finishStage() {
     return '<div class="intro-stage finish-intro"><div class="intro-finish-mark">' + mark + '</div><h1>Готовы начать.</h1>' +
-      '<p>Выберите режим энергопотребления.</p><div class="intro-mode-list">' +
+      '<p>Выберите, как CORTEX будет работать в фоне. Режим можно изменить позже.</p><div class="intro-mode-list">' +
       Object.entries(CortexPlanner.powers).map(([mode, [title, detail]]) =>
         '<button type="button" class="intro-mode ' + (prefs().energy === mode ? "selected" : "") +
         '" data-intro-action="mode" data-mode="' + mode + '" aria-pressed="' + (prefs().energy === mode) +
         '"><span class="intro-mode-text"><strong>' +
-        title + '</strong><small>' + detail + '</small></span><span class="intro-mode-check"></span></button>').join("") +
+        title + (mode === "balanced" ? ' <span class="intro-recommended">Рекомендуем</span>' : '') +
+        '</strong><small>' + detail + '</small></span><span class="intro-mode-check"></span></button>').join("") +
       '</div><p class="intro-feedback" role="status">' + esc(notice) + '</p></div>';
   }
 
   function personalize() {
-    return '<div class="intro-stage intro-custom"><h1>Как к вам обращаться?</h1>' +
+    return '<div class="intro-stage intro-custom"><span class="intro-eyebrow">ПОЧТИ ГОТОВО</span><h1>Настроим под вас.</h1>' +
+      '<p>Имя и внешний вид можно поменять в настройках в любой момент.</p>' +
       '<label class="field"><span>Имя или обращение</span><input id="intro-address" value="' +
       esc(prefs().addressName) + '" maxlength="60" placeholder="Можно пропустить"></label>' +
       '<h2>Оформление островка</h2><div class="intro-mode-list">' +
@@ -83,7 +82,10 @@ window.CortexSetup = (() => {
         const selected = CortexPlanner.style().background === preset.background;
         return '<button type="button" class="intro-mode ' + (selected ? "selected" : "") +
           '" data-intro-action="style" data-mode="' + esc(name) + '" aria-pressed="' + selected + '">' +
-          '<span class="intro-mode-text"><strong>' + esc(name) + '</strong></span><span class="intro-mode-check"></span></button>';
+          '<span class="intro-preset-pill" style="background:' + esc(preset.background) +
+          ';border-color:' + esc(preset.border) + '"><i style="background:' + esc(preset.text) +
+          '"></i></span><span class="intro-mode-text"><strong>' + esc(name) +
+          '</strong></span><span class="intro-mode-check"></span></button>';
       }).join("") + '</div></div>';
   }
 
@@ -95,12 +97,13 @@ window.CortexSetup = (() => {
     const oldWidth = view.querySelector(".intro-meter i")?.style.width;
     const previous = direction === 0 ? view.querySelector(".intro-content")?.scrollTop || 0 : 0;
     view.innerHTML = '<div class="intro-top"><span class="intro-wordmark">CORTEX</span>' +
-      '<button type="button" data-intro-action="close">' + (single ? 'Закрыть' : 'Пропустить') + '</button></div><section class="intro-content">' + content +
+      (!single ? '<span class="intro-count">' + (page + 1) + ' / ' + pages.length + '</span>' : '') +
+      '<button type="button" data-intro-action="close">' + (single ? 'Закрыть' : 'Позже') + '</button></div><section class="intro-content">' + content +
       '</section><div class="intro-bottom">' + (!single ? '<div class="intro-meter" role="progressbar" aria-label="Первый запуск" aria-valuemin="0" aria-valuemax="' +
       pages.length + '" aria-valuenow="' + (page + 1) + '"><i style="width:' + (100 * (page + 1) / pages.length) + '%"></i></div>' : '') +
       '<div class="intro-nav"><button type="button" class="intro-back" data-intro-action="back" ' + (page === 0 || single ? "hidden" : "") + '>Назад</button>' +
       '<button type="button" class="intro-next" data-intro-action="next">' +
-      (single ? "Готово" : id === "finish" ? "Открыть CORTEX" : "Далее") +
+      (single ? "Готово" : id === "finish" ? "Открыть CORTEX" : id === "welcome" ? "Настроить CORTEX" : "Продолжить") +
       ' ' + icon("chevron", 19) + '</button></div></div>';
     const bar = view.querySelector(".intro-meter i");
     if (bar && oldWidth && direction && !reduced()) {
@@ -116,7 +119,7 @@ window.CortexSetup = (() => {
 
   function show(index, one = false) {
     if (view) return;
-    page = index; single = one; notice = ""; demo = 0;
+    page = index; single = one; notice = "";
     view = document.createElement("section");
     view.className = "cortex-intro";
     view.setAttribute("role", "dialog");
@@ -133,7 +136,6 @@ window.CortexSetup = (() => {
   function close(complete = false) {
     if (!view) return;
     if (!single && complete) localStorage.setItem(key, "done");
-    clearTimeout(demoTimer);
     view.remove();
     view = null;
     root.classList.remove("in-onboarding");
@@ -147,17 +149,17 @@ window.CortexSetup = (() => {
     const item = accesses.find(x => x.id === pages[page]);
     switch (target.dataset.introAction) {
       case "next":
-        if (single || page === pages.length - 1) close(true);
+        if (single || page === pages.length - 1) {
+          if (!single) {
+            root.dispatchEvent(new CustomEvent("cortex-onboarding-energy", { detail: { mode: prefs().energy } }));
+            root.dispatchEvent(new Event("cortex-onboarding-style"));
+          }
+          close(true);
+        }
         else { page++; notice = ""; draw(1); }
         break;
       case "back": back(); break;
       case "close": close(!single); break;
-      case "demo":
-        demo = 1;
-        clearTimeout(demoTimer);
-        draw();
-        demoTimer = setTimeout(() => { demo = 2; if (pages[page] === "demo") draw(); }, reduced() ? 0 : 860);
-        break;
       case "permission":
         if (!item) return;
         notice = native(item.action) ? "После выдачи доступа вернитесь в CORTEX." : "Откройте разрешения приложения в Android.";
@@ -167,10 +169,7 @@ window.CortexSetup = (() => {
       case "mode": {
         const mode = target.dataset.mode;
         if (!Object.hasOwn(CortexPlanner.powers, mode)) return;
-        prefs().energy = mode;
-        prefs().overlayMode = { economy: "off", balanced: "wake", maximum: "always" }[mode];
-        prefs().hotwordEnabled = mode === "maximum" && Boolean(permissions.overlay && permissions.microphone);
-        Cortex.save();
+        root.dispatchEvent(new CustomEvent("cortex-onboarding-energy", { detail: { mode } }));
         notice = mode !== "economy" && !permissions.overlay ? "Разрешение для островка можно выдать в разделе «Вызов»." : "";
         draw();
         break;
@@ -179,6 +178,7 @@ window.CortexSetup = (() => {
         if (Object.hasOwn(CortexPlanner.islandPresets, target.dataset.mode)) {
           Cortex.state.islandStyle = { ...CortexPlanner.islandPresets[target.dataset.mode] };
           Cortex.save();
+          root.dispatchEvent(new Event("cortex-onboarding-style"));
           draw();
         }
         break;

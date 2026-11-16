@@ -10,6 +10,7 @@ import android.util.Base64
 import androidx.webkit.JavaScriptReplyProxy
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
@@ -40,7 +41,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
 
     fun handle(raw: String, reply: JavaScriptReplyProxy) {
-        if (raw.length > 270_000) return
+        if (raw.length > 270_000) {
+            val id = Regex("\\\"id\\\"\\s*:\\s*\\\"(request-[0-9]{10,16}-[0-9]{1,9})\\\"")
+                .find(raw.take(256))?.groupValues?.getOrNull(1)
+            if (id != null) runCatching { reply.postMessage(JSONObject().put("id", id).put("error", "too_large").toString()) }
+            return
+        }
         val request = runCatching { JSONObject(raw) }.getOrNull() ?: return
         val id = request.optString("id")
         if (!Regex("^request-[0-9]{10,16}-[0-9]{1,9}$").matches(id)) return
@@ -58,6 +64,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         val id = UUID.randomUUID().toString()
         val request = JSONObject().put("operation", "chat").put("payload", payload)
         enqueue(id, request, onEvent, done)
+        return id
+    }
+
+    fun speech(text: String, done: (JSONObject) -> Unit): String {
+        val id = UUID.randomUUID().toString()
+        enqueue(id, JSONObject().put("operation", "speech").put("text", text.take(550)), {}, done)
         return id
     }
 
@@ -101,6 +113,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "support-inbox" -> call("GET", "support/inbox", null, id)
             "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent)
+            "speech" -> speechBytes(request.optString("text"), id)
             "support" -> call("POST", "support", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "auth-start" -> synchronized(loginLock) {
                 call("POST", "auth/start?return=android&scheme=${BuildConfig.APPLICATION_ID}", JSONObject(), id).also {
@@ -215,14 +228,58 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         }
     }
 
+    private fun speechBytes(text: String, id: String): JSONObject {
+        if (text.isBlank() || text.length > 550) throw GatewayFailure("invalid")
+        val connection = (URL(endpoint + "speech").openConnection() as HttpURLConnection)
+        connections[id] = connection
+        try {
+            if (!jobs.containsKey(id)) throw InterruptedException()
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 32_000
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Accept", "application/octet-stream")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("X-Cortex-Install", installId)
+            connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
+            store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            connection.doOutput = true
+            connection.outputStream.use { it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode !in 200..299) {
+                val json = runCatching { JSONObject(connection.errorStream?.bufferedReader()?.use { it.readText().take(300) }.orEmpty()) }.getOrNull()
+                throw GatewayFailure(json?.optString("error", "speech_unavailable") ?: "speech_unavailable")
+            }
+            if (connection.getHeaderField("X-Cortex-Audio-Format") != "pcm_s16le_24000_mono" ||
+                !connection.contentType.orEmpty().startsWith("application/octet-stream")) throw GatewayFailure("speech_unavailable")
+            val buffer = ByteArray(8192)
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { source ->
+                while (true) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 2_400_000) throw GatewayFailure("speech_unavailable")
+                    output.write(buffer, 0, count)
+                }
+            }
+            val audio = output.toByteArray()
+            if (audio.isEmpty() || audio.size % 2 != 0) throw GatewayFailure("speech_unavailable")
+            return JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP))
+        } finally {
+            connections.remove(id, connection)
+            connection.disconnect()
+        }
+    }
+
     private fun sse(reader: BufferedReader, onEvent: (JSONObject) -> Unit): JSONObject {
         val text = StringBuilder()
         val result = JSONObject()
+        var completed = false
         for (line in reader.lineSequence()) {
             if (Thread.currentThread().isInterrupted) throw GatewayFailure("timeout")
             if (!line.startsWith("data:")) continue
             val value = line.substring(5).trim()
-            if (value == "[DONE]") break
+            if (value == "[DONE]") { completed = true; break }
             val event = runCatching { JSONObject(value) }.getOrNull() ?: continue
             event.optJSONObject("quota")?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
             if (event.has("error")) throw GatewayFailure(event.optString("error", "provider"), event.optInt("retry_after"))
@@ -237,6 +294,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
             for (key in arrayOf("tool", "tools", "tool_error")) if (event.has(key)) result.put(key, event.get(key))
         }
+        // A network disconnect cannot authorize execution of a partial plan.
+        if (!completed) throw GatewayFailure("stream_interrupted")
         if (text.isNotEmpty()) result.put("text", text.toString())
         if (result.length() == 0) throw GatewayFailure("empty")
         return result

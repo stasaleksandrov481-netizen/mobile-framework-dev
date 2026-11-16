@@ -37,6 +37,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private val preferences by lazy { getSharedPreferences("cortex-display", MODE_PRIVATE) }
     private val assistantDelegate = lazy { IslandAssistant(this) }
     private val assistant by assistantDelegate
+    private val voiceOutputDelegate = lazy { CortexVoiceOutput(this) }
+    private val voiceOutput by voiceOutputDelegate
     private var island: LiquidIslandView? = null
     private var window: WindowManager.LayoutParams? = null
     private var legacyBars = Rect()
@@ -172,7 +174,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             }
             ACTION_SUBMIT -> {
                 val text = intent.getStringExtra(EXTRA_MESSAGE).orEmpty()
-                if (handleControl(this, text) != null) return START_NOT_STICKY
+                handleControl(this, text)?.let { control ->
+                    if (control.startsWith("Выключить островок")) {
+                        reply = control
+                        updateStatus("understood", control)
+                        setExpanded(true)
+                    }
+                    return START_STICKY
+                }
                 if (text.trim().matches(STOP_COMMAND)) stopAnswer()
                 else if (text.isNotBlank() && !hiddenByVoice && canShow() && !busy && !actionBusy) {
                     submit(text, fromVoice = true)
@@ -246,7 +255,10 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun dismissIsland(power: Boolean) {
-        closeReminder(true)
+        reminder?.first?.let { CortexSchedule.showNotification(this, it) }
+        reminder = null
+        reminderActions = null
+        ui.removeCallbacks(reminderTimeout)
         if (power) {
             if (poweringOff) return
             poweringOff = true
@@ -277,6 +289,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 exiting = false
                 removeIsland()
                 if (poweringOff) stopSelf()
+                else if (!hiddenByVoice && !CortexRuntime.appVisible) render()
             }
         }
     }
@@ -302,7 +315,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         if (exiting || poweringOff) return
         if (mode == "off" || hiddenByVoice || CortexRuntime.appVisible && reminder == null && !moving || !canShow() ||
             (mode == "wake" && phase == "idle" && task == null && reminder == null && !opening && !moving)) {
-            removeIsland()
+            if (island != null) dismissIsland(power = mode == "off")
             return
         }
         if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density, style)
@@ -371,15 +384,22 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         nextAnimation = Runnable {
             nextAnimation = null
             if (island !== view || generation != layoutGeneration || exiting) return@Runnable
-            view.conversation.updateDeviceWidgets()
             view.expand(open) {
                 if (island === view && generation == layoutGeneration && !exiting) {
-                    moving = false
-                    placeIsland(view)
-                    if (!open) {
-                        if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
-                        render()
+                    val settle = {
+                        if (island === view && generation == layoutGeneration && !exiting) {
+                            moving = false
+                            placeIsland(view)
+                            if (!open) {
+                                if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
+                                render()
+                            }
+                        }
                     }
+                    // Complete the visible morph before replacing the large overlay
+                    // window with the compact touch target. A same-frame resize can
+                    // look like the pill shoots sideways on some Android devices.
+                    if (open) settle() else view.postOnAnimation { settle() }
                 }
             }
         }.also(view::postOnAnimation)
@@ -405,8 +425,15 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun submit(raw: String, fromVoice: Boolean = false) {
         val text = raw.trim().take(2400)
-        if (handleControl(this, text) != null) return
+        handleControl(this, text)?.let { control ->
+            if (control.startsWith("Выключить островок")) {
+                reply = control
+                updateStatus("understood", control)
+            }
+            return
+        }
         if (busy || actionBusy || text.isEmpty() || poweringOff) return
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
         if (fromVoice) island?.conversation?.hideKeyboard()
         busy = true
         task = null
@@ -435,6 +462,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 reply = answer.trim()
                 updateStatus(if (ok) "done" else "error", "")
                 if (!hiddenByVoice && !poweringOff) setExpanded(true)
+                if (ok && fromVoice && !poweringOff) voiceOutput.speak(reply) { /* Speech is optional. */ }
             })
     }
 
@@ -442,6 +470,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         CortexSchedule.clearDraft("island")
         if (!busy) { if (actionBusy) CortexActionState.stop(); return }
         assistant.cancel()
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
         busy = false
         if (reply.isBlank()) reply = "Ответ остановлен."
         updateStatus("stopped", "Остановлено")
@@ -605,6 +634,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         ui.removeCallbacksAndMessages(null)
         removeIsland()
         if (assistantDelegate.isInitialized()) assistant.close()
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
         super.onDestroy()
     }
 
@@ -636,23 +666,16 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                     "Островок скрыт до следующего вызова."
                 }
                 POWER_COMMAND.matches(command) -> {
-                    context.getSharedPreferences("cortex-display", MODE_PRIVATE).edit().putBoolean(WAKE_PAUSED, true).apply()
-                    val service = running
-                    service?.dismissIsland(power = true)
-                    CortexActionState.stop()
-                    CortexActionEngine.clearPaused()
-                    service?.let {
-                        if (it.assistantDelegate.isInitialized()) it.assistant.cancel()
-                    }
-                    context.stopService(Intent(context, CortexWakeService::class.java))
-                    if (service == null) context.stopService(Intent(context, CortexIslandService::class.java))
-                    CortexSupportNotification.pause(context)
-                    CortexRuntime.reportWake(null)
-                    CortexRuntime.shutdownListener?.invoke()
-                    "Кортекс выключен в фоне."
+                    "Выключить островок можно только в настройках приложения CORTEX."
                 }
                 else -> null
             }
+        }
+
+        fun shutdownFromApp(context: Context) {
+            val service = running
+            if (service != null) service.dismissIsland(power = true)
+            else context.stopService(Intent(context, CortexIslandService::class.java))
         }
 
         fun send(context: Context, action: String, extras: Intent.() -> Unit = {}) {

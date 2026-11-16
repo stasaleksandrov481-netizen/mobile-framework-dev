@@ -23,7 +23,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
-import android.view.animation.OvershootInterpolator
+import android.view.animation.PathInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -42,22 +42,17 @@ internal class IslandConversationPanel(
     openApp: () -> Unit
 ) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
-    private val status = label(10.5f, 0xFFC6C6C6.toInt())
-    private val brand = label(12f, Color.WHITE)
+    private val status = label(11f, 0xFFC6C6C6.toInt())
+    private val brand = label(12.5f, Color.WHITE)
     private val signal = Signal()
     private val response = label(15f, 0xFFF0F0F0.toInt())
     private val answerScroll = ScrollView(context)
     private val header = LinearLayout(context)
+    private val divider = View(context)
     private val editor = EditText(context)
     private val entry = Entry()
     private val sendButton = Glyph("send", "Отправить", true)
     private val widgets = LinearLayout(context)
-    private val deviceWidgets = label(11f, Color.WHITE).apply {
-        setPadding(dp(8), dp(4), dp(8), dp(5))
-        maxLines = 1
-        ellipsize = TextUtils.TruncateAt.END
-        visibility = GONE
-    }
     private var appearance = IslandAppearance.parse()
     private var reminderActions: ((String) -> Unit)? = null
     private var busy = false
@@ -67,7 +62,7 @@ internal class IslandConversationPanel(
 
     init {
         orientation = VERTICAL
-        setPadding(dp(15), dp(8), dp(13), dp(12))
+        setPadding(dp(15), dp(10), dp(13), dp(12))
         isSoundEffectsEnabled = false
         isFocusableInTouchMode = true
         isClickable = true
@@ -82,7 +77,7 @@ internal class IslandConversationPanel(
         val wordmark = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         wordmark.addView(brand.apply {
             text = "CORTEX"
-            letterSpacing = .18f
+            letterSpacing = .14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         wordmark.addView(signal, LayoutParams(dp(67), dp(26)).apply { marginStart = dp(7) })
@@ -99,6 +94,13 @@ internal class IslandConversationPanel(
         header.addView(Glyph("close", "Свернуть островок").apply { setOnClickListener { close() } },
             LayoutParams(dp(44), dp(44)))
         addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        addView(divider, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)).apply {
+            topMargin = dp(5)
+            bottomMargin = dp(10)
+            marginStart = dp(4)
+            marginEnd = dp(4)
+        })
+        divider.setBackgroundColor((appearance.text and 0x00FFFFFF) or 0x26000000)
 
         answerScroll.apply {
             isFillViewport = false
@@ -109,14 +111,13 @@ internal class IslandConversationPanel(
             addView(response, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
         response.apply {
-            setPadding(dp(13), dp(11), dp(13), dp(11))
-            setLineSpacing(dp(2).toFloat(), 1.1f)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setLineSpacing(dp(2).toFloat(), 1.13f)
             letterSpacing = .006f
             setTextIsSelectable(true)
         }
         decorateReply()
         addView(answerScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6) })
-        addView(deviceWidgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(widgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
 
         editor.apply {
@@ -278,11 +279,11 @@ internal class IslandConversationPanel(
     fun reveal(progress: Float) {
         val density = resources.displayMetrics.density
         header.translationY = (1f - progress) * 5 * density
+        divider.alpha = progress
         answerScroll.alpha = ((progress - .12f) / .88f).coerceIn(0f, 1f)
         answerScroll.translationY = (1f - progress) * 8 * density
         entry.alpha = ((progress - .28f) / .72f).coerceIn(0f, 1f)
         entry.translationY = (1f - progress) * 9 * density
-        deviceWidgets.alpha = entry.alpha
         widgets.alpha = entry.alpha
     }
 
@@ -292,12 +293,11 @@ internal class IslandConversationPanel(
         decorateReply()
         response.setTextColor(value.text)
         brand.setTextColor(value.text)
-        status.setTextColor(value.text)
+        status.setTextColor((value.text and 0x00FFFFFF) or 0xBA000000.toInt())
+        divider.setBackgroundColor((value.text and 0x00FFFFFF) or 0x26000000)
         editor.setTextColor(value.text)
         editor.setHintTextColor((value.text and 0x00FFFFFF) or 0xA0000000.toInt())
         signal.tint(value.accent)
-        deviceWidgets.setTextColor(value.text)
-        updateDeviceWidgets()
         entry.invalidate()
         sendButton.invalidate()
         for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
@@ -321,8 +321,9 @@ internal class IslandConversationPanel(
     private fun renderWidgets() {
         widgets.removeAllViews()
         val reminder = reminderActions
+        // Only task-specific actions belong in the island. General phone facts and
+        // canned prompts belong to the full app, never to this compact surface.
         val options = if (reminder != null) listOf("Готово" to "done", "Отложить" to "snooze", "Открыть" to "open")
-            else if (appearance.quick && !busy && answer.isBlank()) listOf("Заряд" to "Сколько заряда?", "Время" to "Сколько времени?")
             else emptyList()
         widgets.visibility = if (options.isEmpty()) GONE else VISIBLE
         options.forEach { (name, command) ->
@@ -334,21 +335,13 @@ internal class IslandConversationPanel(
                 isSoundEffectsEnabled = false
                 background = GradientDrawable().apply {
                     cornerRadius = dp(13).toFloat()
-                    setStroke(dp(1), (appearance.border and 0x00FFFFFF) or 0x50000000)
+                    setColor((appearance.text and 0x00FFFFFF) or 0x0D000000)
+                    setStroke(dp(1), (appearance.border and 0x00FFFFFF) or 0x28000000)
                 }
                 setOnClickListener { if (reminder == null) sendMessage(command) else reminder(command) }
             }
             widgets.addView(chip, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
         }
-    }
-
-    fun updateDeviceWidgets() {
-        val playing = appearance.music && context.getSystemService(android.media.AudioManager::class.java)?.isMusicActive == true
-        val battery = if (appearance.battery) context.getSystemService(android.os.BatteryManager::class.java)
-            ?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 0..100 } else null
-        deviceWidgets.text = listOfNotNull(if (playing) "♪  Сейчас играет аудио" else null, battery?.let { "Заряд $it%" })
-            .joinToString("   ·   ")
-        deviceWidgets.visibility = if (deviceWidgets.text.isEmpty()) GONE else VISIBLE
     }
 
     fun hideKeyboard() {
@@ -458,10 +451,11 @@ internal class IslandConversationPanel(
             if (isEnabled && motion && ValueAnimator.areAnimatorsEnabled()) {
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
-                        animate().scaleX(.85f).scaleY(.76f).setInterpolator(null).setDuration(95).start()
+                        animate().scaleX(.93f).scaleY(.93f).setInterpolator(null).setDuration(100).start()
                     }
                     MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
-                        animate().scaleX(1f).scaleY(1f).setInterpolator(OvershootInterpolator(1.85f)).setDuration(270).start()
+                        animate().scaleX(1f).scaleY(1f)
+                            .setInterpolator(PathInterpolator(.2f, 0f, .2f, 1f)).setDuration(200).start()
                     }
                 }
             }
@@ -479,8 +473,12 @@ internal class IslandConversationPanel(
                 canvas.drawRoundRect(-16f, -16f, 16f, 16f, 11f, 11f, pen)
                 pen.color = if (isEnabled) appearance.background else appearance.text
             } else {
+                pen.style = Paint.Style.FILL
                 pen.color = appearance.text
-                pen.alpha = if (isPressed) 255 else 200
+                pen.alpha = if (isPressed) 32 else 13
+                canvas.drawRoundRect(-16f, -16f, 16f, 16f, 12f, 12f, pen)
+                pen.color = appearance.text
+                pen.alpha = if (isPressed) 255 else 204
             }
             pen.style = Paint.Style.STROKE
             symbol.rewind()

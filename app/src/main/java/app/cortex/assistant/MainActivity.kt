@@ -40,6 +40,9 @@ class MainActivity : ComponentActivity() {
     private var rendererFailed = false
     private var nativeReady = false
     private var pendingSchedule: String? = null
+    private var pendingAuthReturn = false
+    private val webUpdates by lazy { CortexWebUpdates(applicationContext) }
+    private var webSnapshot = 0L
     private val leaveForAction: () -> Unit = { moveTaskToBack(true) }
     private val wakeCommand: (String) -> Boolean = { command ->
         val available = !rendererFailed && nativeReady && CortexRuntime.appVisible
@@ -74,6 +77,7 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(container)
         createWebView(savedInstanceState)
+        intent.data?.let(::authReturned)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (rendererFailed) {
@@ -91,8 +95,11 @@ class MainActivity : ComponentActivity() {
     private fun createWebView(savedInstanceState: Bundle? = null) {
         rendererFailed = false
         nativeReady = false
+        webSnapshot = webUpdates.snapshot()
         val loader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/web/", webUpdates.handler(webSnapshot))
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
+        webUpdates.checkAsync()
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         webView = WebView(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -104,6 +111,7 @@ class MainActivity : ComponentActivity() {
                 allowFileAccess = false
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                cacheMode = WebSettings.LOAD_NO_CACHE
                 blockNetworkLoads = true  // All backend traffic uses the native HTTPS gateway.
                 javaScriptCanOpenWindowsAutomatically = false
                 setSupportMultipleWindows(false)
@@ -117,8 +125,21 @@ class MainActivity : ComponentActivity() {
                     return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                 }
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    if (view === webView) webUpdates.rollback(webSnapshot)
                     if (!rendererFailed && view === webView) showRendererError()
                     return true
+                }
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (webSnapshot <= 0 || view !== webView || !isAsset(Uri.parse(url))) return
+                    view.postDelayed({
+                        if (view !== webView || rendererFailed) return@postDelayed
+                        view.evaluateJavascript("Boolean(document.getElementById('app') && document.getElementById('screen')?.children.length && typeof Cortex !== 'undefined' && typeof CortexApi !== 'undefined' && window.CortexSetup)") { healthy ->
+                            if (view === webView && !rendererFailed && healthy != "true" && webUpdates.rollback(webSnapshot)) {
+                                closeWebView()
+                                createWebView()
+                            }
+                        }
+                    }, 5000L)
                 }
             }
         }
@@ -137,6 +158,10 @@ class MainActivity : ComponentActivity() {
                     val data = message.data.orEmpty()
                     if (!nativeReady && runCatching { JSONObject(data).optString("operation") }.getOrNull() == "permissions") {
                         nativeReady = true
+                        if (pendingAuthReturn) {
+                            pendingAuthReturn = false
+                            deviceEvent(JSONObject().put("type", "auth-return"))
+                        }
                     }
                     device.handle(data)
                     showPendingSchedule()
@@ -218,7 +243,8 @@ class MainActivity : ComponentActivity() {
 
     private fun authReturned(uri: Uri) {
         if (uri.scheme == BuildConfig.APPLICATION_ID && uri.host == "oauth" && uri.path == "/return" && ::webView.isInitialized) {
-            deviceEvent(JSONObject().put("type", "auth-return"))
+            if (nativeReady && !rendererFailed) deviceEvent(JSONObject().put("type", "auth-return"))
+            else pendingAuthReturn = true
         }
     }
 

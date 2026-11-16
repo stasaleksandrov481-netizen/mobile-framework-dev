@@ -23,7 +23,8 @@ internal data class VisualNode(
     val enabled: Boolean = true,
     val description: String = "",
     val state: String = "",
-    val scrollAxis: VisualScrollAxis? = null
+    val scrollAxis: VisualScrollAxis? = null,
+    val longClickable: Boolean = false
 )
 
 internal data class VisualFrame(
@@ -58,7 +59,8 @@ internal data class VisualFrame(
 
     private val structuralSignature by lazy(LazyThreadSafetyMode.NONE) { tree.map { node ->
         listOf(node.path, node.label, node.role, node.resource, node.bounds, node.checked,
-            node.focused, node.selected, node.state, node.enabled, node.editable, node.clickable, node.scrollable)
+            node.focused, node.selected, node.state, node.enabled, node.editable, node.clickable,
+            node.longClickable, node.scrollable)
     }.hashCode() }
 
     fun structure(): Int = structuralSignature
@@ -76,6 +78,7 @@ internal data class VisualFrame(
                 if (!node.enabled) put("disabled", true)
             }.put("actions", JSONArray(buildList {
                 if (node.clickable || node.ocr) add("tap")
+                if (node.longClickable) add("long_press")
                 if (node.editable) add("type")
                 if (node.scrollable) add("scroll")
             }))
@@ -93,13 +96,13 @@ internal object VisualSafety {
 
     fun risk(request: String, step: VisualStep, label: String, resource: String, role: String): VisualRisk {
         val control = VisualLabels.normalize("$label $resource")
-        if (step.action !in setOf(VisualAction.TAP, VisualAction.SUBMIT, VisualAction.SET, VisualAction.LOCK)) return VisualRisk.NORMAL
+        if (step.action !in setOf(VisualAction.TAP, VisualAction.LONG_PRESS, VisualAction.SUBMIT, VisualAction.SET, VisualAction.LOCK)) return VisualRisk.NORMAL
         if (school.containsMatchIn(request) && (step.action == VisualAction.SUBMIT || submit.containsMatchIn(control))) {
             return VisualRisk.MANUAL
         }
         if (step.confirm || irreversible.containsMatchIn(control)) return VisualRisk.CONFIRM
         if (step.action == VisualAction.SUBMIT && outbound.containsMatchIn(request)) return VisualRisk.CONFIRM
-        if (step.action == VisualAction.TAP && outbound.containsMatchIn(request) &&
+        if (step.action in setOf(VisualAction.TAP, VisualAction.LONG_PRESS) && outbound.containsMatchIn(request) &&
             !safeControl.containsMatchIn(control) && (label.isBlank() || role in setOf("ImageButton", "ImageView", "OCR"))) {
             return VisualRisk.CONFIRM
         }

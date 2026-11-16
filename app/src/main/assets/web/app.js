@@ -23,7 +23,8 @@
     status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   let phoneInfo = {};
-  const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  let deviceSnapshot = null;
+  const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
   let accountMode = "password", accountEmail = "";
   let pending, login, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
@@ -94,6 +95,11 @@
     if (mode === "maximum" && !p.hotwordEnabled) flash("В разделе «Вызов» выдайте доступы к островку и микрофону, затем включите обращение «Кортекс».");
     render();
   }
+
+  // First-run choices must configure the native island as well as the WebView.
+  // Changing local preferences alone left the selected background mode disabled.
+  app.addEventListener("cortex-onboarding-energy", event => applyEnergy(event.detail?.mode));
+  app.addEventListener("cortex-onboarding-style", syncIslandOptions);
 
   function haptic() {
     if (S.preferences.haptics) sendDevice("tap");
@@ -830,7 +836,7 @@
       const timer = setTimeout(() => {
         sendDevice("action-stop");
         done({ text: "Время задачи истекло. Проверьте последний шаг на экране.", local: true, external: !appVisible(), resumable: true });
-      }, 240000);
+      }, 740000);
       actionReplies.set(id, value => {
         if (value.phase === "progress") {
           if (pending !== job) return;
@@ -859,7 +865,9 @@
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
-      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
+      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
+      ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
+        deviceSnapshot ? { state: deviceSnapshot } : {})
     };
     const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
       "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
@@ -908,17 +916,19 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const outcome = await respond(chat, job);
+      const memoryReply = retry ? null : M.memoryCommand(text);
+      const outcome = memoryReply === null ? await respond(chat, job) : { text: memoryReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
       M.touch(chat);
-      if (chat.saved) saved();
+      const memorized = memoryReply === null && !outcome.local && M.learnFromUser(text);
+      if (chat.saved || memoryReply !== null || memorized) saved();
       if (voiceTurn && voice === voiceTurn) {
         if (outcome.external) closeVoice();
-        else voiceReplyReady(voiceTurn);
+        else voiceReplyReady(voiceTurn, outcome.text);
       }
     } catch (error) {
       if (pending !== job) return;
@@ -1137,7 +1147,7 @@
     Wave.state(waveMode());
     voicePanel.querySelector("[data-voice-status]").textContent = text;
     const labels = { starting: "Включаю микрофон", listening: "Завершить запись", hearing: "Завершить запись",
-      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить",
+      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить", speaking: "Перебить",
       waiting: "Говорить", error: "Повторить" };
     voiceControl.innerHTML = icon(["waiting", "error", "starting"].includes(phase) ? "mic" : "stop", 17);
     voiceControl.setAttribute("aria-label", labels[phase]);
@@ -1153,6 +1163,7 @@
     voice = null;
     clearTimeout(job.timer);
     if (job.recognition) sendDevice("voice-cancel", { id: job.recognition });
+    if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
     voicePanel.hidden = true;
     delete voicePanel.dataset.voicePhase;
     Wave.state(waveMode());
@@ -1203,18 +1214,33 @@
     if (["listening", "hearing"].includes(job.phase)) {
       recognizing(job);
       sendDevice("voice-finish", { id: job.recognition });
-    } else if (["thinking", "opening"].includes(job.phase)) {
+    } else if (["thinking", "opening", "speaking"].includes(job.phase)) {
       if (pending?.voice === job) stopAnswer();
+      if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
       clearTimeout(job.timer);
       voiceStatus("waiting", "Готовлю микрофон…");
       job.timer = setTimeout(() => listen(job), 300);
     } else if (job.phase === "waiting" || job.phase === "error") listen(job);
   }
 
-  function voiceReplyReady(job) {
+  function voiceReplyReady(job, answer) {
     clearTimeout(job.timer);
-    voiceStatus("waiting", "Ответ в чате");
-    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 340);
+    job.speechId = M.id("speech");
+    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
+      voiceStatus("speaking", "Озвучиваю ответ…");
+      job.timer = setTimeout(() => {
+        if (voice !== job || job.phase !== "speaking") return;
+        sendDevice("voice-stop", { id: job.speechId });
+        voiceSpoken(job, false);
+      }, 44000);
+    } else voiceSpoken(job, false);
+  }
+
+  function voiceSpoken(job, ok) {
+    clearTimeout(job.timer);
+    job.speechId = null;
+    voiceStatus("waiting", ok ? "Готов слушать" : "Ответ в чате");
+    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 420);
   }
 
   function finishDictation(job, text) {
@@ -1276,6 +1302,9 @@
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
+    if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
+      voiceSpoken(voice, message.ok === true);
+    }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";
       if (text && !pending && !app.classList.contains("in-onboarding")) {
@@ -1290,6 +1319,9 @@
         entries.map(entry => '<li><time>' + esc(new Date(entry.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })) +
         '</time><span>' + esc(entry.message) + '</span></li>').join("") + '</ol>' : '<p class="muted">Действий пока нет.</p>');
     }
+    if (message.type === "notification-journal-cleared") {
+      if (message.ok) flash("Журнал уведомлений очищен.");
+    }
     if (message.type === "visual-privacy") {
       connection.visualPrivacy = message.enabled === true;
       if (route === "privacy") render();
@@ -1302,6 +1334,9 @@
       if (device && typeof message.phoneModel === "string") phoneInfo = {
         manufacturer: message.manufacturer, model: message.phoneModel, android_version: message.androidRelease
       };
+      if (message.deviceSnapshot && typeof message.deviceSnapshot === "object" && !Array.isArray(message.deviceSnapshot)) {
+        deviceSnapshot = message.deviceSnapshot;
+      }
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1422,8 +1457,9 @@
     },
     "delete-chat": id => confirm("Удалить чат?", "Переписка будет удалена с устройства.", () => deleteChats(chat => chat.id === id, "Чат удалён")),
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
-    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память и настройки будут удалены с устройства.", () => {
+    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
+      sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
       drafts.clear(); errors.clear(); ruleDrafts.clear();
       chatId = ""; rule = "goal";
@@ -1459,6 +1495,10 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "notification-listener-permission": () => sendDevice("notification-listener-permission"),
+    "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
+      if (!sendDevice("notification-journal-clear")) flash("Очистка доступна только в приложении Android.");
+    }),
     "overlay-permission": () => {
       if (!window.CortexIslandControl) flash("Островок доступен только в Android-приложении CORTEX.");
       else if (!sendDevice("overlay-permission")) flash("Не удалось открыть разрешение Android.");

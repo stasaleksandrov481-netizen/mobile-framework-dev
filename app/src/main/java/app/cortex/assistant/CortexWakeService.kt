@@ -52,8 +52,7 @@ class CortexWakeService : Service() {
     private val turn = CortexWakeTurn(
         listening = { CortexIslandService.send(this, CortexIslandService.ACTION_WAKE) },
         finished = { command ->
-            if (CortexIslandService.handleControl(this, command) == null &&
-                CortexRuntime.wakeCommand?.invoke(command) != true) {
+            if (CortexRuntime.wakeCommand?.invoke(command) != true) {
                 CortexIslandService.send(this, CortexIslandService.ACTION_SUBMIT) {
                     putExtra(CortexIslandService.EXTRA_MESSAGE, command)
                 }

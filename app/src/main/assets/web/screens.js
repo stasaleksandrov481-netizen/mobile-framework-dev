@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.11";
+  let version = "1.0.12";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
@@ -405,7 +405,10 @@ const CortexUI = (() => {
     return detail("Уведомления", "Ответы в фоновом режиме", `<section class="panel stack">
       ${switchRow("Ответы поддержки", "Уведомлять о новых сообщениях в обращениях", M.state.preferences.notifyReplies, "notifyReplies")}
       <p class="muted">${ctx.native && ctx.permissions.notifications ? "Android разрешает уведомления." : "Для оповещений нужен доступ в настройках Android."}</p>
-    </section>`);
+    </section>` + group(tile("Сводка событий телефона",
+      ctx.permissions.notificationAccess ? "CORTEX считает новые уведомления. Тексты не сохраняются." : "Разрешите доступ, чтобы спрашивать «Что нового?»",
+      "bell", "notification-listener-permission") +
+      (ctx.permissions.notificationAccess ? tile("Очистить журнал уведомлений", "Удалить сохранённые сведения о событиях", "trash", "notification-journal-clear") : "")));
   }
   function data() {
     const p = M.state.preferences;
@@ -466,6 +469,7 @@ const CortexUI = (() => {
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
       ${item("focus", "Поверх приложений", "Показывать островок поверх других окон. Не даёт доступа к содержимому экрана.", a.overlay, "overlay-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
+      ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
       ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Разрешает системный вызов помощника и передачу текста экрана после вашего действия.", a.assistant, "assistant-permission") : ""}
       </section>
