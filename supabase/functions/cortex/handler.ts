@@ -4,6 +4,7 @@ import {
   supportInput, verifyCompletion,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
+import { createRedisCache } from "./redis.ts";
 import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
 
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
@@ -186,20 +187,37 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   const control = createControl(database);
+  const redis = createRedisCache(env, network, () =>
+    database<{ url?: string; token?: string } | null>("rpc/cortex_redis_config", "POST", {}));
+  const bonusClaims = new Map<string, number>();
+  async function claimEarlyBonus(account: Account): Promise<void> {
+    const now = Date.now();
+    if (now < Date.parse("2026-11-20T00:00:00+03:00") || (bonusClaims.get(account.id) || 0) > now) return;
+    try {
+      await database("rpc/cortex_ai_claim_early_bonus", "POST", { p_subject: account.id, p_email: account.email });
+      if (bonusClaims.size >= 2048) bonusClaims.clear();
+      bonusClaims.set(account.id, now + 4 * 60 * 60 * 1000);
+    } catch { /* Bonus lookup must not block the account. */ }
+  }
   let catalog: { value: Promise<string[]>; until: number } | undefined;
   function freeCatalog(): Promise<string[]> {
     if (catalog && catalog.until > Date.now()) return catalog.value;
-    const value = network("https://openrouter.ai/api/v1/models", {
-      redirect: "error", signal: AbortSignal.timeout(3500),
-    }).then(async response => {
+    const value = (async () => {
+      const cached = await redis.getFreeModels(model => FREE_MODEL.test(model)).catch(() => null);
+      if (cached) return cached;
+      const response = await network("https://openrouter.ai/api/v1/models", {
+        redirect: "error", signal: AbortSignal.timeout(3500),
+      });
       if (!response.ok) throw new Error("model_catalog");
       const { data } = await response.json();
       if (!Array.isArray(data)) return [];
-      return data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
+      const models = data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
         String(item.pricing?.prompt) === "0" && String(item.pricing?.completion) === "0" &&
         item.architecture?.output_modalities?.includes("text") && item.supported_parameters?.includes("tools"))
         .slice(0, 12).map(item => String(item.id));
-    }).catch(() => []);
+      await redis.putFreeModels(models).catch(() => {});
+      return models;
+    })().catch(() => []);
     catalog = { value, until: Date.now() + 600_000 };
     return value;
   }
@@ -306,6 +324,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     const previous = bearer(request);
     if (previous) await database("cortex_sessions?token_hash=eq." + await hash(previous), "DELETE");
     await claimGuest(request, account);
+    await claimEarlyBonus(account);
     return json({ state: "signed_in", token, account });
   }
 
@@ -354,6 +373,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function usage(request: Request, account: Account | null): Promise<Quota | null> {
+    if (account) await claimEarlyBonus(account);
     const id = await subject(request, account);
     return id ? await database<Quota>("rpc/cortex_ai_usage", "POST", { p_subject: id }) : null;
   }
@@ -465,6 +485,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (result.state === "forbidden") throw new Failure("account_forbidden", 403);
     if (result.state !== "signed_in" || !result.account) return json({ state: "pending" });
     await claimGuest(request, result.account);
+    await claimEarlyBonus(result.account);
     return json({ ...result, token });
   }
 
@@ -547,6 +568,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       }
       if (method === "POST" && (path === "/v1/chat" || path === "/v1/check")) {
         const caller = await actor(request);
+        if (caller.account) await claimEarlyBonus(caller.account);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
           messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,

@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
+import OtpCodeInput from "@/components/OtpCodeInput";
 
 type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
 const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
@@ -27,12 +28,55 @@ export function RegistrationForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [wasSignin, setWasSignin] = useState(false);
+  const [resendWait, setResendWait] = useState(0);
 
   useEffect(() => {
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (requestedMode === "signin") setMode("signin");
     if (requestedMode === "code" && emailOtpReady) setMode("signin_code");
   }, []);
+
+  useEffect(() => {
+    if (resendWait <= 0) return;
+    const timer = window.setTimeout(() => setResendWait((n) => Math.max(0, n - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendWait]);
+
+  useEffect(() => {
+    if (mode !== "verify") return;
+    let active = true;
+    const confirmed = async () => {
+      try {
+        const { data: { user } } = await cortexAuth.auth.getUser();
+        if (active && user?.email?.toLowerCase() === email.trim().toLowerCase() && user.email_confirmed_at) {
+          setWasSignin(false);
+          setMode("done");
+        }
+      } catch { /* Retry once the user returns to this tab. */ }
+    };
+    const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("cortex-email-confirmed");
+    const onMessage = () => { void confirmed(); };
+    const onVisible = () => { if (!document.hidden) void confirmed(); };
+    channel?.addEventListener("message", onMessage);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { active = false; channel?.close(); document.removeEventListener("visibilitychange", onVisible); };
+  }, [mode, email]);
+
+  async function resendCode() {
+    if (busy || resendWait > 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      const address = email.trim().toLowerCase();
+      const { error: sendError } = mode === "signin_code_verify"
+        ? await cortexAuth.auth.signInWithOtp({ email: address, options: { shouldCreateUser: false } })
+        : await cortexAuth.auth.resend({ type: "signup", email: address });
+      if (sendError) throw sendError;
+      setCode("");
+      setResendWait(60);
+    } catch { setError("Не удалось отправить новый код. Попробуйте позже."); }
+    finally { setBusy(false); }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,7 +86,7 @@ export function RegistrationForm() {
     try {
       if (mode === "signup") {
         if (!accepted) throw new Error("Примите условия обработки данных.");
-        if (password.length < 8) throw new Error("Пароль должен содержать минимум 8 символов.");
+        if (password.length < 10) throw new Error("Пароль должен содержать минимум 10 символов.");
         const { data, error: signupError } = await cortexAuth.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
@@ -63,10 +107,12 @@ export function RegistrationForm() {
           setWasSignin(false);
           setMode("done");
         } else {
+          setResendWait(60);
           setMode("verify");
         }
         setPassword("");
       } else if (mode === "verify") {
+        if (!/^\d{6}$/.test(code)) throw new Error("Введите шестизначный код из письма.");
         const { error: verifyError } = await cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
         });
@@ -82,6 +128,7 @@ export function RegistrationForm() {
         });
         if (otpError) throw otpError;
         setCode("");
+        setResendWait(60);
         setMode("signin_code_verify");
       } else if (mode === "signin_code_verify") {
         if (!/^\d{6}$/.test(code)) throw new Error("Введите шестизначный код из письма.");
@@ -121,6 +168,7 @@ export function RegistrationForm() {
     setError("");
     setPassword("");
     setCode("");
+    setResendWait(0);
     setMode(next);
   }
 
@@ -160,16 +208,17 @@ export function RegistrationForm() {
             {mode === "verify" || mode === "signin_code_verify" ? (
               <>
                 <label htmlFor="registration-code">Код из письма</label>
-                <input id="registration-code" className="verification-input" inputMode="numeric" autoComplete="one-time-code"
-                  value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                  required minLength={6} maxLength={6} placeholder="000000" />
+                <OtpCodeInput value={code} onChange={setCode} disabled={busy} />
+                <button className="auth-resend" type="button" onClick={resendCode} disabled={busy || resendWait > 0}>
+                  {resendWait > 0 ? `Отправить ещё раз через ${resendWait} с` : "Отправить код повторно"}
+                </button>
               </>
             ) : mode !== "signin_code" ? (
               <>
                 <label htmlFor="registration-password">Пароль</label>
                 <input id="registration-password" autoComplete={mode === "signup" ? "new-password" : "current-password"}
                   type="password" value={password} onChange={(event) => setPassword(event.target.value)}
-                  required minLength={8} placeholder="Не менее 8 символов" />
+                  required minLength={mode === "signup" ? 10 : 1} placeholder={mode === "signup" ? "Не менее 10 символов" : "Ваш пароль"} />
               </>
             ) : null}
 

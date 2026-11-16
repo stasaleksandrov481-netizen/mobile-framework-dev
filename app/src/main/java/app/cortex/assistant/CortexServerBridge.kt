@@ -40,7 +40,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
 
     fun handle(raw: String, reply: JavaScriptReplyProxy) {
-        if (raw.length > 270_000) return
+        if (raw.length > 270_000) {
+            val id = Regex("\\\"id\\\"\\s*:\\s*\\\"(request-[0-9]{10,16}-[0-9]{1,9})\\\"")
+                .find(raw.take(256))?.groupValues?.getOrNull(1)
+            if (id != null) runCatching { reply.postMessage(JSONObject().put("id", id).put("error", "too_large").toString()) }
+            return
+        }
         val request = runCatching { JSONObject(raw) }.getOrNull() ?: return
         val id = request.optString("id")
         if (!Regex("^request-[0-9]{10,16}-[0-9]{1,9}$").matches(id)) return
@@ -218,11 +223,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private fun sse(reader: BufferedReader, onEvent: (JSONObject) -> Unit): JSONObject {
         val text = StringBuilder()
         val result = JSONObject()
+        var completed = false
         for (line in reader.lineSequence()) {
             if (Thread.currentThread().isInterrupted) throw GatewayFailure("timeout")
             if (!line.startsWith("data:")) continue
             val value = line.substring(5).trim()
-            if (value == "[DONE]") break
+            if (value == "[DONE]") { completed = true; break }
             val event = runCatching { JSONObject(value) }.getOrNull() ?: continue
             event.optJSONObject("quota")?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
             if (event.has("error")) throw GatewayFailure(event.optString("error", "provider"), event.optInt("retry_after"))
@@ -237,6 +243,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
             for (key in arrayOf("tool", "tools", "tool_error")) if (event.has(key)) result.put(key, event.get(key))
         }
+        // A network disconnect cannot authorize execution of a partial plan.
+        if (!completed) throw GatewayFailure("stream_interrupted")
         if (text.isNotEmpty()) result.put("text", text.toString())
         if (result.length() == 0) throw GatewayFailure("empty")
         return result

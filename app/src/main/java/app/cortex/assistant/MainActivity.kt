@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private var rendererFailed = false
     private var nativeReady = false
     private var pendingSchedule: String? = null
+    private var pendingAuthReturn = false
     private val leaveForAction: () -> Unit = { moveTaskToBack(true) }
     private val wakeCommand: (String) -> Boolean = { command ->
         val available = !rendererFailed && nativeReady && CortexRuntime.appVisible
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(container)
         createWebView(savedInstanceState)
+        intent.data?.let(::authReturned)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (rendererFailed) {
@@ -137,6 +139,10 @@ class MainActivity : ComponentActivity() {
                     val data = message.data.orEmpty()
                     if (!nativeReady && runCatching { JSONObject(data).optString("operation") }.getOrNull() == "permissions") {
                         nativeReady = true
+                        if (pendingAuthReturn) {
+                            pendingAuthReturn = false
+                            deviceEvent(JSONObject().put("type", "auth-return"))
+                        }
                     }
                     device.handle(data)
                     showPendingSchedule()
@@ -218,7 +224,8 @@ class MainActivity : ComponentActivity() {
 
     private fun authReturned(uri: Uri) {
         if (uri.scheme == BuildConfig.APPLICATION_ID && uri.host == "oauth" && uri.path == "/return" && ::webView.isInitialized) {
-            deviceEvent(JSONObject().put("type", "auth-return"))
+            if (nativeReady && !rendererFailed) deviceEvent(JSONObject().put("type", "auth-return"))
+            else pendingAuthReturn = true
         }
     }
 

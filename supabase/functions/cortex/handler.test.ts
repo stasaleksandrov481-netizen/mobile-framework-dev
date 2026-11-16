@@ -94,6 +94,8 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
 
       case "/rest/v1/cortex_ai_settings": return Response.json([{ model: null }]);
       case "/rest/v1/rpc/cortex_claim_guest": return Response.json(true);
+      case "/rest/v1/rpc/cortex_ai_claim_early_bonus": return Response.json(true);
+      case "/rest/v1/rpc/cortex_redis_config": return Response.json(null);
       case "/auth/v1/signup":
       case "/auth/v1/recover": return Response.json({ user: { id: accountId } });
       case "/auth/v1/verify":
@@ -454,4 +456,20 @@ test("maintenance access does not bypass closed beta admission", async () => {
   assert.ok(requests.includes("rpc/cortex_beta_admit"));
   allowed = true;
   assert.equal((await control.gate(request, account)).mode, "open");
+});
+
+test("missing deployment control configuration fails closed", async () => {
+  const control = createControl(async <T>() => [] as T);
+  const request = new Request("https://example.test", { headers: { "x-cortex-install": install } });
+  await assert.rejects(control.gate(request), (error: unknown) =>
+    error instanceof Error && error.message === "storage_config");
+});
+
+test("post-launch accounts claim the early bonus once per worker", async (context) => {
+  context.mock.method(Date, "now", () => Date.parse("2026-11-21T10:00:00Z"));
+  const { call, requests } = fixture();
+  const headers = { Authorization: "Bearer " + "T".repeat(43) };
+  assert.equal((await call("status", undefined, headers)).status, 200);
+  assert.equal((await call("status", undefined, headers)).status, 200);
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_ai_claim_early_bonus").length, 1);
 });
