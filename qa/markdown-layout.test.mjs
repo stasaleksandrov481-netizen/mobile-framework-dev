@@ -47,3 +47,75 @@ test("assistant messages render without a bubble background or frame", () => {
   assert.match(model, /Не используй эмодзи/);
   assert.match(model, /:icon\[имя\]:/);
 });
+
+test("the entire app uses compact spacing and the composer exposes an accessible quota ring", () => {
+  const screens = content("screens.js");
+  const app = content("app.js");
+  const css = content("style.css");
+  assert.match(screens, /class="quota-ring"[^>]*aria-label="Остаток токенов"/);
+  assert.match(app, /quotaRing\.style\.setProperty\("--quota-fraction"/);
+  assert.match(app, /quotaRing\.setAttribute\("aria-label", label/);
+  assert.match(css, /\.quota-ring-art\s*\{[^}]*conic-gradient/s);
+  for (const selector of [".section-header", ".profile-scroll", ".tile", ".switch-row", ".navigation button", ".chat-header"]) {
+    assert.ok(css.includes(selector), `missing application-wide density rule: ${selector}`);
+  }
+  assert.match(css, /\.app-shell \.tile\s*\{[^}]*min-height:\s*51px/s);
+  assert.match(css, /\.app-shell \.switch-row, \.app-shell \.access-row\s*\{[^}]*min-height:\s*52px/s);
+});
+
+test("rich metrics are rendered as safe accessible progress bars", () => {
+  const render = markdown();
+  const result = render('```cortex-metrics\n' + JSON.stringify({
+    title: "Сжатие голосовых", rows: [
+      { label: "Раньше, PCM", value: "48 КБ/с", percent: 100 },
+      { label: "Теперь, ADPCM", value: "12 КБ/с", percent: 25, tone: "success" },
+    ], note: "На 75% меньше данных",
+  }) + '\n```');
+  assert.match(result, /class="cortex-metrics"/);
+  assert.match(result, /aria-valuenow="25"/);
+  assert.match(result, /width:25%/);
+  assert.match(result, /cortex-metric-note/);
+});
+
+test("metrics reject untrusted markup, impossible values and oversized content", () => {
+  const render = markdown();
+  const bad = [
+    { title: '<img src=x onerror=alert(1)>', rows: [{ label: '<script>', value: 'a', percent: 80 }] },
+    { title: "Test", rows: [{ label: "A", value: "B", percent: '100; background:url(https://x)' }] },
+    { title: "Test", rows: [{ label: "A", value: "B", percent: 200 }] },
+  ];
+  const escaped = render('```cortex-metrics\n' + JSON.stringify(bad[0]) + '\n```');
+  assert.doesNotMatch(escaped, /<script>|<img src=x/);
+  assert.match(escaped, /&lt;script&gt;/);
+  for (const entry of bad.slice(1)) {
+    const result = render('```cortex-metrics\n' + JSON.stringify(entry) + '\n```');
+    assert.doesNotMatch(result, /class="cortex-metrics"/);
+    assert.match(result, /class="code-block"/);
+  }
+});
+
+test("rich metric cards and timelines render only trusted fields", () => {
+  const render = markdown();
+  const cards = render('```cortex-cards\n' + JSON.stringify({ cards: [
+    { title: "Экономия", value: "75%", note: '<img src=x onerror=alert(1)>', tone: "success" },
+  ] }) + '\n```');
+  assert.match(cards, /cortex-answer-cards/);
+  assert.match(cards, /75%/);
+  assert.match(cards, /&lt;img src=x/);
+  assert.doesNotMatch(cards, /<img src=x/);
+  const steps = render('```cortex-steps\n' + JSON.stringify({ steps: [
+    { title: "Поиск", state: "done", detail: "Данные проверены" },
+    { title: "Ответ", state: "active" },
+  ] }) + '\n```');
+  assert.match(steps, /cortex-answer-steps/);
+  assert.match(steps, /class="done"/);
+  assert.match(steps, /class="active"/);
+  assert.doesNotMatch(render('```cortex-steps\n{"steps":[{"title":"a","state":"anything"}]}\n```'), /cortex-answer-steps/);
+});
+
+test("Markdown adds same-origin site icon to safe citation links only", () => {
+  const result = markdown()('[OpenRouter](https://openrouter.ai/docs) [unsafe](javascript:alert(1))');
+  assert.match(result, /src="\/favicons\/openrouter\.ai"/);
+  assert.doesNotMatch(result, /\/favicons\/javascript/);
+  assert.doesNotMatch(result, /href="javascript:/);
+});

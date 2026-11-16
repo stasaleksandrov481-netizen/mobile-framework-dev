@@ -185,14 +185,15 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       case "/rest/v1/rpc/cortex_paid_reserve": {
         assert.equal(paid, true);
         assert.equal(body.p_subject, accountId);
-        assert.equal(body.p_model, "anthropic/claude-haiku-5.5");
-        assert.equal(body.p_advanced, true);
+        assert.ok(["anthropic/claude-haiku-5.5", "google/gemini-3.8-flash-lite-tts"].includes(body.p_model));
+        assert.equal(body.p_advanced, body.p_model === "anthropic/claude-haiku-5.5");
         const attempt = crypto.randomUUID();
         attempts.set(attempt, accountId);
         return Response.json({ quota: { ...quota(accountId), plan: "pro" }, attempt, max_output: body.p_output });
       }
       case "/rest/v1/rpc/cortex_paid_finish": {
-        assert.ok(body.p_cost > 0);
+        assert.ok(body.p_cost === null || body.p_cost > 0);
+        if (body.p_input !== null) usage.set(accountId, quota(accountId).used + body.p_input + body.p_output);
         return Response.json(quota(accountId));
       }
       case "/rest/v1/rpc/cortex_ai_reserve": {
@@ -335,11 +336,28 @@ test("speech is server-authenticated, throttled and returns only validated PCM",
   const speech = await call("speech", { text: "Привет" }, headers);
   assert.equal(speech.status, 200);
   assert.equal(speech.headers.get("x-cortex-audio-format"), "pcm_s16le_24000_mono");
+  const charged = JSON.parse(speech.headers.get("x-cortex-quota") || "null");
+  assert.equal(charged.unit, "tokens");
+  assert.ok(charged.used >= 100, "voice synthesis must deduct shared quota");
   assert.deepEqual(new Uint8Array(await speech.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
   assert.ok(requests.includes("POST /api/v1/audio/speech"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_reserve"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_reserve"));
+  assert.ok(!reservations.some(limits => limits.some(limit =>
+    limit.bucket.startsWith("speech:") && limit.bucket !== "speech:all" && limit.seconds === 86_400)),
+  "personal speech usage should be bounded by tokens, not an extra daily request count");
   assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all" &&
     limit.seconds === 86_400 && limit.maximum === 500)));
+});
+
+test("paid voice synthesis uses the existing subscription token allowance", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, true, true);
+  const response = await call("speech", { text: "Привет" }, { Authorization: "Bearer " + "T".repeat(43) });
+  assert.equal(response.status, 200);
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_reserve"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_finish"));
+  assert.equal(JSON.parse(response.headers.get("x-cortex-quota")!).unit, "tokens");
 });
 
 test("speech falls back only for retryable upstream failures", async () => {
@@ -352,6 +370,8 @@ test("speech falls back only for retryable upstream failures", async () => {
   const declined = await invalid.call("speech", { text: "Привет" }, headers);
   assert.equal(declined.status, 502);
   assert.equal(invalid.requests.filter(url => url === "POST /api/v1/audio/speech").length, 1);
+  assert.ok(invalid.requests.includes("POST /rest/v1/rpc/cortex_ai_finish"),
+    "failed speech must release its reserved token balance");
 });
 
 test("upgraded APKs receive 4x smaller voice data while older APKs retain identical PCM", async () => {

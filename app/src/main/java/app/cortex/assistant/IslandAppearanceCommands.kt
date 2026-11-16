@@ -31,6 +31,7 @@ internal object IslandAppearanceCommands {
                     "результат" in command -> "results"
                     else -> "face"
                 }
+                if (key == "face") return "В компактном островке теперь только анимированный логотип CORTEX."
                 val enabled = when {
                     Regex("""выключи|убери|скрой""").containsMatchIn(command) -> false
                     Regex("""включи|добавь|покажи""").containsMatchIn(command) -> true
@@ -46,7 +47,7 @@ internal object IslandAppearanceCommands {
                     Regex("""включи|добавь|покажи|верни""").containsMatchIn(command) -> true
                     else -> return null
                 }
-                style.put("borderWidth", if (show) .65 else 0.0)
+                style.put("borderWidth", if (show) .45 else 0.0)
                 feedback = if (show) "Вернул рамку островка." else "Убрал рамку островка."
             }
             Regex("""сдвинь|подвинь|перемести|левее|правее|ниже|выше""").containsMatchIn(command) -> {
@@ -64,7 +65,7 @@ internal object IslandAppearanceCommands {
                 feedback = "Сдвинул островок $description."
             }
             Regex("""прозрачн|непрозрачн""").containsMatchIn(command) -> {
-                val previous = style.optDouble("opacity", 96.0).takeIf(Double::isFinite) ?: 96.0
+                val previous = style.optDouble("opacity", 100.0).takeIf(Double::isFinite) ?: 100.0
                 val next = when {
                     percentage != null && percentage in 40..100 -> percentage.toDouble()
                     Regex("""прозрачнее|уменьши|более прозрачн""").containsMatchIn(command) -> previous - 15
@@ -77,7 +78,7 @@ internal object IslandAppearanceCommands {
             Regex("""черн|чёрн|темн|тёмн|графит|бел|светл""").containsMatchIn(command) -> {
                 val light = Regex("""бел|светл""").containsMatchIn(command)
                 val colors = if (light) listOf("#e7e7e7", "#161616", "#555555", "#363636", "#777777")
-                else listOf("#080808", "#ffffff", "#c6c6c6", "#ffffff", "#ffffff")
+                else listOf("#000000", "#ffffff", "#ffffff", "#ffffff", "#ffffff")
                 listOf("background", "text", "border", "accent", "faceColor").forEachIndexed { index, key ->
                     style.put(key, colors[index])
                 }

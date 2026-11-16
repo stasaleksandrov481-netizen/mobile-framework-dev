@@ -6,19 +6,15 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.SystemClock
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
-import android.text.SpannableStringBuilder
-import android.text.Spanned
 import android.text.TextUtils
 import android.text.TextWatcher
-import android.text.style.RelativeSizeSpan
-import android.text.style.StyleSpan
+import android.text.method.LinkMovementMethod
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -33,6 +29,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.math.exp
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 internal class IslandConversationPanel(
     context: Context,
@@ -42,10 +39,9 @@ internal class IslandConversationPanel(
     openApp: () -> Unit
 ) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
-    private val status = label(11f, 0xFFC6C6C6.toInt())
-    private val brand = label(12.5f, Color.WHITE)
+    private val status = label(11.5f, 0xFFBABABA.toInt())
     private val signal = Signal()
-    private val response = label(15f, 0xFFF0F0F0.toInt())
+    private val response = label(15f, Color.WHITE)
     private val answerScroll = ScrollView(context)
     private val header = LinearLayout(context)
     private val divider = View(context)
@@ -62,7 +58,7 @@ internal class IslandConversationPanel(
 
     init {
         orientation = VERTICAL
-        setPadding(dp(15), dp(10), dp(13), dp(12))
+        setPadding(dp(17), dp(12), dp(15), dp(14))
         isSoundEffectsEnabled = false
         isFocusableInTouchMode = true
         isClickable = true
@@ -70,25 +66,17 @@ internal class IslandConversationPanel(
         descendantFocusability = FOCUS_AFTER_DESCENDANTS
 
         header.gravity = Gravity.CENTER_VERTICAL
-        val identity = LinearLayout(context).apply {
-            orientation = VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val wordmark = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        wordmark.addView(brand.apply {
-            text = "CORTEX"
-            letterSpacing = .14f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
-        wordmark.addView(signal, LayoutParams(dp(67), dp(26)).apply { marginStart = dp(7) })
-        identity.addView(wordmark, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        status.maxLines = 2
+        val identity = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        identity.addView(signal, LayoutParams(dp(42), dp(42)))
+        status.maxLines = 1
         status.ellipsize = TextUtils.TruncateAt.END
-        status.text = "На связи"
-        status.visibility = VISIBLE
+        status.text = ""
+        // Keep the header geometry fixed while the model changes phases.
+        status.visibility = INVISIBLE
+        status.minHeight = dp(17)
         status.accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE
-        identity.addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(3) })
-        header.addView(identity, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(4) })
+        identity.addView(status, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(5) })
+        header.addView(identity, LayoutParams(0, dp(44), 1f))
         header.addView(Glyph("open", "Открыть приложение").apply { setOnClickListener { openApp() } },
             LayoutParams(dp(44), dp(44)))
         header.addView(Glyph("close", "Свернуть островок").apply { setOnClickListener { close() } },
@@ -96,11 +84,11 @@ internal class IslandConversationPanel(
         addView(header, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         addView(divider, LayoutParams(LayoutParams.MATCH_PARENT, dp(1)).apply {
             topMargin = dp(5)
-            bottomMargin = dp(10)
-            marginStart = dp(4)
-            marginEnd = dp(4)
+            bottomMargin = dp(9)
+            marginStart = dp(2)
+            marginEnd = dp(2)
         })
-        divider.setBackgroundColor((appearance.text and 0x00FFFFFF) or 0x26000000)
+        divider.setBackgroundColor(0x1FFFFFFF)
 
         answerScroll.apply {
             isFillViewport = false
@@ -111,17 +99,20 @@ internal class IslandConversationPanel(
             addView(response, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
         response.apply {
-            setPadding(dp(14), dp(12), dp(14), dp(12))
-            setLineSpacing(dp(2).toFloat(), 1.13f)
+            setPadding(dp(5), dp(8), dp(6), dp(12))
+            setLineSpacing(dp(3).toFloat(), 1.14f)
             letterSpacing = .006f
-            setTextIsSelectable(true)
+            linksClickable = true
+            movementMethod = LinkMovementMethod.getInstance()
+            setLinkTextColor(Color.WHITE)
+            isFocusable = true
         }
         decorateReply()
         addView(answerScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).apply { bottomMargin = dp(6) })
         addView(widgets, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(4) })
 
         editor.apply {
-            hint = "Написать Кортексу…"
+            hint = "Спросить CORTEX…"
             isSoundEffectsEnabled = false
             contentDescription = "Сообщение Кортексу"
             setHintTextColor(0xFFAAAAAA.toInt())
@@ -184,8 +175,9 @@ internal class IslandConversationPanel(
             signal.phase = phase
             signal.invalidate()
         }
-        val message = label.ifBlank { "На связи" }
-        status.visibility = if (appearance.status || phase == "reminder") VISIBLE else GONE
+        val message = label.trim()
+        val show = (appearance.status || phase == "reminder") && phase != "idle" && message.isNotBlank()
+        status.visibility = if (show) VISIBLE else INVISIBLE
         if (status.text.toString() == message) return
         status.text = message
         if (changed && motion) {
@@ -224,7 +216,7 @@ internal class IslandConversationPanel(
         val pinned = answerScroll.scrollY >= response.height - answerScroll.height - dp(22)
         answer = value
         val hasAnswer = value.isNotBlank()
-        response.text = styledReply(value)
+        response.text = IslandMarkdown.render(value, appearance.accent)
         answerScroll.visibility = if (hasAnswer) VISIBLE else INVISIBLE
         if (wasEmpty == hasAnswer) renderWidgets()
         if (wasEmpty && hasAnswer) {
@@ -243,37 +235,9 @@ internal class IslandConversationPanel(
         }
     }
 
-    private fun styledReply(value: String): CharSequence = SpannableStringBuilder().apply {
-        value.lineSequence().forEachIndexed { index, raw ->
-            if (index > 0) append('\n')
-            val lineStart = length
-            val heading = HEADING.find(raw)
-            val line = if (heading != null) raw.substring(heading.range.last + 1)
-                else raw.replaceFirst(BULLET, "•  ")
-            var consumed = 0
-            for (match in EMPHASIS.findAll(line)) {
-                append(line.substring(consumed, match.range.first))
-                val start = length
-                append(match.groupValues[1])
-                setSpan(StyleSpan(Typeface.BOLD), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                consumed = match.range.last + 1
-            }
-            append(line.substring(consumed))
-            if (heading != null && length > lineStart) {
-                setSpan(StyleSpan(Typeface.BOLD), lineStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                setSpan(RelativeSizeSpan(1.11f), lineStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-        }
-    }
-
     private fun decorateReply() {
-        val tint = appearance.text and 0x00FFFFFF
-        answerScroll.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-            tint or 0x16000000, tint or 0x0A000000
-        )).apply {
-            cornerRadius = dp(16).toFloat()
-            setStroke(dp(1), tint or 0x24000000)
-        }
+        // The answer is part of the same true-black surface, not a grey bubble.
+        answerScroll.setBackgroundColor(Color.TRANSPARENT)
     }
 
     fun reveal(progress: Float) {
@@ -292,9 +256,8 @@ internal class IslandConversationPanel(
         appearance = value
         decorateReply()
         response.setTextColor(value.text)
-        brand.setTextColor(value.text)
-        status.setTextColor((value.text and 0x00FFFFFF) or 0xBA000000.toInt())
-        divider.setBackgroundColor((value.text and 0x00FFFFFF) or 0x26000000)
+        status.setTextColor((value.text and 0x00FFFFFF) or 0xB0000000.toInt())
+        divider.setBackgroundColor((value.text and 0x00FFFFFF) or 0x24000000)
         editor.setTextColor(value.text)
         editor.setHintTextColor((value.text and 0x00FFFFFF) or 0xA0000000.toInt())
         signal.tint(value.accent)
@@ -302,12 +265,6 @@ internal class IslandConversationPanel(
         sendButton.invalidate()
         for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
         renderWidgets()
-    }
-
-    private companion object {
-        val HEADING = Regex("""^#{1,4}\s+""")
-        val BULLET = Regex("""^\s*[-*]\s+""")
-        val EMPHASIS = Regex("""\*\*([^*\n]+)(?:\*\*|$)""")
     }
 
     fun reminder(action: ((String) -> Unit)?) {
@@ -335,8 +292,8 @@ internal class IslandConversationPanel(
                 isSoundEffectsEnabled = false
                 background = GradientDrawable().apply {
                     cornerRadius = dp(13).toFloat()
-                    setColor((appearance.text and 0x00FFFFFF) or 0x0D000000)
-                    setStroke(dp(1), (appearance.border and 0x00FFFFFF) or 0x28000000)
+                    setColor(Color.BLACK)
+                    setStroke(dp(1), (appearance.border and 0x00FFFFFF) or 0x40000000)
                 }
                 setOnClickListener { if (reminder == null) sendMessage(command) else reminder(command) }
             }
@@ -392,14 +349,19 @@ internal class IslandConversationPanel(
         init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
         override fun onDraw(canvas: Canvas) {
-            val moving = motion && isShown && windowVisibility == VISIBLE &&
-                (phase == "listening" || phase == "thinking" || phase == "executing")
+            val moving = motion && isShown && windowVisibility == VISIBLE
             val now = SystemClock.uptimeMillis()
             val time = if (moving) (now % 720_000L) / 1000f else 0f
-            drawing.mark(canvas, 13 * density, height / 2f, 1f)
-            drawing.wave(canvas, 47 * density, height / 2f, phase, time,
-                level * exp((levelAt - now) / 240f), 1f)
-            if (moving) postInvalidateDelayed(33)
+            val active = appearance.progress && (phase == "listening" || phase == "thinking" || phase == "executing")
+            val pulse = if (moving) (sin(time * if (active) 5f else 1.8f) + 1f) * .5f else .5f
+            val voice = if (phase == "listening") level * exp((levelAt - now) / 240f) else 0f
+            val centerX = width / 2f
+            val centerY = height / 2f
+            canvas.save()
+            canvas.scale(.96f + pulse * .08f + .12f * voice, .96f + pulse * .08f + .12f * voice, centerX, centerY)
+            drawing.mark(canvas, centerX, centerY, .78f + pulse * .22f)
+            canvas.restore()
+            if (moving) postInvalidateDelayed(if (active) 48 else 85)
         }
     }
 
@@ -417,13 +379,13 @@ internal class IslandConversationPanel(
             val inset = .65f * density
             val radius = (height / 2f).coerceAtMost(19 * density)
             ink.style = Paint.Style.FILL
-            ink.color = appearance.background
-            ink.alpha = 224
+            ink.color = Color.BLACK
+            ink.alpha = 255
             canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, ink)
             ink.style = Paint.Style.STROKE
             ink.strokeWidth = density * .8f
             ink.color = if (focused) appearance.accent else appearance.border
-            ink.alpha = if (focused) 150 else 84
+            ink.alpha = if (focused) 125 else 42
             canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, ink)
         }
     }

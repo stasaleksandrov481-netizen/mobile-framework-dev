@@ -40,6 +40,7 @@
   const form = composition.firstElementChild;
   const input = form.querySelector("#composer-input");
   const send = form.querySelector(".send-button");
+  const quotaRing = form.querySelector(".quota-ring");
   const microphone = form.querySelector(".mic-button");
   const voiceButton = form.querySelector(".voice-button");
   const stop = form.querySelector(".stop-button");
@@ -366,6 +367,18 @@
   addEventListener("popstate", () => { closeSheet(); closeHistory(true); readRoute(); });
 
   function syncComposer() {
+    const quota = connection.quota;
+    if (quotaRing) {
+      const known = quota?.unit === "tokens" && (quota.unlimited || Number(quota.limit) > 0);
+      quotaRing.hidden = !known;
+      if (known) {
+        const fraction = quota.unlimited ? 1 : Math.max(0, Math.min(1, Number(quota.remaining) / Number(quota.limit)));
+        quotaRing.style.setProperty("--quota-fraction", `${Math.round(fraction * 100)}%`);
+        const label = quota.unlimited ? "Токены без лимита" : `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")} токенов`;
+        quotaRing.setAttribute("aria-label", label + ". Открыть использование");
+        quotaRing.title = label;
+      }
+    }
     if (composition.hidden) return;
     const filled = Boolean(input.value.trim());
     const working = route === "chat" && pending?.chatId === chatId;
@@ -573,6 +586,7 @@
       connection.profiles = data.device_profiles === true;
       setAccount(data.account);
       connection.quota = data.quota || null;
+      syncComposer();
     } catch {
       if (epoch !== statusEpoch) return;
       connection.status = "offline";
@@ -636,6 +650,7 @@
     const quota = event.detail;
     if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
     connection.quota = quota;
+    syncComposer();
     if (["profile", "models", "subscription"].includes(route)) render();
   });
   addEventListener("cortex-guest-id", event => {
@@ -856,14 +871,17 @@
       "Опирайся на доступы и реальные результаты Android. " +
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
     const result = await Api.request("chat", {
-      payload: { messages: M.turns(chat, policy), style: M.profile().style,
+      payload: { messages: M.turns(chat, policy), style: M.profile().style, web_search: true,
         ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }) },
       notify: S.preferences.notifyReplies
     }, {
       signal: job.controller.signal,
-      onStatus() {
+      onStatus(status) {
         if (pending !== job) return;
-        job.action = "Пробую резервную модель…";
+        job.action = status === "web_search" ? "Ищу информацию в интернете…"
+          : status === "web_ready" ? "Проверяю, нужны ли свежие данные…" : "Пробую резервную модель…";
+        if (status === "web_ready") job.webEnabled = true;
+        if (status === "web_search") job.webSearching = true;
         if (activeChat(job)) render({ bottom: true });
       },
       onDelta(delta) {
@@ -904,7 +922,7 @@
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
-      chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }),
+      chat.messages.push({ role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
         ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
       M.touch(chat);
@@ -1289,6 +1307,7 @@
     }
     if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
       voiceSpoken(voice, message.ok === true);
+      void refreshConnection();
     }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";

@@ -147,8 +147,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         mode = preferences.getString("mode", "off") ?: "off"
         val appearance = IslandAppearance.read(preferences)
         if (style != appearance) {
-            if (style.size != appearance.size || style.offsetX != appearance.offsetX ||
-                style.offsetY != appearance.offsetY || style.face != appearance.face) placement = null
+            if (style.size != appearance.size || style.widthScale != appearance.widthScale ||
+                style.heightScale != appearance.heightScale || style.offsetX != appearance.offsetX ||
+                style.offsetY != appearance.offsetY) placement = null
             style = appearance
         }
         if (mode != "off" && intent?.getBooleanExtra(EXTRA_RESUME, false) == true) {
@@ -383,6 +384,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         val view = island ?: return
         if (open == opening) return
         nextAnimation?.let(view::removeCallbacks)
+        view.cancelPlacementWait()
         val generation = ++layoutGeneration
         opening = open
         moving = true
@@ -391,25 +393,29 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             view.conversation.hideKeyboard()
         }
         placeIsland(view)
+        val targetWindow = placement?.window(true) ?: return
         nextAnimation = Runnable {
             nextAnimation = null
             if (island !== view || generation != layoutGeneration || exiting) return@Runnable
-            view.expand(open) {
+            view.whenWindowReady(targetWindow) {
                 if (island === view && generation == layoutGeneration && !exiting) {
-                    val settle = {
+                    view.expand(open) {
                         if (island === view && generation == layoutGeneration && !exiting) {
-                            moving = false
-                            placeIsland(view)
-                            if (!open) {
-                                if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
-                                render()
+                            val settle = {
+                                if (island === view && generation == layoutGeneration && !exiting) {
+                                    moving = false
+                                    placeIsland(view)
+                                    if (!open) {
+                                        if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
+                                        render()
+                                    }
+                                }
                             }
+                            // Never shrink the touch window in the middle of a
+                            // morph. Let Android compose the final capsule first.
+                            if (open) settle() else view.postOnAnimation { settle() }
                         }
                     }
-                    // Complete the visible morph before replacing the large overlay
-                    // window with the compact touch target. A same-frame resize can
-                    // look like the pill shoots sideways on some Android devices.
-                    if (open) settle() else view.postOnAnimation { settle() }
                 }
             }
         }.also(view::postOnAnimation)

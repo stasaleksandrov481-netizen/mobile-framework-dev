@@ -52,7 +52,8 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
             }
             Thread({ play(turn, pcm, normalized, complete) }, "cortex-voice-playback").start()
         }
-        // A slow TTS provider must never leave a voice answer silent for 30+ seconds.
+        // The normal cloud TTS round trip may exceed four seconds. Give it a
+        // realistic playback window before falling back to Android speech.
         handler.postDelayed({
             val stale = synchronized(this) {
                 if (turn != generation) null else request.also { request = null }
@@ -61,7 +62,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                 bridge.cancel(stale)
                 useAndroidVoice(turn, normalized, complete)
             }
-        }, 4_500L)
+        }, 10_000L)
     }
 
     private fun play(turn: Int, pcm: ByteArray, text: String, complete: (Boolean) -> Unit) {

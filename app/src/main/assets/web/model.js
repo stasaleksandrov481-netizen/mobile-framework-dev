@@ -54,8 +54,9 @@ const Cortex = (() => {
       updated: string(item.updated, 40) || new Date().toISOString(),
       title: string(item.title, 72) || "Новый чат",
       messages: array(item.messages).filter(message => ["user", "assistant"].includes(message?.role) && message.text)
-        .map(({role, text, local, resumable}) => ({ role, text: string(text, 20000),
-          ...(local === true && { local: true }), ...(resumable === true && { resumable: true }) }))
+        .map(({role, text, local, resumable, webSearch}) => ({ role, text: string(text, 20000),
+          ...(local === true && { local: true }), ...(resumable === true && { resumable: true }),
+          ...(webSearch === true && { webSearch: true }) }))
     };
   }
 
@@ -264,6 +265,14 @@ const Cortex = (() => {
       "Оформляй содержательные ответы чистым Markdown: короткие абзацы, списки, заголовки только когда нужны, таблицы для сравнения, блоки кода с языком. " +
         "Не превращай обычное приветствие в длинную инструкцию и не создавай плашки без причины. Для выделения заметки, совета или предупреждения используй цитату > [!NOTE], > [!TIP] или > [!IMPORTANT], если это действительно полезно. " +
         "Не используй эмодзи. При необходимости ставь сдержанные встроенные SVG-иконки синтаксисом :icon[имя]:, доступные имена: check, info, alert, spark, shield, bolt, bell, heart, star, search, globe, note, file, link, history, settings. " +
+        "Для сравнений с количествами можно показать красивую диаграмму через fenced-блок cortex-metrics с JSON: " +
+        "{\"title\":\"Сравнение\",\"rows\":[{\"label\":\"До\",\"value\":\"48 КБ/с\",\"percent\":100}," +
+        "{\"label\":\"После\",\"value\":\"12 КБ/с\",\"percent\":25,\"tone\":\"success\"}],\"note\":\"На 75% меньше\"}. " +
+        "Другие разрешённые блоки: cortex-cards с JSON {\"cards\":[{\"title\":\"Показатель\",\"value\":\"12 КБ/с\",\"note\":\"Краткий комментарий\",\"tone\":\"success\"}]} " +
+        "и cortex-steps с JSON {\"steps\":[{\"title\":\"Проверка\",\"detail\":\"Описание\",\"state\":\"done\"}]}. " +
+        "В шагах состояния только done, active, pending, error; в цветовых тонах success, neutral, warning. " +
+        "Используй компонент только для настоящих проверенных чисел, не приукрашивай данные. " +
+        "Если искал в интернете, приведи кликабельные ссылки на реально найденные источники, отделяй найденные факты от выводов. " +
         "Иконки необязательны; максимум одна на смысловой блок. Не пиши HTML или SVG-код. Действия выполняет клиент приложения и сообщает результат.",
       ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
       facts ? "Память пользователя:\n" + facts : "",

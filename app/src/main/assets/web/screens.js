@@ -78,6 +78,9 @@ const CortexUI = (() => {
       <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
         enterkeyhint="send"></textarea>
       <div class="composer-actions">
+        <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("go", "models")} hidden>
+          <span class="quota-ring-art" aria-hidden="true"></span>
+        </button>
         <button class="composer-button mic-button" type="button" aria-label="Диктовать сообщение" ${attributes("dictate")}>${icon("mic", 21)}</button>
         <button class="composer-button voice-button" type="button" aria-label="Голосовой разговор" ${attributes("voice-chat")}>${icon("wave", 22)}</button>
         <button class="composer-button send-button" type="submit" aria-label="Отправить сообщение" hidden disabled>${icon("sendUp", 23)}</button>
@@ -103,9 +106,24 @@ const CortexUI = (() => {
   }
 
   function actionProgress(job) {
-    return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.waiting ? "history" : "bolt", 18)}</span>
-      <span><strong>${job.waiting ? "План на паузе" : "Выполняю…"}</strong>
+    return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.webEnabled || job.webSearching ? "globe" : job.waiting ? "history" : "bolt", 18)}</span>
+      <span><strong>${job.webSearching ? "Поиск в интернете" : job.webEnabled ? "Интернет" : job.waiting ? "План на паузе" : "Выполняю…"}</strong>
         <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action)}</small></span></div>`;
+  }
+
+  function webSourceBadges(text, active) {
+    if (!active) return "";
+    const hosts = new Set();
+    for (const match of text.matchAll(/\]\((https?:\/\/[^\s)]+)\)/gu)) {
+      if (hosts.size >= 5) break;
+      const href = CortexMarkdown.webUrl(match[1]);
+      if (!href) continue;
+      const host = new URL(href).hostname.toLowerCase();
+      if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) hosts.add(host);
+    }
+    return hosts.size ? `<div class="web-source-badges" aria-label="Сайты-источники">${icon("globe", 14)}<span>Источники</span>` +
+      [...hosts].map(host => `<span class="web-source-badge"><img src="/favicons/${esc(host)}" alt="" loading="lazy">${esc(host)}</span>`).join("") +
+      "</div>" : "";
   }
 
   const replyMark = `<span class="reply-mark" aria-hidden="true">${sign}</span>`;
@@ -115,12 +133,12 @@ const CortexUI = (() => {
     const messages = (item?.messages || []).map((message, index) => message.role === "user"
       ? `<article class="message user${ctx.messageEnter && index === item.messages.length - 1 ? " new-turn" : ""}" aria-label="Вы">${esc(message.text)}</article>`
       : `<article class="message assistant${ctx.messageEnter && index === item.messages.length - 1 ? " new-response" : ""}" aria-label="Ответ CORTEX">
-        ${replyMark}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
+        ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
         </div></article>`).join("");
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
-      ${replyMark}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
+      ${replyMark}${webSourceBadges(ctx.pending.text, ctx.pending.webSearching)}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
     const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">

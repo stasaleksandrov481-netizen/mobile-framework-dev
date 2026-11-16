@@ -284,7 +284,11 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             val audio = output.toByteArray()
             if (audio.isEmpty() || format == CortexAudioCodec.PCM_FORMAT && audio.size % 2 != 0)
                 throw GatewayFailure("speech_unavailable")
-            return JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP)).put("audio_format", format)
+            val result = JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP)).put("audio_format", format)
+            connection.getHeaderField("X-Cortex-Quota")?.takeIf { it.length <= 1024 }?.let { raw ->
+                runCatching { JSONObject(raw) }.getOrNull()?.let { result.put("quota", it) }
+            }
+            return result
         } finally {
             connections.remove(id, connection)
             connection.disconnect()
@@ -315,6 +319,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             event.optJSONObject("quota")?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
             if (event.has("error")) throw GatewayFailure(event.optString("error", "provider"), event.optInt("retry_after"))
             if (event.optString("status") == "fallback") onEvent(JSONObject().put("status", "fallback"))
+            if (event.optString("status") == "web_search") onEvent(JSONObject().put("status", "web_search"))
+            if (event.optString("status") == "web_ready") onEvent(JSONObject().put("status", "web_ready"))
             if (event.has("delta")) {
                 val delta = event.optString("delta")
                 if (delta.isNotEmpty() && text.length < 20_000) {

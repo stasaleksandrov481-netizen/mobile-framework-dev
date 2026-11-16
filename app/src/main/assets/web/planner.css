@@ -208,8 +208,8 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  width: var(--island-width, 132px);
-  min-height: var(--island-height, 40px);
+  width: var(--island-width, 72px);
+  min-height: var(--island-height, 36px);
   padding: 7px 14px;
   color: var(--island-text);
   background: var(--island-bg);
@@ -224,7 +224,14 @@
   height: 17px;
   mask: url("art/mark.svg") center / contain no-repeat;
   background: var(--island-text);
+  animation: island-mark-breathe 2.8s ease-in-out infinite;
 }
+@keyframes island-mark-breathe {
+  0%, 100% { opacity: .78; transform: scale(.95); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+@media (prefers-reduced-motion: reduce) { .plan-logo { animation: none; } }
+.reduce-motion .plan-logo { animation: none; }
 .plan-island-sample > i { position: absolute; inset: auto 36% 3px; height: 2px; border-radius: 5px; background: var(--island-accent); }
 .quota-panel, .faq { padding: 14px 15px; }
 .quota-balance { display: flex; align-items: baseline; gap: 8px; }

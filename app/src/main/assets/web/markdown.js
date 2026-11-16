@@ -15,9 +15,16 @@ const CortexMarkdown = (() => {
 
   parser.validateLink = value => Boolean(webUrl(value));
   parser.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
-    tokens[index].attrSet("target", "_blank");
-    tokens[index].attrSet("rel", "noopener noreferrer");
-    return renderer.renderToken(tokens, index, options);
+    const token = tokens[index];
+    token.attrSet("target", "_blank");
+    token.attrSet("rel", "noopener noreferrer");
+    const href = webUrl(token.attrGet("href"));
+    if (!href) return renderer.renderToken(tokens, index, options);
+    const host = new URL(href).hostname.toLowerCase();
+    const safe = host.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host);
+    return renderer.renderToken(tokens, index, options) + (safe
+      ? '<img class="cortex-site-favicon" src="/favicons/' + escape(host) + '" alt="" aria-hidden="true" loading="lazy" decoding="async">'
+      : '');
   };
   parser.renderer.rules.image = (tokens, index, options, env, renderer) => {
     const token = tokens[index];
@@ -60,7 +67,67 @@ const CortexMarkdown = (() => {
       CortexIcons("copy", 17) + '<span>Копировать</span></button></figcaption>' +
       '<pre tabindex="0"><code>' + escape(token.content) + "</code></pre></figure>\n";
   }
-  parser.renderer.rules.fence = (tokens, index) => codeBlock(tokens[index]);
+  // A small, typed Markdown extension. Never render model-provided HTML, CSS or URLs.
+  // ```cortex-metrics {"title":"...","rows":[{"label":"PCM","value":"48 КБ/с","percent":100},...]}
+  function metricsBlock(token) {
+    if (token.content.length > 2400) return codeBlock(token);
+    let data;
+    try { data = JSON.parse(token.content); } catch { return codeBlock(token); }
+    if (!data || typeof data !== "object" || Array.isArray(data) ||
+        !Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 5 ||
+        typeof data.title !== "string" || data.title.length > 90 ||
+        data.rows.some(row => !row || typeof row !== "object" ||
+          typeof row.label !== "string" || row.label.length > 70 ||
+          typeof row.value !== "string" || row.value.length > 40 ||
+          typeof row.percent !== "number" || !Number.isFinite(row.percent) ||
+          row.percent < 0 || row.percent > 100 ||
+          (row.tone !== undefined && !["success", "neutral", "warning"].includes(row.tone))) ||
+        (data.note !== undefined && (typeof data.note !== "string" || data.note.length > 120))) return codeBlock(token);
+    const rows = data.rows.map(row => '<div class="cortex-metric">' +
+      '<div class="cortex-metric-heading"><span>' + escape(row.label) + '</span><strong>' +
+      escape(row.value) + '</strong></div>' +
+      '<div class="cortex-metric-track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
+      row.percent + '" aria-label="' + escape(row.label) + '"><div class="cortex-metric-fill ' +
+      (row.tone || "neutral") + '" style="width:' + row.percent + '%"></div></div></div>').join("");
+    return '<figure class="cortex-metrics"><figcaption>' + escape(data.title) + '</figcaption>' + rows +
+      (data.note ? '<div class="cortex-metric-note">' + CortexIcons("check", 14) + escape(data.note) + '</div>' : "") + '</figure>\n';
+  }
+  function cardsBlock(token) {
+    if (token.content.length > 2500) return codeBlock(token);
+    let data;
+    try { data = JSON.parse(token.content); } catch { return codeBlock(token); }
+    if (!data || typeof data !== "object" || !Array.isArray(data.cards) || data.cards.length < 1 ||
+      data.cards.length > 6 || data.cards.some(card => !card || typeof card !== "object" ||
+      typeof card.title !== "string" || card.title.length > 65 ||
+      typeof card.value !== "string" || card.value.length > 75 ||
+      (card.note !== undefined && (typeof card.note !== "string" || card.note.length > 150)) ||
+      (card.tone !== undefined && !["success", "neutral", "warning"].includes(card.tone)))) return codeBlock(token);
+    return '<div class="cortex-answer-cards">' + data.cards.map(card =>
+      '<div class="cortex-answer-card ' + (card.tone || "neutral") + '"><span>' + escape(card.title) +
+      '</span><strong>' + escape(card.value) + '</strong>' +
+      (card.note ? '<small>' + escape(card.note) + '</small>' : "") + '</div>').join("") + '</div>\n';
+  }
+  function stepsBlock(token) {
+    if (token.content.length > 2600) return codeBlock(token);
+    let data;
+    try { data = JSON.parse(token.content); } catch { return codeBlock(token); }
+    if (!data || typeof data !== "object" || !Array.isArray(data.steps) || data.steps.length < 1 ||
+      data.steps.length > 7 || data.steps.some(step => !step || typeof step !== "object" ||
+      typeof step.title !== "string" || step.title.length > 85 ||
+      (step.detail !== undefined && (typeof step.detail !== "string" || step.detail.length > 170)) ||
+      !["done", "active", "pending", "error"].includes(step.state))) return codeBlock(token);
+    return '<ol class="cortex-answer-steps">' + data.steps.map(step =>
+      '<li class="' + step.state + '"><span class="cortex-step-symbol" aria-hidden="true">' +
+      (step.state === "done" ? CortexIcons("check", 15) : step.state === "error" ? CortexIcons("alert", 15) : "") +
+      '</span><div><strong>' + escape(step.title) + '</strong>' +
+      (step.detail ? '<small>' + escape(step.detail) + '</small>' : "") + '</div></li>').join("") + '</ol>\n';
+  }
+  parser.renderer.rules.fence = (tokens, index) => {
+    const token = tokens[index];
+    const kind = token.info.trim();
+    return kind === "cortex-metrics" ? metricsBlock(token) : kind === "cortex-cards" ? cardsBlock(token)
+      : kind === "cortex-steps" ? stepsBlock(token) : codeBlock(token);
+  };
   parser.renderer.rules.code_block = (tokens, index) => codeBlock(tokens[index]);
   parser.renderer.rules.table_open = () => '<div class="table-scroll" tabindex="0" role="region" aria-label="Таблица"><table>\n';
   parser.renderer.rules.table_close = () => "</table></div>\n";

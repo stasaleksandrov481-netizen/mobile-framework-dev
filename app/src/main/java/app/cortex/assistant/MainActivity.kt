@@ -106,6 +106,7 @@ class MainActivity : ComponentActivity() {
         }
         webSnapshot = webUpdates.snapshot()
         val loader = WebViewAssetLoader.Builder()
+            .addPathHandler("/favicons/", CortexSiteFavicon())
             .addPathHandler("/assets/web/", webUpdates.handler(webSnapshot))
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
         webUpdates.checkAsync()
@@ -277,7 +278,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun isAsset(uri: Uri) = uri.scheme == "https" && uri.host == ASSET_HOST && uri.path?.startsWith("/assets/web/") == true
+    private fun isAsset(uri: Uri) = uri.scheme == "https" && uri.host == ASSET_HOST &&
+        (uri.path?.startsWith("/assets/web/") == true || uri.path?.startsWith("/favicons/") == true)
 
     @Deprecated("For Android document pickers")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
