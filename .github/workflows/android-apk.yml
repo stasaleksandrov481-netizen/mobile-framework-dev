@@ -134,7 +134,8 @@ jobs:
           gradle --no-daemon :app:assembleRelease
           apk=app/build/outputs/apk/release/app-release.apk
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          expected=6a7967ebe2d0a5de51c02140ceade238bf1769b47bb2dcffc80bc955d650cf6b
+          # Keep the signing certificate used by the published 1.0.11 APK.
+          expected=dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274
           actual=$("$apksigner" verify --print-certs "$apk" | awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }')
           if [[ "$actual" != "$expected" ]]; then
             echo "::error::The APK certificate does not match the permanent CORTEX release certificate."
