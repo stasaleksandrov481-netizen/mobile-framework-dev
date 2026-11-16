@@ -83,6 +83,18 @@ jobs:
       - name: Build and test Android
         run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
 
+      # Upload a test build on normal pushes. Public signed release remains gated.
+      - name: Verify test APK output
+        run: test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CORTEX-test-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Sign the CORTEX update
         if: github.event_name == 'workflow_dispatch' && inputs.publish
         id: signing
