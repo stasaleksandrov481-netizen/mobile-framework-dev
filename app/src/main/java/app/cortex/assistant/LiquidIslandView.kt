@@ -7,6 +7,8 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PathMeasure
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
@@ -39,6 +41,10 @@ internal class LiquidIslandView(
     private val location = IntArray(2)
     private val laidOutAt = IntArray(2)
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val traceOutline = Path()
+    private val traceSegment = Path()
+    private val traceMeasure = PathMeasure()
+    private val traceBounds = RectF()
     private val signal = IslandSignal(density)
     private var placement: IslandPlacement? = null
     private var animator: ValueAnimator? = null
@@ -46,6 +52,7 @@ internal class LiquidIslandView(
     private var disappearance = 0f
     private var motion = true
     private var phase = "idle"
+    private var phaseStartedAt = SystemClock.uptimeMillis()
     private var style = IslandAppearance.parse()
     private var level = 0f
     private var levelAt = 0L
@@ -92,6 +99,7 @@ internal class LiquidIslandView(
     }
 
     fun phase(value: String, message: String, canStop: Boolean) {
+        if (phase != value) phaseStartedAt = SystemClock.uptimeMillis()
         phase = value
         activeStop = canStop
         val description = if (message.isBlank()) "Островок CORTEX. Ввести команду." else "CORTEX. $message"
@@ -332,6 +340,7 @@ internal class LiquidIslandView(
             canvas.drawRoundRect(body, radius, radius, ink)
         }
         val compactAlpha = (1f - ease(.02f, .44f, t)) * (1f - ease(0f, .76f, disappearance))
+        if (compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
         if (compactAlpha > .02f) {
             val cy = body.centerY()
             val active = style.progress && isActivePhase()
@@ -356,6 +365,42 @@ internal class LiquidIslandView(
         if (moving && compactAlpha > .02f && disappearance == 0f) {
             postInvalidateDelayed(if (isActivePhase()) 48L else 85L)
         }
+    }
+
+    /** One quiet light trace follows the compact capsule perimeter.
+     * Unlike a spinner, it disappears in idle and uses the chosen island accent.
+     * Reduce Motion disables it entirely, including when Voice is active.
+     */
+    private fun drawTrace(canvas: Canvas, now: Long, radius: Float, alpha: Float) {
+        if (!motion || !style.progress || !isActivePhase() || body.width() < 18f * density) return
+        val inset = 1.8f * density
+        traceBounds.set(body.left + inset, body.top + inset, body.right - inset, body.bottom - inset)
+        traceOutline.rewind()
+        val arc = (radius - inset).coerceAtLeast(0f)
+        traceOutline.addRoundRect(traceBounds, arc, arc, Path.Direction.CW)
+        traceMeasure.setPath(traceOutline, true)
+        val total = traceMeasure.length
+        if (total <= 0f) return
+        val elapsed = ((now - phaseStartedAt).coerceAtLeast(0L) % 200_000L) / 1000f
+        val speed = when (phase) { "listening" -> .19f; "thinking" -> .13f; else -> .16f }
+        val span = when (phase) { "listening" -> .14f; "thinking" -> .19f; else -> .25f }
+        val start = total * ((elapsed * speed) % 1f)
+        val end = start + total * span
+        traceSegment.rewind()
+        traceMeasure.getSegment(start, minOf(end, total), traceSegment, true)
+        if (end > total) traceMeasure.getSegment(0f, end - total, traceSegment, true)
+        val voice = if (phase == "listening") level * exp((levelAt - now) / 240f) else 0f
+        val strength = (1f + voice * .42f).coerceIn(1f, 1.42f)
+        ink.style = Paint.Style.STROKE
+        ink.strokeCap = Paint.Cap.ROUND
+        ink.color = style.accent
+        ink.strokeWidth = 3.4f * density
+        ink.alpha = (28f * alpha * strength).roundToInt().coerceIn(0, 255)
+        canvas.drawPath(traceSegment, ink)
+        ink.strokeWidth = 1.25f * density
+        ink.alpha = (165f * alpha * strength).roundToInt().coerceIn(0, 255)
+        canvas.drawPath(traceSegment, ink)
+        ink.strokeCap = Paint.Cap.BUTT
     }
 
     private fun isActivePhase() = phase == "listening" || phase == "thinking" || phase == "executing"
