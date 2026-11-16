@@ -1,0 +1,30 @@
+name: Dispatch approved CORTEX 1.0.12 beta
+on:
+  push:
+    branches: [ops/cortex-release-1.0.12-20261116]
+    paths: [.github/workflows/dispatch-approved-cortex-beta.yml]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_MAIN: 8d151d5156c9cf5ad0a64ff4179d37a251285b00
+    steps:
+      - name: Dispatch the signed beta from reviewed main
+        shell: bash
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$current" != "$EXPECTED_MAIN" ]]; then
+            echo "::error::main advanced. Recheck the release source before dispatch."
+            exit 1
+          fi
+          if [[ -n "$(gh run list --repo "$GITHUB_REPOSITORY" --workflow android-apk.yml --commit "$EXPECTED_MAIN" --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')" ]]; then
+            echo "Release workflow is already dispatched for this commit."
+            exit 0
+          fi
+          gh workflow run android-apk.yml --repo "$GITHUB_REPOSITORY" --ref main --field publish=true
