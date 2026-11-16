@@ -120,6 +120,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
   const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
+  const haikuModel = "anthropic/claude-haiku-5.5";
   const paidFast = env.CORTEX_PAID_FAST_MODEL?.trim() || "";
   const paidDeep = env.CORTEX_PAID_DEEP_MODEL?.trim() || "";
   const paidModelId = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
@@ -625,9 +626,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 5_200 : quick ? 5_500 : 15_000;
+        const firstTokenMs = input.visual ? 8_000 : quick ? 5_500 : 15_000;
         const signal = AbortSignal.any([request.signal, upstream.signal,
-          AbortSignal.timeout(input.visual ? 12_500 : quick ? 29_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 46_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
@@ -637,8 +638,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         ] : ready;
         if (!ordered.length && choices[0]) ordered.push(choices[0]);
         // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
-        const paidCandidates = [ ...(premium ? [{ model: paidDeep, advanced: true }] : []),
-          ...(basic && (!premium || paidFast !== paidDeep) ? [{ model: paidFast, advanced: false }] : []) ];
+        // Haiku 5.5 is a paid model. Reserve it against the advanced-token and
+        // $0.60/M-token liability ceiling; never silently bill free users.
+        const haikuReady = Boolean(isChat && hasPaidPlan && paidKey && access?.advanced_tokens);
+        const paidCandidates = [ ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
+          ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
+          ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
+            ? [{ model: paidFast, advanced: false }] : []) ];
         const routeModels = [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
         const maxAttempts = paidCandidates.length + (input.visual ? 2 : 3);
         const messages = [...input.messages];
@@ -697,7 +703,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               const format = !input.visual ? undefined : visualTools.includes(model)
                 ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
               const result = await completion(network, paid ? paidKey : key, [model], messages, isChat && !input.visual,
-                input.limit, signal, input.device, input.repair, firstTokenMs, quick, input.plan,
+                input.limit, signal, input.device, input.repair,
+                paid && model === haikuModel ? 20_000 : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
               modelCooldown.delete(scope + model);
               return result;

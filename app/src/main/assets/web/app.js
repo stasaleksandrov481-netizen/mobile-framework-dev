@@ -95,6 +95,11 @@
     render();
   }
 
+  // First-run choices must configure the native island as well as the WebView.
+  // Changing local preferences alone left the selected background mode disabled.
+  app.addEventListener("cortex-onboarding-energy", event => applyEnergy(event.detail?.mode));
+  app.addEventListener("cortex-onboarding-style", syncIslandOptions);
+
   function haptic() {
     if (S.preferences.haptics) sendDevice("tap");
   }
@@ -830,7 +835,7 @@
       const timer = setTimeout(() => {
         sendDevice("action-stop");
         done({ text: "Время задачи истекло. Проверьте последний шаг на экране.", local: true, external: !appVisible(), resumable: true });
-      }, 240000);
+      }, 740000);
       actionReplies.set(id, value => {
         if (value.phase === "progress") {
           if (pending !== job) return;

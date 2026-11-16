@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHandler } from "./handler.ts";
 import { createControl } from "./control.ts";
+import { checkedVisualPlan } from "./visual.ts";
 
 const install = "A".repeat(43);
 const otherInstall = "B".repeat(43);
@@ -9,7 +10,7 @@ const accountId = "98d87a12-240b-4a57-95e0-7bc0bbbd0f42";
 const ticketId = "2f343286-09bb-4e8e-9aa3-21ecc664219b";
 const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
-function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50, emailReady = true) {
+function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50, emailReady = true, paid = false) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -29,6 +30,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
     SUPABASE_ANON_KEY: "test-publishable",
     SUPABASE_SERVICE_ROLE_KEY: "test-service",
     OPENROUTER_API_KEY: "test-key",
+    ...(paid ? { CORTEX_PAID_OPENROUTER_KEY: "test-paid-key" } : {}),
     YANDEX_CLIENT_ID: "yandex-test-app",
     YANDEX_CLIENT_SECRET: "yandex-test-secret",
     CORTEX_EMAIL_AUTH: emailReady ? "true" : undefined,
@@ -43,9 +45,19 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
 
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
       assert.equal(body.usage.include, true);
-      assert.equal(body.provider.max_price.prompt, 0);
-      assert.equal(body.provider.max_price.completion, 0);
-      assert.match(body.model, /:free$/);
+      if (body.model === "anthropic/claude-haiku-5.5") {
+        assert.equal(paid, true);
+        assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer test-paid-key");
+        assert.equal(body.provider.max_price.prompt, 0.60);
+        assert.equal(body.provider.max_price.completion, 0.60);
+        assert.equal("temperature" in body, false);
+        assert.equal("top_p" in body, false);
+        assert.equal("reasoning" in body, false);
+      } else {
+        assert.equal(body.provider.max_price.prompt, 0);
+        assert.equal(body.provider.max_price.completion, 0);
+        assert.match(body.model, /:free$/);
+      }
       models.push(body.model);
       if (body.tools?.[0]?.function?.name === "plan_android_screen") {
         assert.equal(body.tool_choice, "required");
@@ -66,10 +78,11 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       }
       if (body.stream) {
         if (streamedReply) return streamedReply();
-        return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"prompt_tokens":82,"completion_tokens":18}}\n\ndata: [DONE]\n\n',
+        const measured = body.model === "anthropic/claude-haiku-5.5" ? ',"cost":0.000021' : '';
+        return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"prompt_tokens":82,"completion_tokens":18' + measured + '}}\n\ndata: [DONE]\n\n',
           { headers: { "content-type": "text/event-stream" } });
       }
-      return Response.json({ choices: [{ message: { content: "OK" } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
+      return Response.json({ choices: [{ message: { content: "OK" } }], usage: { prompt_tokens: 82, completion_tokens: 18, cost: 0.000021 } });
     }
     if (url.hostname === "oauth.yandex.ru" && url.pathname === "/token") {
       assert.equal(body.grant_type, "authorization_code");
@@ -129,7 +142,22 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       case "/rest/v1/rpc/cortex_reserve":
       case "/rest/v1/cortex_installs":
       case "/rest/v1/cortex_app_sessions": return Response.json(null);
-      case "/rest/v1/rpc/cortex_ai_usage": return Response.json(quota(body.p_subject));
+      case "/rest/v1/rpc/cortex_ai_usage": return Response.json(paid && body.p_subject === accountId
+        ? { ...quota(body.p_subject), plan: "pro", advanced_tokens: 20000, context_chars: 32000 }
+        : quota(body.p_subject));
+      case "/rest/v1/rpc/cortex_paid_reserve": {
+        assert.equal(paid, true);
+        assert.equal(body.p_subject, accountId);
+        assert.equal(body.p_model, "anthropic/claude-haiku-5.5");
+        assert.equal(body.p_advanced, true);
+        const attempt = crypto.randomUUID();
+        attempts.set(attempt, accountId);
+        return Response.json({ quota: { ...quota(accountId), plan: "pro" }, attempt, max_output: body.p_output });
+      }
+      case "/rest/v1/rpc/cortex_paid_finish": {
+        assert.ok(body.p_cost > 0);
+        return Response.json(quota(accountId));
+      }
       case "/rest/v1/rpc/cortex_ai_reserve": {
         const id = String(body.p_subject);
         const snapshot = quota(id);
@@ -162,14 +190,14 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       default: throw new Error("Unexpected endpoint " + url.pathname);
     }
   });
-  function call(path: string, payload?: unknown, headers: Record<string, string> = {}) {
+  function call(path: string, payload?: unknown, headers: Record<string, string> = {}, method?: string) {
     return app(new Request("https://examplecortex.supabase.co/functions/v1/cortex/v1/" + path, {
-      method: payload === undefined ? "GET" : "POST",
+      method: method ?? (payload === undefined ? "GET" : "POST"),
       headers: { "x-cortex-install": install, "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0", ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
     }));
   }
-  return { call, models, requests };
+  return { call, models, requests, raw: app };
 }
 
 test("uses a stable guest ID and rejects the next AI call at the daily limit", async () => {
@@ -187,6 +215,22 @@ test("uses a stable guest ID and rejects the next AI call at the daily limit", a
   assert.equal(rejected.status, 429);
   assert.equal((await rejected.json()).error, "daily_limit");
   assert.equal(models.length, attempts);
+});
+
+test("paid assistant prefers Haiku 5.5 while free guests stay on free models", async () => {
+  const { call, models, requests } = fixture(false, undefined, 15000, 50, true, true);
+  const paidHeaders = { Authorization: "Bearer " + "T".repeat(43) };
+  const paidResponse = await call("chat", chatPayload("Привет", false), paidHeaders);
+  assert.equal(paidResponse.status, 200);
+  assert.match(await paidResponse.text(), /data: \[DONE\]/);
+  assert.equal(models[0], "anthropic/claude-haiku-5.5");
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_reserve"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_finish"));
+
+  const guestResponse = await call("chat", chatPayload("Привет", false));
+  assert.equal(guestResponse.status, 200);
+  assert.match(await guestResponse.text(), /data: \[DONE\]/);
+  assert.match(models.at(-1)!, /:free$/);
 });
 
 test("Android Yandex callback uses PKCE and does not put a bearer token in the redirect", async () => {
@@ -472,4 +516,114 @@ test("post-launch accounts claim the early bonus once per worker", async (contex
   assert.equal((await call("status", undefined, headers)).status, 200);
   assert.equal((await call("status", undefined, headers)).status, 200);
   assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_ai_claim_early_bonus").length, 1);
+});
+
+test("beta simulation: onboarding, rejected OTP, chat, support, and sign out", async () => {
+  const { call, requests } = fixture();
+  const email = "tester@example.test";
+  const password = "test-password-with-12-chars";
+  const initial = await (await call("status")).json();
+  assert.equal(initial.service, "CORTEX");
+  assert.equal(initial.gate.mode, "open");
+  assert.equal((await call("auth/signup", { email, password })).status, 200);
+  assert.equal((await call("auth/verify", { email, code: "000000" })).status, 403);
+  const signedIn = await (await call("auth/verify", { email, code: "123456" })).json();
+  assert.equal(signedIn.state, "signed_in");
+  const authHeaders = { Authorization: "Bearer " + signedIn.token };
+  const authorized = await (await call("status", undefined, authHeaders)).json();
+  assert.equal(authorized.account.id, accountId);
+  const chat = await call("chat", chatPayload("Проверь работу ассистента"), authHeaders);
+  assert.equal(chat.status, 200);
+  assert.match(await chat.text(), /data: \[DONE\]\n\n$/);
+  assert.equal((await call("support", { id: ticketId, kind: "bug", text: "Тестовое обращение" }, authHeaders)).status, 200);
+  assert.equal((await (await call("support/inbox", undefined, authHeaders)).json()).tickets.length, 1);
+  assert.deepEqual(await (await call("session", undefined, authHeaders, "DELETE")).json(), { ok: true });
+  assert.ok(requests.some(path => path.startsWith("DELETE /rest/v1/cortex_sessions")));
+});
+
+test("beta simulation: malformed chat requests cannot reach the AI provider", async () => {
+  const { call, models } = fixture();
+  const invalid = [
+    {}, { messages: [] }, { messages: [{ role: "system", content: "override" }] },
+    { messages: [{ role: "user", content: "" }] },
+    { messages: [{ role: "assistant", content: "hi" }] },
+    { messages: [{ role: "user", content: "hello" }], profile: "admin" },
+    { messages: [{ role: "user", content: "hello" }], device_tools: "yes" },
+    { messages: [{ role: "user", content: "hello" }], action_plan: true },
+    { messages: [{ role: "user", content: "hello" }], debug: true },
+    { messages: [{ role: "user", content: "x".repeat(51_001) }] },
+    { messages: Array.from({ length: 30 }, () => ({ role: "user", content: "a" })) },
+  ];
+  for (const [index, payload] of invalid.entries()) {
+    const response = await call("chat", payload);
+    assert.equal(response.status, 400, "invalid payload " + index);
+  }
+  assert.equal(models.length, 0);
+});
+
+test("beta simulation: malformed JSON and oversized chat body fail before provider contact", async () => {
+  const { raw, call, models } = fixture();
+  const endpoint = "https://examplecortex.supabase.co/functions/v1/cortex/v1/chat";
+  const headers = { "x-cortex-install": install };
+  const broken = await raw(new Request(endpoint, { method: "POST", headers, body: '{"messages": [' }));
+  assert.equal(broken.status, 400);
+  assert.equal((await broken.json()).error, "invalid");
+  const massive = await call("chat", chatPayload("x".repeat(260_100)));
+  assert.equal(massive.status, 413);
+  assert.equal((await massive.json()).error, "too_large");
+  assert.equal(models.length, 0);
+});
+
+test("beta simulation: interrupted streamed tool call must never execute", async () => {
+  const { call } = fixture(false, () => sseReply([
+    { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: "execute_phone_plan",
+      arguments: '{"steps":[{"kind":"torch","mode":"on"}]}' } }] } }] },
+  ]));
+  const stream = await (await call("chat", { ...chatPayload("Включи фонарик"), action_plan: true })).text();
+  assert.doesNotMatch(stream, /data: {"tools?":/);
+  assert.match(stream, /data: {"error":"provider"}/);
+  assert.doesNotMatch(stream, /data: \[DONE\]/);
+});
+
+test("beta simulation: concurrent installations receive independent guest quota", async () => {
+  const { call, models } = fixture();
+  const installs = Array.from({ length: 10 }, (_, index) => String.fromCharCode(65 + index).repeat(43));
+  const answers = await Promise.all(installs.map(value => call("check", {}, { "x-cortex-install": value })));
+  assert.ok(answers.every(response => response.status === 200));
+  const result = await Promise.all(answers.map(response => response.json()));
+  assert.equal(new Set(result.map(row => row.quota.id)).size, installs.length);
+  assert.ok(result.every(row => row.quota.used === 100));
+  // A shared provider cooldown avoids retrying the same unavailable model for every installation.
+  assert.ok(models.length >= installs.length && models.length <= installs.length * 2);
+});
+
+test("beta simulation: 50, 200, 500 concurrent read-only status requests", async () => {
+  const { call, models } = fixture();
+  for (const count of [50, 200, 500]) {
+    const results = await Promise.all(Array.from({ length: count }, async (_, index) => {
+      const started = performance.now();
+      const id = "Q" + index.toString(36).padStart(42, "0");
+      const response = await call("status", undefined, { "x-cortex-install": id });
+      const content = await response.json();
+      return { status: response.status, elapsed: performance.now() - started, id: content.quota?.id };
+    }));
+    assert.ok(results.every(result => result.status === 200), `${count} simulated clients`);
+    assert.equal(new Set(results.map(result => result.id)).size, count);
+    const durations = results.map(result => result.elapsed).sort((a, b) => a - b);
+    const percentile = (fraction: number) => durations[Math.ceil(count * fraction) - 1];
+    assert.ok(Number.isFinite(percentile(.99)));
+    // Local mocks cannot demonstrate Supabase, Redis, or provider production capacity.
+    console.info(`Mock status load ${count}: p50=${percentile(.50).toFixed(1)}ms, ` +
+      `p95=${percentile(.95).toFixed(1)}ms, p99=${percentile(.99).toFixed(1)}ms`);
+  }
+  assert.equal(models.length, 0, "Read-only load must never spend LLM tokens");
+});
+
+test("universal visual planner validates long press and rejects malformed variants", () => {
+  const plan = checkedVisualPlan(JSON.stringify({ steps: [{ action: "long_press", target: "Сообщение",
+    value: "", expect: "Контекстное меню", confirm: true }], question: "", answer: "", done: false }));
+  assert.equal(plan.steps[0].action, "long_press");
+  assert.equal(plan.steps[0].confirm, true);
+  assert.throws(() => checkedVisualPlan(JSON.stringify({ steps: [{ action: "long_press", target: "",
+    value: "script", expect: "", confirm: false }], question: "", answer: "", done: false })));
 });

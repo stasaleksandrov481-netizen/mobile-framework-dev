@@ -17,6 +17,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # Public configuration only. The signing private key must never be embedded in an APK.
+  CORTEX_WEB_UPDATE_ROOT: ${{ vars.CORTEX_WEB_UPDATE_ROOT }}
+  CORTEX_WEB_UPDATE_PUBLIC_KEY: ${{ vars.CORTEX_WEB_UPDATE_PUBLIC_KEY }}
+
 concurrency:
   group: cortex-android-release
   cancel-in-progress: false
@@ -39,6 +44,12 @@ jobs:
 
       - name: Verify gateway and billing
         run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/redis.test.ts cortex-control/tests/billing.test.js
+
+      - name: Verify island onboarding and content
+        run: node --test qa/island-onboarding.test.mjs
+
+      - name: Verify signed WebView update packaging
+        run: python3 -m unittest discover -s tools -p 'test_package_web_update.py' -v
 
       - name: Verify website and administrator console
         run: |
@@ -83,6 +94,10 @@ jobs:
           CORTEX_KEY_ALIAS: ${{ secrets.CORTEX_KEY_ALIAS }}
           CORTEX_KEY_PASSWORD: ${{ secrets.CORTEX_KEY_PASSWORD }}
         run: |
+          if [[ -z "$CORTEX_WEB_UPDATE_ROOT" || -z "$CORTEX_WEB_UPDATE_PUBLIC_KEY" ]]; then
+            echo "::error::Public beta APK requires signed WebView update configuration. Set both CORTEX_WEB_UPDATE_ROOT and CORTEX_WEB_UPDATE_PUBLIC_KEY repository variables."
+            exit 1
+          fi
           if [[ -z "$CORTEX_KEYSTORE_B64" && -z "$CORTEX_STORE_PASSWORD" &&
                 -z "$CORTEX_KEY_ALIAS" && -z "$CORTEX_KEY_PASSWORD" ]]; then
             if [[ "$CORTEX_REQUIRE_PUBLISH" == 'true' ]]; then

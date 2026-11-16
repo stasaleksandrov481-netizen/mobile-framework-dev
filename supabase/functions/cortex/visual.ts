@@ -1,6 +1,6 @@
 import { Failure } from "./provider.ts";
 
-const actions = ["home", "back", "quick_settings", "open", "tap", "set", "type", "submit", "scroll", "swipe", "read", "expect", "lock"];
+const actions = ["home", "back", "quick_settings", "open", "tap", "long_press", "set", "type", "submit", "scroll", "swipe", "read", "expect", "lock"];
 const directions = ["up", "down", "left", "right"];
 const step = {
   type: "object",
@@ -67,7 +67,7 @@ export function checkedVisualPlan(text: string) {
       const expect = field(item.expect, 180).trim();
       if (!actions.includes(action)) throw new Failure("invalid_plan", 502);
       const valid = action === "type" ? Boolean(value.trim())
-        : ["open", "tap", "expect"].includes(action) ? Boolean(target && !value)
+        : ["open", "tap", "long_press", "expect"].includes(action) ? Boolean(target && !value)
         : action === "set" ? Boolean(target && ["on", "off"].includes(value))
         : ["scroll", "swipe"].includes(action) ? directions.includes(value)
         : !target && !value;

@@ -2117,3 +2117,119 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
   background: linear-gradient(to top, #ffffff31, #000 21%);
   box-shadow: 0 8px 35px #ffffff25;
 }
+
+/* CORTEX first run: a clear, focused introduction instead of a noisy demo. */
+.cortex-intro {
+  background: #070707;
+}
+.cortex-intro::before {
+  inset: 0;
+  opacity: .7;
+  animation: none;
+  transform: none;
+  background: radial-gradient(ellipse at 50% 25%, #ffffff13, transparent 60%);
+}
+.cortex-intro .intro-top,
+.cortex-intro .intro-bottom {
+  background: #080808f5;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.cortex-intro .intro-top {
+  border-bottom: 1px solid #ffffff12;
+}
+.cortex-intro .intro-count {
+  color: #ffffff80;
+  font-size: .78rem;
+  font-weight: 570;
+  letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
+}
+.cortex-intro .intro-content { padding-bottom: 16px; }
+.cortex-intro .intro-welcome { justify-content: center; }
+.intro-hero-art {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  width: min(100%, 385px);
+  height: clamp(206px, 33vh, 270px);
+  flex: 0 0 auto;
+  margin-bottom: clamp(14px, 4vh, 28px);
+}
+.intro-hero-halo {
+  position: absolute;
+  inset: 5% 8% 9%;
+  border: 1px solid #ffffff17;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 33%, #ffffff13, #ffffff05 38%, transparent 70%);
+  box-shadow: inset 0 0 40px #ffffff04;
+  transform: scaleY(.65);
+}
+.intro-hero-halo::after {
+  content: "";
+  position: absolute;
+  inset: 15%;
+  border: 1px solid #ffffff19;
+  border-radius: 50%;
+}
+.intro-hero-pill {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  padding: 10px 18px 10px 12px;
+  border: 1px solid #ffffff45;
+  border-radius: 999px;
+  background: linear-gradient(170deg, #2a2a2a, #060606 56%);
+  box-shadow: 0 15px 38px #000b, inset 0 1px #ffffff28;
+  font-size: .78rem;
+  font-weight: 710;
+  letter-spacing: .13em;
+  transform: translateY(-28px);
+}
+.intro-hero-pill .intro-mark { width: 20px; height: 20px; filter: none; }
+.intro-hero-pill i { width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: #dcdcdc; }
+.intro-hero-task {
+  position: absolute;
+  z-index: 2;
+  right: 3%;
+  bottom: 0;
+  left: 3%;
+  display: grid;
+  gap: 7px;
+  padding: 14px 17px;
+  text-align: left;
+  border: 1px solid #ffffff29;
+  border-radius: 17px;
+  background: linear-gradient(160deg, #242424, #101010 55%, #080808);
+  box-shadow: 0 13px 38px #0009, inset 0 1px #ffffff12;
+}
+.intro-hero-task > span { font-size: .64rem; font-weight: 700; letter-spacing: .13em; color: #ffffff84; }
+.intro-hero-task strong { font-size: clamp(.87rem, 3.6vw, 1rem); line-height: 1.25; font-weight: 590; }
+.intro-hero-task small { display: flex; align-items: center; gap: 7px; color: #c9c9c9; font-size: .75rem; line-height: 1.3; }
+.intro-welcome .intro-eyebrow { margin-bottom: 11px; }
+.intro-welcome h1 { font-size: clamp(2.35rem, 10.5vw, 4.25rem); line-height: 1.02; letter-spacing: -.071em; }
+.intro-welcome > p { max-width: 345px; color: #ffffffba; font-size: clamp(.89rem, 3.7vw, 1rem); }
+.intro-promise { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: .74rem; color: #ffffff92; }
+.intro-promise svg { flex: 0 0 auto; }
+.cortex-intro .intro-next { border-radius: 15px; min-height: 54px; padding-inline: 17px; }
+.cortex-intro .intro-mode { border-color: #ffffff20; border-radius: 16px; transition: background .18s, border-color .18s; }
+.cortex-intro .intro-mode.selected { border-color: #ffffffb5; background: #ffffff13; }
+.intro-recommended { display: inline-block; margin-left: 5px; padding: 3px 6px; border-radius: 6px; background: #ffffff1b; color: #efefef; font-size: .65rem; font-weight: 600; vertical-align: 2px; }
+.intro-preset-pill { display: grid; place-items: center; width: 48px; height: 25px; flex: 0 0 48px; border: 1px solid; border-radius: 100px; box-shadow: inset 0 1px 2px #ffffff22; }
+.intro-preset-pill i { width: 18px; height: 3px; border-radius: 100px; opacity: .9; }
+@media (max-height: 720px) {
+  .intro-hero-art { height: 185px; margin-bottom: 13px; }
+  .intro-hero-pill { transform: translateY(-22px); }
+  .intro-hero-task { padding: 11px 14px; gap: 5px; }
+  .intro-welcome .intro-promise { margin-top: 10px; }
+  .intro-welcome h1 { margin-bottom: 9px; }
+}
+@media (max-width: 350px) {
+  .intro-hero-art { height: 185px; }
+  .intro-promise { font-size: .69rem; }
+  .intro-recommended { display: block; width: max-content; margin: 4px 0 0; }
+}

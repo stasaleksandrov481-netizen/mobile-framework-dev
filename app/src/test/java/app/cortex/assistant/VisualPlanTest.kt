@@ -30,6 +30,25 @@ class VisualPlanTest {
         assertFalse(VisualRequest.isAction("Как выключить экран?"))
     }
 
+    @Test fun screenActionsAreGroundedWithoutUploadingUnrelatedChats() {
+        assertTrue(VisualRequest.needsVisibleScreen("Нажми на кнопку Продолжить"))
+        assertTrue(VisualRequest.needsVisibleScreen("Введи код в поле на экране"))
+        assertTrue(VisualRequest.needsVisibleScreen("Прочитай что сейчас на экране"))
+        assertFalse(VisualRequest.needsVisibleScreen("Как нажать на кнопку в Android?"))
+        assertFalse(VisualRequest.needsVisibleScreen("Напиши пост о технологиях"))
+        assertFalse(VisualRequest.needsVisibleScreen("Открой Telegram"))
+    }
+
+    @Test fun naturalPhoneVerbsReachTheActionEngine() {
+        assertTrue(VisualRequest.isAction("Позвони маме"))
+        assertTrue(VisualRequest.isAction("Ответь в Телеграме"))
+        assertTrue(VisualRequest.isAction("Переименуй файл"))
+        assertTrue(VisualRequest.isAction("Переключи настройку"))
+        assertTrue(VisualRequest.isAction("Сделай скриншот"))
+        assertFalse(VisualRequest.isAction("Как позвонить маме?"))
+        assertFalse(VisualRequest.isAction("Напиши пост о технологиях"))
+    }
+
     @Test fun plannerRejectsUnknownOperationsAndInvalidParameters() {
         assertNull(VisualPlan.parse("""{"steps":[{"action":"tap","target":"OK","x":12}]}"""))
         assertNull(VisualPlan.parse("""{"steps":[{"action":"set","target":"Wi-Fi","value":"toggle"}]}"""))
@@ -47,6 +66,17 @@ class VisualPlanTest {
         assertEquals(listOf(VisualAction.TYPE, VisualAction.SWIPE, VisualAction.BACK), steps.map { it.action })
         assertEquals("Привет, потом открой файл", steps.first().value)
         assertEquals("up", steps[1].value)
+    }
+
+    @Test fun longPressUsesAccessibilityAndProtectsSensitiveControls() {
+        val step = requireNotNull(VisualRequest.local("Зажми «Сообщение»", installed)).single()
+        assertEquals(VisualAction.LONG_PRESS, step.action)
+        assertEquals("Сообщение", step.target)
+        assertTrue(VisualRequest.isAction("Удерживай сообщение"))
+        assertNotNull(VisualPlan.parse("""{"steps":[{"action":"long_press","target":"Сообщение"}]}"""))
+        assertNull(VisualPlan.parse("""{"steps":[{"action":"long_press","target":""}]}"""))
+        assertEquals(VisualRisk.CONFIRM, VisualSafety.risk("Удали сообщение", step,
+            "Удалить", "action_delete", "Button"))
     }
 
     @Test fun finalSubmissionIsManualForGradedTasksAndConfirmedForMessages() {

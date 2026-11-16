@@ -165,9 +165,10 @@ internal class CortexPhoneActions(private val context: Context) {
                 return status(if (saved && enabled == (wanted == 1)) "done" else "requested").put("enabled", enabled)
             }
             "ringer" -> {
-                audio.ringerMode = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
+                val wanted = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
                     "silent" -> AudioManager.RINGER_MODE_SILENT; else -> AudioManager.RINGER_MODE_NORMAL }
-                return status("done")
+                audio.ringerMode = wanted
+                return status(if (audio.ringerMode == wanted) "done" else "requested")
             }
             "lock_screen" -> {
                 val service = CortexScreenService.connected

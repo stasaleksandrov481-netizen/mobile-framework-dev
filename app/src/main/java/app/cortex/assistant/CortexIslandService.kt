@@ -371,15 +371,22 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         nextAnimation = Runnable {
             nextAnimation = null
             if (island !== view || generation != layoutGeneration || exiting) return@Runnable
-            view.conversation.updateDeviceWidgets()
             view.expand(open) {
                 if (island === view && generation == layoutGeneration && !exiting) {
-                    moving = false
-                    placeIsland(view)
-                    if (!open) {
-                        if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
-                        render()
+                    val settle = {
+                        if (island === view && generation == layoutGeneration && !exiting) {
+                            moving = false
+                            placeIsland(view)
+                            if (!open) {
+                                if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
+                                render()
+                            }
+                        }
                     }
+                    // Complete the visible morph before replacing the large overlay
+                    // window with the compact touch target. A same-frame resize can
+                    // look like the pill shoots sideways on some Android devices.
+                    if (open) settle() else view.postOnAnimation { settle() }
                 }
             }
         }.also(view::postOnAnimation)
