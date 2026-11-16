@@ -220,7 +220,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.requestMethod = method
             connection.setRequestProperty("Accept", if (onEvent == null) "application/json" else "text/event-stream")
             connection.setRequestProperty("X-Cortex-Install", installId)
-            if (route == "presence") deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")
@@ -281,6 +281,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Audio-Accept", CortexAudioCodec.ADPCM_FORMAT)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("X-Cortex-Install", installId)
+            deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
             store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true
