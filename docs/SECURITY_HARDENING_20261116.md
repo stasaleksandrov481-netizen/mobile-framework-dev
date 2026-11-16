@@ -18,6 +18,7 @@ Audit date: 2026-11-16. This is a deployment checklist, not a claim of immunity 
 - Input bounds for chat, support, auth, and speech; uploads from users never choose the OpenRouter model or provider key.
 - JSON media-type checks prevent simple browser form submissions to state-changing gateway routes.
 - Native client has bounded parallel requests, bounded pending queue, bounded JSON and SSE responses, and cancellation when the UI is closed.
+- Voice responses negotiate a versioned 4-bit ADPCM wire format with new APKs (approximately 75% smaller than 16-bit mono PCM), while existing APKs retain PCM. Frames are size-checked before Android decoding; decoded audio is zeroed in memory after playback or cancellation. CORTEX does not persist synthesized voice files or a voice-history cache.
 - GitHub CodeQL security scans, automated dependency-update proposals and Android / server-side security regression tests.
 - Cold-start readiness probes now coalesce concurrent calls, and a valid environment provider-key fallback is cached even when the Vault RPC fails. These prevent extra database calls during bursts.
 

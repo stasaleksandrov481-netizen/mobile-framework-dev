@@ -6,6 +6,7 @@ import {
 import { createControl } from "./control.ts";
 import { createRedisCache } from "./redis.ts";
 import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
+import { AUDIO_CODEC, encodeAdpcm4 } from "./audio.ts";
 
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
 const ANDROID_SCHEME = "app.cortex.assistant";
@@ -689,8 +690,14 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const pcm = new Uint8Array(size);
         let offset = 0;
         for (const part of parts) { pcm.set(part, offset); offset += part.length; }
-        return new Response(pcm, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
-          "X-Cortex-Audio-Format": "pcm_s16le_24000_mono" } });
+        // Only upgraded APKs opt into the wire codec. Older APKs must keep
+        // receiving their original raw PCM or voice playback would break.
+        const acceptsAdpcm = request.headers.get("x-cortex-audio-accept") === AUDIO_CODEC;
+        const packed = acceptsAdpcm ? encodeAdpcm4(pcm) : null;
+        const compressed = packed !== null && packed.byteLength < pcm.byteLength;
+        const audio = compressed && packed ? packed : pcm;
+        return new Response(audio, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+          "X-Cortex-Audio-Format": compressed ? AUDIO_CODEC : "pcm_s16le_24000_mono" } });
       }
       if (method === "POST" && (path === "/v1/chat" || path === "/v1/check")) {
         const caller = await actor(request);

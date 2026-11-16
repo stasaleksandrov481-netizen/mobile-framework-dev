@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHandler } from "./handler.ts";
 import { createControl } from "./control.ts";
 import { checkedVisualPlan } from "./visual.ts";
+import { AUDIO_CODEC } from "./audio.ts";
 
 const install = "A".repeat(43);
 const otherInstall = "B".repeat(43);
@@ -12,7 +13,7 @@ const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
 function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50,
   emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
-  enforceRateLimits = false) {
+  enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4])) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -54,7 +55,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       assert.ok(["google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts"].includes(body.model));
       assert.deepEqual({ ...body, model: undefined }, { model: undefined, input: "Привет", voice: "Kore", response_format: "pcm" });
       if (speechLiteStatus && body.model === "google/gemini-3.8-flash-lite-tts") return new Response(null, { status: speechLiteStatus });
-      return new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "application/octet-stream" } });
+      return new Response(speechPcm, { headers: { "content-type": "application/octet-stream" } });
     }
 
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
@@ -351,6 +352,27 @@ test("speech falls back only for retryable upstream failures", async () => {
   const declined = await invalid.call("speech", { text: "Привет" }, headers);
   assert.equal(declined.status, 502);
   assert.equal(invalid.requests.filter(url => url === "POST /api/v1/audio/speech").length, 1);
+});
+
+test("upgraded APKs receive 4x smaller voice data while older APKs retain identical PCM", async () => {
+  const pcm = new Uint8Array(48_000);
+  for (let i = 0; i < pcm.byteLength; i += 2) {
+    const sample = Math.round(13_000 * Math.sin(i / 2 * Math.PI * 2 * 320 / 24_000));
+    pcm[i] = sample & 255;
+    pcm[i + 1] = (sample >> 8) & 255;
+  }
+  const { call } = fixture(false, undefined, 15_000, 50, true, false, 0, "", false, false, pcm);
+  const headers = { Authorization: "Bearer " + "T".repeat(43) };
+  const old = await call("speech", { text: "Привет" }, headers);
+  assert.equal(old.status, 200, old.status === 200 ? "" : await old.clone().text());
+  assert.equal(old.headers.get("x-cortex-audio-format"), "pcm_s16le_24000_mono");
+  assert.deepEqual(new Uint8Array(await old.arrayBuffer()), pcm);
+  const upgraded = await call("speech", { text: "Привет" }, { ...headers, "X-Cortex-Audio-Accept": AUDIO_CODEC });
+  assert.equal(upgraded.status, 200);
+  assert.equal(upgraded.headers.get("x-cortex-audio-format"), AUDIO_CODEC);
+  const packed = new Uint8Array(await upgraded.arrayBuffer());
+  assert.equal(packed.byteLength, 12_012);
+  assert.equal(new TextDecoder().decode(packed.subarray(0, 4)), "C4A1");
 });
 
 test("Yandex sign-in is disabled while existing account sessions remain usable", async () => {

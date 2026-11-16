@@ -255,6 +255,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.readTimeout = 32_000
             connection.requestMethod = "POST"
             connection.setRequestProperty("Accept", "application/octet-stream")
+            connection.setRequestProperty("X-Cortex-Audio-Accept", CortexAudioCodec.ADPCM_FORMAT)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("X-Cortex-Install", installId)
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
@@ -265,8 +266,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 val json = runCatching { JSONObject(connection.errorStream?.let { readBounded(it, 300) }.orEmpty()) }.getOrNull()
                 throw GatewayFailure(json?.optString("error", "speech_unavailable") ?: "speech_unavailable")
             }
-            if (connection.getHeaderField("X-Cortex-Audio-Format") != "pcm_s16le_24000_mono" ||
+            val format = connection.getHeaderField("X-Cortex-Audio-Format")
+            if (format != CortexAudioCodec.PCM_FORMAT && format != CortexAudioCodec.ADPCM_FORMAT ||
                 !connection.contentType.orEmpty().startsWith("application/octet-stream")) throw GatewayFailure("speech_unavailable")
+            val transferLimit = if (format == CortexAudioCodec.ADPCM_FORMAT) 600_012 else 2_400_000
             val buffer = ByteArray(8192)
             val output = ByteArrayOutputStream()
             connection.inputStream.use { source ->
@@ -274,13 +277,14 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                     if (Thread.currentThread().isInterrupted) throw InterruptedException()
                     val count = source.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > 2_400_000) throw GatewayFailure("speech_unavailable")
+                    if (output.size() + count > transferLimit) throw GatewayFailure("speech_unavailable")
                     output.write(buffer, 0, count)
                 }
             }
             val audio = output.toByteArray()
-            if (audio.isEmpty() || audio.size % 2 != 0) throw GatewayFailure("speech_unavailable")
-            return JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP))
+            if (audio.isEmpty() || format == CortexAudioCodec.PCM_FORMAT && audio.size % 2 != 0)
+                throw GatewayFailure("speech_unavailable")
+            return JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP)).put("audio_format", format)
         } finally {
             connections.remove(id, connection)
             connection.disconnect()
