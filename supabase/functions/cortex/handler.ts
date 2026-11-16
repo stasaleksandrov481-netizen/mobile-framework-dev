@@ -818,7 +818,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           p_kind: !isChat ? "check" : input.visual ? "visual" : "chat" });
         // Only exact duplicate safe chats are combined. Auth, access control,
         // account checks and rate limits still run for every caller.
-        const flightKey = isChat ? chatFlightKey(input, id, access?.plan || "guest") : null;
+        const flightKey = isChat && access?.allowed !== false
+          ? chatFlightKey(input, id, access?.plan || "guest") : null;
         let quota: Quota | undefined;
         const hold = (model?: string, advanced = false) => async (estimatedInput: number, output: number) => {
           // The balance is monetary: one CORTEX credit = $0.20 / 1M.
