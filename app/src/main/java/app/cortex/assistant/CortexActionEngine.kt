@@ -290,7 +290,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     "read_device", "volume", "brightness", "rotate", "ringer", "copy_text", "recents", "play_store",
                     "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info",
                     "timer", "alarm", "search", "maps", "utility", "dial", "sms" -> true
-                    "torch", "app" -> !visualAvailable
+                    // Opening an installed app is an Android operation; don't depend on LLM quota.
+                    "app" -> true
+                    "torch" -> !visualAvailable
                     else -> false
                 }
             }
@@ -824,12 +826,17 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             val text = when (error) {
                 "daily_limit" -> "Суточный лимит CORTEX исчерпан. Запросы обновятся в 03:00 по Москве."
                 "sign_in" -> "Для сложной задачи нужен вход в профиль CORTEX."
-                "provider_quota_daily", "provider_quota", "provider_limit", "rate_limit" -> "Сейчас исчерпана квота ИИ."
+                "provider_quota_daily", "provider_quota", "provider_limit", "provider_limit_unknown", "rate_limit" ->
+                    "Сервис ИИ ограничил количество запросов. Попробуйте позже."
+                "provider_budget", "provider_balance" -> "Сейчас недоступен бюджет ИИ-провайдера."
+                "provider_access", "model", "unconfigured", "storage_config" ->
+                    "Серверу CORTEX не удалось подключить модель ИИ."
+                "server", "server_busy" -> "Сервер ИИ временно перегружен."
                 "offline" -> "Связь с ИИ потеряна."
                 "timeout" -> "Следующий шаг не удалось получить вовремя."
                 "invalid_plan" -> "Уточните название пункта или приложения, с которого нужно начать."
                 "update", "maintenance" -> "Сервер CORTEX временно недоступен."
-                else -> "CORTEX не получил проверенный шаг для текущего экрана."
+                else -> "Не удалось получить следующий шаг от ИИ."
             }
             return null to "$text Можно продолжить с текущего экрана."
         }
