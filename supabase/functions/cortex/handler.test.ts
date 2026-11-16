@@ -309,6 +309,17 @@ test("uses a stable guest ID and rejects the next AI call at the daily limit", a
   assert.equal(models.length, attempts);
 });
 
+
+test("the chat stream reports the exact provider token counts", async () => {
+  const { call } = fixture();
+  const response = await call("chat", { messages: [{ role: "user", content: "Проверь ответ" }], style: "brief" });
+  assert.equal(response.status, 200);
+  const value = await response.text();
+  const usage = value.split("\n").find(line => line.startsWith("data: ") && line.includes('"status":"usage"'));
+  assert.ok(usage);
+  assert.deepEqual(JSON.parse(usage.slice(6)).usage, { input: 82, output: 18, total: 100 });
+});
+
 test("paid assistant prefers Haiku 5.5 while free guests stay on free models", async () => {
   const { call, models, requests } = fixture(false, undefined, 15000, 50, true, true);
   const paidHeaders = { Authorization: "Bearer " + "T".repeat(43) };

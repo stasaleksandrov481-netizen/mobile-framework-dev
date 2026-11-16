@@ -323,6 +323,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                     onEvent(JSONObject().put("delta", part))
                 }
             }
+            if (event.optString("status") == "usage") event.optJSONObject("usage")?.let { result.put("usage", it) }
             for (key in arrayOf("tool", "tools", "tool_error")) if (event.has(key)) result.put(key, event.get(key))
         }
         // A network disconnect cannot authorize execution of a partial plan.

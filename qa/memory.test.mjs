@@ -66,3 +66,15 @@ test("sensitive local notification answers never persist or enter model context"
   const restarted = fixture.start();
   assert.equal(restarted.state.chats[0].messages.length, 2);
 });
+
+test("small talk stays local and the default prompt has no boilerplate from the app", () => {
+  const runtime = model().start();
+  assert.equal(runtime.smallTalk("Кортекс, чё как?"), "Всё хорошо. А у тебя как?");
+  assert.equal(runtime.smallTalk("How are you?"), "Doing well. How about you?");
+  assert.equal(runtime.smallTalk("Как дела в проекте и что доделать?"), null);
+  const chat = runtime.createChat();
+  chat.messages.push({ role: "user", text: "Что значит алгоритм?" });
+  assert.deepEqual(JSON.parse(JSON.stringify(runtime.turns(chat, ""))), [
+    { role: "user", content: "Что значит алгоритм?" }
+  ]);
+});

@@ -38,7 +38,8 @@ internal class CortexActionSequence(
             val confirmed = status in setOf("done", "already_background") || status == "opened" && result.optBoolean("verified")
             allConfirmed = allConfirmed && confirmed
             val handoff = status == "panel" || kind == "lock_screen" && status in setOf("done", "requested") ||
-                kind in setOf("timer", "alarm", "dial", "sms") && status == "opened"
+                (kind in setOf("timer", "alarm", "dial", "sms", "file_create", "contact_insert") ||
+                    kind == "settings" && command.optBoolean("switch")) && status == "opened"
             if (handoff || status == "cancelled") {
                 complete(commands.size - index - 1, true)
             } else step(index + 1)

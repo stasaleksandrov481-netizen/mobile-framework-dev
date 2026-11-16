@@ -10,6 +10,7 @@ function markdown() {
   const context = vm.createContext({ URL, window: {}, CortexIcons: name => `<svg data-cortex-icon="${name}"></svg>` });
   vm.runInContext(content("vendor/markdown-it-15.0.3.js"), context);
   context.window.markdownit = context.markdownit;
+  vm.runInContext(content("icons.js").replace("const CortexIcons", "const OriginalCortexIcons"), context);
   vm.runInContext(content("markdown.js"), context);
   return text => vm.runInContext(`CortexMarkdown.render(${JSON.stringify(text)})`, context);
 }
@@ -43,7 +44,18 @@ test("assistant messages render without a bubble background or frame", () => {
   assert.match(css, /Chat: the assistant writes on the canvas/);
   assert.match(css, /\.message\.assistant:not\(\.pending\) \.message-body\s*\{[^}]*border:\s*0;/s);
   assert.match(css, /\.markdown \.cortex-callout\s*\{[^}]*width:\s*100%/s);
-  const model = content("model.js");
-  assert.match(model, /Не используй эмодзи/);
-  assert.match(model, /:icon\[имя\]:/);
+  const provider = readFileSync(new URL("../supabase/functions/cortex/provider.ts", import.meta.url), "utf8");
+  assert.match(provider, /Без Unicode-эмодзи/);
+  assert.match(provider, /:face\[joy\]:/);
+});
+
+test("replies turn emoji graphemes and expressions into trusted Cortex faces", () => {
+  const render = markdown();
+  const markup = render("Готово ✅, думаю :face[think]:. Ура 👍🏻. В коде `😀`. Неизвестно :face[nope]:.");
+  assert.match(markup, /data-emotion="done"/);
+  assert.match(markup, /data-emotion="think"/);
+  assert.match(markup, /data-emotion="joy"/);
+  assert.doesNotMatch(markup, /✅|👍|🏻/u);
+  assert.match(markup, /<code>😀<\/code>/u);
+  assert.match(markup, /:face\[nope\]:/);
 });

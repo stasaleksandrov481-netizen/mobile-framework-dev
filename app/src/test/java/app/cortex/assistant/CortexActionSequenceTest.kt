@@ -96,7 +96,7 @@ class CortexActionSequenceTest {
     }
 
     @Test fun clockAndMessageIntentsWaitForUserConfirmation() {
-        for (kind in listOf("timer", "alarm", "dial", "sms")) {
+        for (kind in listOf("timer", "alarm", "dial", "sms", "file_create", "contact_insert")) {
             var secondStarted = false
             var final: CortexActionSequence.Result? = null
             CortexActionSequence(listOf(step(kind), step("torch")), { true }, { _, index, _, done ->
@@ -119,6 +119,29 @@ class CortexActionSequenceTest {
         assertNotNull(callback)
         active = false
         callback?.invoke(outcome("done"))
+    }
+
+
+    @Test fun variedCommandsKeepStreamsUnitsAndQuotedValuesInOrder() {
+        val plan = requireNotNull(CortexLocalCommands.parse(
+            "Выставь громкость будильника на половину, сделай тайм-аут экрана через 2 мин, скопируй «План, и создай резерв» и создай файл «Файл, версия 2.txt»",
+            appLookup,
+        ))
+        assertEquals(listOf("volume", "screen_timeout", "copy_text", "file_create"), plan.map { it.getString("kind") })
+        assertEquals("alarm", plan[0].getString("stream"))
+        assertEquals(50, plan[0].getInt("level"))
+        assertEquals(120, plan[1].getInt("seconds"))
+        assertEquals("План, и создай резерв", plan[2].getString("text"))
+        assertEquals("Файл, версия 2.txt", plan[3].getString("title"))
+    }
+
+    @Test fun repeatedVisualPlansStopEvenWhenTheyAlternate() {
+        val tracker = CortexPlanTracker()
+        assertTrue(tracker.accept("A"))
+        assertTrue(tracker.accept("B"))
+        assertTrue(tracker.accept("A"))
+        assertTrue(tracker.accept("B"))
+        assertFalse(tracker.accept("A"))
     }
 
     private fun step(kind: String) = JSONObject().put("kind", kind)

@@ -43,8 +43,12 @@ internal class CortexWebUpdates(context: Context) {
 
     fun snapshot(): Long {
         val active = preferences.getLong("active", 0L)
-        return if (active > 0 && File(storage, "v$active").isDirectory) active else 0L
+        return active.takeIf(::compatible) ?: 0L
     }
+
+    private fun compatible(version: Long): Boolean = version > 0 &&
+        preferences.getInt("native-v$version", 0) in WEB_CONTRACT_NATIVE..BuildConfig.VERSION_CODE &&
+        File(storage, "v$version").isDirectory
 
     fun handler(version: Long): WebViewAssetLoader.PathHandler = WebViewAssetLoader.PathHandler { path ->
         val safe = safePath(path)
@@ -59,7 +63,7 @@ internal class CortexWebUpdates(context: Context) {
 
     @Synchronized fun rollback(version: Long): Boolean {
         if (version <= 0 || preferences.getLong("active", 0L) != version) return false
-        val old = preferences.getLong("previous", 0L).takeIf { it > 0 && File(storage, "v$it").isDirectory } ?: 0L
+        val old = preferences.getLong("previous", 0L).takeIf(::compatible) ?: 0L
         return preferences.edit().putLong("active", old).putLong("blocked", version)
             .putLong("previous", 0L).commit()
     }
@@ -96,7 +100,9 @@ internal class CortexWebUpdates(context: Context) {
         val version = manifest.getLong("version")
         require(version > 0 && version < 10_000_000_000_000L)
         if (version <= snapshot() || version == preferences.getLong("blocked", 0L)) return
-        require(manifest.optInt("min_native") in 1..BuildConfig.VERSION_CODE)
+        val minNative = manifest.optInt("min_native")
+        if (minNative < WEB_CONTRACT_NATIVE) return
+        require(minNative <= BuildConfig.VERSION_CODE)
         val name = "web-v$version.zip"
         require(manifest.getString("archive") == name)
         val size = manifest.getLong("size")
@@ -115,9 +121,14 @@ internal class CortexWebUpdates(context: Context) {
                 // A rollback may have happened while the download was in flight.
                 require(version > snapshot() && version != preferences.getLong("blocked", 0L))
                 val destination = File(storage, "v$version")
+                // A cached package from the old contract can share this web version number.
+                if (destination.exists() && !compatible(version)) {
+                    require(destination.deleteRecursively())
+                }
                 require(!destination.exists() && stage.renameTo(destination))
                 val previous = snapshot()
-                if (!preferences.edit().putLong("previous", previous).putLong("active", version).commit()) {
+                if (!preferences.edit().putLong("previous", previous).putLong("active", version)
+                        .putInt("native-v$version", minNative).commit()) {
                     throw IllegalStateException("Could not activate update")
                 }
             }
@@ -205,6 +216,8 @@ internal class CortexWebUpdates(context: Context) {
         mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(ByteArray(0)))
 
     private companion object {
+        // The settings shell uses the visual consent and local token fields introduced in 1.0.14.
+        const val WEB_CONTRACT_NATIVE = 114
         val BINARY_TYPES = setOf("svg", "png", "webp", "jpg", "jpeg", "woff", "woff2", "ttf")
         val REQUIRED = setOf("index.html", "app.js", "model.js", "gateway.js", "setup.js", "screens.js",
             "icons.js", "style.css", "planner.js", "planner.css", "cortex-control-client.js",

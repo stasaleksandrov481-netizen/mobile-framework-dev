@@ -17,7 +17,7 @@
   const device = window.CortexDevice;
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
-  const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
+  const drafts = new Map(), errors = new Map(), actionReplies = new Map();
   const filters = { search: "" };
   const connection = { email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
     status: Api.available ? "loading" : "preview" };
@@ -26,7 +26,7 @@
   let deviceSnapshot = null;
   let androidCompatibility = null;
   const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
-  let route = "home", chatId = "", rule = "goal";
+  let route = "home", chatId = "";
   let accountMode = "password", accountEmail = "";
   let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
   let connectionLoad, subscriptionLoad;
@@ -78,7 +78,8 @@
   }
 
   function syncIslandOptions() {
-    return sendDevice("island-options", { profile: S.preferences.model, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
+    return sendDevice("island-options", { assistant: M.assistantOptions(), phoneActions: S.preferences.phoneActions,
+    visualBeta: S.preferences.visualBeta, visualLaunch: S.preferences.visualLaunch,
       reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
       addressName: S.preferences.addressName, appearance: Planner.style() });
   }
@@ -226,7 +227,7 @@
       native: Boolean(device), chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
-      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail,
+      accountMode, email: accountEmail,
       resendWait: Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000))
     });
     updateCodeCells();
@@ -493,6 +494,16 @@
       ${button("Отмена", "", "close")}${button("Подтвердить", "check", "confirm", "", "danger")}</div></div>`, { confirm: run });
   }
 
+  function visualBetaNotice() {
+    return [
+      '<div class="visual-beta-body"><div class="visual-beta-mark">' + icon("alert", 30) + "</div>",
+      "<p>В бета-режиме CORTEX может читать элементы экрана, нажимать кнопки и прокручивать страницы, если системной команды недостаточно.</p>",
+      "<p>Режим экспериментальный. Возможны ошибки: проверяйте важные шаги. Android отдельно запросит доступ к специальным возможностям.</p>",
+      '<div class="actions">' + button("Оставить выключенным", "", "close") +
+        button("Включить БЕТУ", "check", "confirm", "", "primary") + "</div></div>"
+    ].join("");
+  }
+
   function showSplash() {
     if (!splash.hidden && splash.classList.contains("playing") && !splash.classList.contains("leaving")) return;
     cancelAnimationFrame(splashFrame);
@@ -546,10 +557,10 @@
       subscriptionEpoch++;
       drafts.clear();
       errors.clear();
-      ruleDrafts.clear();
       screenContext = null;
       refreshScreen();
       Planner.accountChanged();
+      syncIslandOptions();
       if (route === "chat") navigate("profile", { replace: true });
       dispatchEvent(new Event("cortex-account-changed"));
     }
@@ -826,11 +837,12 @@
           if (activeChat(job) && appVisible()) render({ bottom: true });
         } else if (value.phase === "result") {
           done({ text: value.text, local: true, external: value.external === true || !appVisible(),
-            resumable: value.resumable === true, ephemeral: value.ephemeral === true });
+            resumable: value.resumable === true, ephemeral: value.ephemeral === true,
+            usage: value.localOnly === true ? { input: 0, output: 0, total: 0 } : null });
         } else done(null);
       });
       job.controller.signal.addEventListener("abort", cancel, { once: true });
-      if (!sendDevice("action-start", { id, text, profile: S.preferences.model, force: job.force,
+      if (!sendDevice("action-start", { id, text, profile: M.automaticProfile(text), force: job.force,
         allowPhone: S.preferences.phoneActions, source: job.chatId })) done(null);
     });
   }
@@ -842,22 +854,18 @@
     const request = chat.messages.at(-1)?.text || "";
     const native = await nativeAction(job, request);
     if (native || pending !== job) return native || {};
-    const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
-    const deviceContext = {
-      ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
-      version: U.version, version_code: androidVersionCode || undefined,
-      screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
-      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
-      ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
-        deviceSnapshot ? { state: deviceSnapshot } : {})
-    };
-    const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
-      "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
-      "Опирайся на доступы и реальные результаты Android. " +
-      "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
+    const deviceQuery = /телефон|android|андроид|устройств|запуск|громкост|яркост|экран|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request);
+    const clockQuery = /сегодня|завтра|вчера|какое число|который час|today|tomorrow|yesterday/iu.test(request);
+    const policy = [
+      job.screen ? "Приложенный текст экрана: " + JSON.stringify(job.screen) : "",
+      clockQuery ? "Дата и время: " + clock.format(new Date()) : "",
+      deviceQuery && device ? "Android: " + JSON.stringify({ android: phoneInfo.android_version, model: phoneInfo.model,
+        screen: S.preferences.phoneActions && S.preferences.visualBeta && permissions.screenAutomation === true,
+        ...(deviceSnapshot && /состояние|интернет|сеть|заряд|батаре|памят|wi-?fi/iu.test(request) ? { state: deviceSnapshot } : {}) }) : ""
+    ].filter(Boolean).join("\n");
     const result = await Api.request("chat", {
-      payload: { messages: M.turns(chat, policy), style: M.profile().style,
-        ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }) },
+      payload: { messages: M.turns(chat, policy), style: M.replyStyle(request),
+        ...((connection.profiles || !connection.checked) && { profile: M.automaticProfile(request) }) },
       notify: S.preferences.notifyReplies
     }, {
       signal: job.controller.signal,
@@ -876,7 +884,7 @@
       }
     });
     job.action = "";
-    return { text: typeof result.text === "string" ? result.text : "" };
+    return { text: typeof result.text === "string" ? result.text : "", usage: M.usage(result.usage) };
   }
 
   async function answer(chat, text, { retry = false, from, voiceTurn, explain = false, includeScreen = true, force = false } = {}) {
@@ -899,20 +907,25 @@
     historyItems();
     try {
       const localReply = retry ? null : islandCommand(text) ?? M.memoryCommand(text);
-      const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
+      const greeting = retry || localReply !== null ? null : M.smallTalk(text);
+      const immediateReply = localReply ?? greeting;
+      const outcome = immediateReply === null ? await respond(chat, job) : {
+        text: immediateReply, local: localReply !== null, usage: { input: 0, output: 0, total: 0 }
+      };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
       chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }),
-        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
+        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }),
+        ...(outcome.usage && { usage: outcome.usage }) });
       job.completed = true;
       M.touch(chat);
-      const memorized = localReply === null && !outcome.local && M.learnFromUser(text);
-      if (chat.saved || localReply !== null || memorized) saved();
+      const memorized = immediateReply === null && !outcome.local && M.learnFromUser(text);
+      if (chat.saved || immediateReply !== null || memorized) saved();
       if (voiceTurn && voice === voiceTurn) {
         if (outcome.external) closeVoice();
-        else voiceReplyReady(voiceTurn, outcome.text);
+        else voiceReplyReady(voiceTurn, outcome.text, outcome.usage?.total === 0);
       }
     } catch (error) {
       if (pending !== job) return;
@@ -1208,10 +1221,10 @@
     } else if (job.phase === "waiting" || job.phase === "error") listen(job);
   }
 
-  function voiceReplyReady(job, answer) {
+  function voiceReplyReady(job, answer, offlineOnly = false) {
     clearTimeout(job.timer);
     job.speechId = M.id("speech");
-    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
+    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550), offlineOnly })) {
       voiceStatus("speaking", "Озвучиваю ответ…");
       job.timer = setTimeout(() => {
         if (voice !== job || job.phase !== "speaking") return;
@@ -1386,7 +1399,7 @@
     S.preferences[key] = value;
     saved();
     appearance();
-    if (["model", "phoneActions", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
+    if (["phoneActions", "visualBeta", "visualLaunch", "reduceMotion", "haptics", "language"].includes(key)) syncIslandOptions();
     render();
   }
 
@@ -1455,8 +1468,8 @@
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
       sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
-      drafts.clear(); errors.clear(); ruleDrafts.clear();
-      chatId = ""; rule = "goal";
+      drafts.clear(); errors.clear();
+      chatId = "";
       syncIslandOptions(); appearance(); render(); flash("Локальные данные сброшены");
     }),
     stop: () => stopAnswer(),
@@ -1481,6 +1494,7 @@
     "resume-visual"() { const chat = current(); if (chat) return answer(chat, "Продолжи", { force: true }); },
     "visual-privacy"() { sendDevice("visual-privacy", { enabled: !connection.visualPrivacy }); },
     "assistant-permission": () => sendDevice("assistant-permission"),
+    "write-settings-permission": () => sendDevice("write-settings-permission"),
     "verification-permission": () => window.CortexSetup?.openPermission("screenAutomation"),
     "microphone-permission": () => {
       if (!window.CortexIslandControl) {
@@ -1507,7 +1521,6 @@
       } else if (!sendDevice("overlay-config", { mode, hideLandscape: S.preferences.hideLandscape, resume: true }))
         flash("Не удалось применить режим. Проверьте разрешения Android.");
     },
-    "model-profile"(value) { if (Object.hasOwn(M.models, value)) preference("model", value); },
     "account-options": accountOptions,
     "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),
     "resend-code": resendCode,
@@ -1539,19 +1552,15 @@
     }),
     "personality-edit"() {
       const person = M.profile();
-      editor("Манера общения", field("tone", "Тон", person.tone) +
-        field("description", "Роль", person.description, { max: 380, rows: 3 }), values => {
-        Object.assign(S.edits.cortex, values); saved("Манера общения сохранена"); closeSheet(); render();
+      editor("Ответы CORTEX", field("tone", "Манера общения", person.tone, { optional: true }) +
+        field("description", "Характер", person.description, { max: 380, rows: 3, optional: true }), values => {
+        Object.assign(S.edits.cortex, values); saved("Настройки ответов сохранены"); syncIslandOptions(); closeSheet(); render();
       });
     },
     "reply-style"(value) {
       if (!Object.hasOwn(M.styles, value)) return;
       S.edits.cortex.style = value;
-      saved(); render();
-    },
-    rule(value) {
-      if (!M.instructionFields.some(item => item.id === value)) return;
-      rule = value; render();
+      saved(); syncIslandOptions(); render();
     },
     quality(value) { if (Object.hasOwn(M.motion, value)) preference("quality", value); },
     language(value) { if (Object.hasOwn(M.languages, value)) preference("language", value); },
@@ -1562,7 +1571,15 @@
       }
       if (key === "memory") { M.memory().enabled = !M.memory().enabled; saved(); render(); return; }
       if (!Object.hasOwn(M.defaults, key) || typeof M.defaults[key] !== "boolean") return;
+      if (key === "visualBeta" && !S.preferences.visualBeta && !S.preferences.visualBetaNotice) {
+        showSheet("Визуальное управление · БЕТА", visualBetaNotice(), { confirm() {
+          S.preferences.visualBetaNotice = true;
+          preference("visualBeta", true);
+        } });
+        return;
+      }
       preference(key, !S.preferences[key]);
+      if (key === "visualBeta" && !S.preferences.visualBeta) sendDevice("action-stop");
       if (key === "notifyReplies") {
         if (S.preferences[key]) sendDevice("notification-permission");
         sendDevice("support-notify-config", { enabled: S.preferences[key] });
@@ -1607,10 +1624,6 @@
       [key, ["password", "confirmation"].includes(key) ? String(value) : String(value).trim()]));
     if (form.id === "account-form") { await submitAccount(form, data); return; }
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
-    if (form.id === "rule-form") {
-      const rules = S.instructions.cortex ||= {};
-      rules[rule] = data.rule; ruleDrafts.delete(rule); saved("Инструкция сохранена");
-    }
     if (form.id === "editor" && activeSheet?.submit) {
       const error = form.querySelector(".form-error");
       const submit = form.querySelector('[type="submit"]');
@@ -1640,7 +1653,6 @@
       clearTimeout(historySearchTimer);
       historySearchTimer = setTimeout(historyItems, 160);
     }
-    if (input.name === "rule") ruleDrafts.set(rule, input.value);
   });
   function visibleViewportHeight() {
     return Math.round(Math.min(innerHeight, window.visualViewport?.height || innerHeight));

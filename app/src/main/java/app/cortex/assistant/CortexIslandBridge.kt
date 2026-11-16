@@ -67,16 +67,22 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                         } else status("overlay-mode", false, "Разрешите показ поверх приложений")
                     }
                     "island-options" -> {
-                        val profile = objectValue.optString("profile").takeIf { it in setOf("auto", "fast", "deep") } ?: "auto"
+                        val assistant = objectValue.optJSONObject("assistant")
+                        val replyStyle = assistant?.optString("style")?.takeIf { it in setOf("brief", "balanced", "deep") } ?: "balanced"
+                        val replyLanguage = assistant?.optString("language")?.takeIf { it in setOf("ru-RU", "en-US") } ?: "auto"
                         val energy = objectValue.optString("energy").takeIf { it in setOf("economy", "balanced", "maximum") } ?: "balanced"
                         val nativeStyle = prefs.getString("island-style", "{}").orEmpty()
                         val voiceStylePending = prefs.getBoolean("island-command-sync", false)
-                        prefs.edit().putString("profile", profile)
+                        prefs.edit().putString("replyStyle", replyStyle)
+                            .putString("replyLanguage", replyLanguage)
+                            .putString("replyTone", assistant?.optString("tone").orEmpty().trim().take(90))
+                            .putString("replyCharacter", assistant?.optString("character").orEmpty().trim().take(380))
                             .putString("energy", energy)
                             .putString("addressName", objectValue.optString("addressName").take(60))
                             .putString("island-style", if (voiceStylePending) nativeStyle else objectValue.optJSONObject("appearance")?.toString() ?: "{}")
                             .putBoolean("phoneActions", objectValue.optBoolean("phoneActions", true))
-                            .putBoolean("visualLaunch", objectValue.optBoolean("visualLaunch"))
+                            .putBoolean("visualBeta", objectValue.optBoolean("visualBeta"))
+                            .putBoolean("visualLaunch", objectValue.optBoolean("visualBeta") && objectValue.optBoolean("visualLaunch"))
                             .putBoolean("reduceMotion", objectValue.optBoolean("reduceMotion"))
                             .putBoolean("haptics", objectValue.optBoolean("haptics", true)).apply()
                         CortexRuntime.wakeHook?.invoke()

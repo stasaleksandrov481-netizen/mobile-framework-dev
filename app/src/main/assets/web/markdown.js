@@ -14,6 +14,19 @@ const CortexMarkdown = (() => {
   }
 
   parser.validateLink = value => Boolean(webUrl(value));
+  const emoji = /(?:[#*0-9]\uFE0F?\u20E3|\p{Regional_Indicator}{1,2}|(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\uFE0F|[⚠❤♥✔☑☹☺❗])(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier}|[\u{E0020}-\u{E007F}])*(?:\u200D\p{Extended_Pictographic}(?:[\uFE0E\uFE0F]|\p{Emoji_Modifier})*)*)/gu;
+  const expression = /:face\[([a-z]{3,8})\]:/g;
+  parser.renderer.rules.text = (tokens, index) => {
+    const raw = tokens[index].content;
+    let output = "", end = 0;
+    for (const match of raw.matchAll(new RegExp(expression.source + "|" + emoji.source, "gu"))) {
+      const kind = match[1];
+      output += escape(raw.slice(end, match.index));
+      output += kind && !CortexEmotion.accepts(kind) ? escape(match[0]) : CortexEmotion.render(kind || CortexEmotion.fromEmoji(match[0]));
+      end = match.index + match[0].length;
+    }
+    return output + escape(raw.slice(end));
+  };
   parser.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
     tokens[index].attrSet("target", "_blank");
     tokens[index].attrSet("rel", "noopener noreferrer");

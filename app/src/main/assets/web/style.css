@@ -2392,3 +2392,22 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
 .profile-id-details { margin: 12px 0 20px; padding: 8px 0; border-top: 1px solid #ffffff20; border-bottom: 1px solid #ffffff20; }
 .profile-id-details summary { cursor: pointer; padding: 8px 2px; color: #d6d6d6; font-size: .9rem; }
 .profile-id-details p { padding: 0 2px; font-size: .86rem; }
+
+.cortex-emotion { display: inline-flex; width: 1.17em; height: 1.17em; vertical-align: -.22em; flex: none; }
+.cortex-emotion svg { display: block; width: 100%; height: 100%; }
+.thinking-core .cortex-emotion, .action-pulse .cortex-emotion { font-size: 20px; }
+.action-pulse .cortex-emotion[data-emotion="work"] { animation: cortex-emote-work 1.3s ease-in-out infinite; }
+.thinking-core .cortex-emotion[data-emotion="think"] { animation: cortex-emote-think 2.4s ease-in-out infinite; }
+.cortex-emotion[data-emotion="joy"] { animation: cortex-emote-joy 480ms ease-out both; }
+@keyframes cortex-emote-work { 50% { opacity: .68; transform: scale(.91); } }
+@keyframes cortex-emote-think { 50% { transform: rotate(-8deg); } }
+@keyframes cortex-emote-joy { 45% { transform: translateY(-2px) scale(1.11); } }
+.visual-beta-row .tile-copy strong { display: flex; align-items: center; gap: .48rem; flex-wrap: wrap; }
+.visual-beta-row .tile-copy strong svg, .visual-beta-mark { color: #e9b746; }
+.visual-beta-badge { color: #b07c17; font-size: .66rem; letter-spacing: .07em; }
+.visual-beta-body { min-height: 36dvh; display: grid; align-content: space-between; gap: 1rem; }
+.visual-beta-mark { width: fit-content; padding: .65rem; border-radius: 15px; background: #e9b74620; line-height: 0; }
+.visual-beta-body p { margin: 0; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .cortex-emotion { animation: none !important; } }
+:root.reduce-motion .cortex-emotion { animation: none !important; }
+.message-usage { color: var(--muted); font-size: .67rem; align-self: center; font-variant-numeric: tabular-nums; }
