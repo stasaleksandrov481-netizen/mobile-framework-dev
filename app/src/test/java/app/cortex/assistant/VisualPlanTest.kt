@@ -88,5 +88,11 @@ class VisualPlanTest {
             "Send", "action", "Button"))
         assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Напиши сообщение", VisualStep(VisualAction.TAP),
             "Поиск", "toolbar_search", "ImageButton"))
+        assertEquals(VisualRisk.CONFIRM, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
+            "", "com.example:id/btnSend", "ImageButton"))
+        assertEquals(VisualRisk.CONFIRM, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
+            "", "com.example:id/confirmPayment", "Button"))
+        assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
+            "", "com.example:id/btnOpen", "Button"))
     }
 }
