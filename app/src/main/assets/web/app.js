@@ -23,7 +23,8 @@
     status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   let phoneInfo = {};
-  const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  let deviceSnapshot = null;
+  const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
   let accountMode = "password", accountEmail = "";
   let pending, login, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
@@ -864,7 +865,9 @@
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
-      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
+      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
+      ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
+        deviceSnapshot ? { state: deviceSnapshot } : {})
     };
     const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
       "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
@@ -1316,6 +1319,9 @@
         entries.map(entry => '<li><time>' + esc(new Date(entry.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })) +
         '</time><span>' + esc(entry.message) + '</span></li>').join("") + '</ol>' : '<p class="muted">Действий пока нет.</p>');
     }
+    if (message.type === "notification-journal-cleared") {
+      if (message.ok) flash("Журнал уведомлений очищен.");
+    }
     if (message.type === "visual-privacy") {
       connection.visualPrivacy = message.enabled === true;
       if (route === "privacy") render();
@@ -1328,6 +1334,9 @@
       if (device && typeof message.phoneModel === "string") phoneInfo = {
         manufacturer: message.manufacturer, model: message.phoneModel, android_version: message.androidRelease
       };
+      if (message.deviceSnapshot && typeof message.deviceSnapshot === "object" && !Array.isArray(message.deviceSnapshot)) {
+        deviceSnapshot = message.deviceSnapshot;
+      }
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1448,8 +1457,9 @@
     },
     "delete-chat": id => confirm("Удалить чат?", "Переписка будет удалена с устройства.", () => deleteChats(chat => chat.id === id, "Чат удалён")),
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
-    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память и настройки будут удалены с устройства.", () => {
+    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
+      sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
       drafts.clear(); errors.clear(); ruleDrafts.clear();
       chatId = ""; rule = "goal";
@@ -1485,6 +1495,10 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "notification-listener-permission": () => sendDevice("notification-listener-permission"),
+    "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
+      if (!sendDevice("notification-journal-clear")) flash("Очистка доступна только в приложении Android.");
+    }),
     "overlay-permission": () => {
       if (!window.CortexIslandControl) flash("Островок доступен только в Android-приложении CORTEX.");
       else if (!sendDevice("overlay-permission")) flash("Не удалось открыть разрешение Android.");

@@ -87,6 +87,8 @@ internal class CortexPrivateMemory(private val context: Context) {
         if (personal.matches(normalized)) addFact(normalized)
     }
 
+    @Synchronized fun wipeDevice() { prefs.edit().clear().apply() }
+
     @Synchronized fun listFacts(): List<String> {
         val array = read().optJSONArray("facts") ?: return emptyList()
         return (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }.take(12)

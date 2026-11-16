@@ -45,8 +45,8 @@ jobs:
       - name: Verify gateway and billing
         run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/provider.test.ts supabase/functions/cortex/redis.test.ts cortex-control/tests/billing.test.js
 
-      - name: Verify island onboarding and private memory
-        run: node --test qa/island-onboarding.test.mjs qa/memory.test.mjs
+      - name: Verify island onboarding, privacy and phone awareness
+        run: node --test qa/island-onboarding.test.mjs qa/memory.test.mjs qa/notification-awareness.test.mjs
 
       - name: Verify signed WebView update packaging
         run: python3 -m unittest discover -s tools -p 'test_package_web_update.py' -v
