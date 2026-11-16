@@ -51,7 +51,8 @@ internal object IslandMarkdown {
             if (fence == null && cells != null && cells.all { tableSeparator.matches(it) }) continue
             if (result.isNotEmpty()) result.append('\n')
             val start = result.length
-            if (fence == "code") {
+            val codeBlock = fence == "code"
+            if (codeBlock) {
                 result.append(raw.ifEmpty { " " })
                 decorateCode(result, start, result.length, block = true)
                 continue
