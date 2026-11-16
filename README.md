@@ -1,4 +1,4 @@
-> **ПЕРЕД РАБОТОЙ С РЕПОЗИТОРИЕМ:** прочитайте [AGENTS.md](AGENTS.md), [состояние релизов](docs/RELEASE_INVENTORY.md) и [журнал изменений ИИ-агентов](docs/AGENT_HANDOFF.md).
+> **ПЕРЕД РАБОТОЙ С РЕПОЗИТОРИЕМ:** прочитайте [AGENTS.md](AGENTS.md), [состояние релизов](docs/RELEASE_INVENTORY.md) и [журнал изменений ИИ-агентов](docs/AGENT_HANDOFF.md) и [карту веток](docs/BRANCH_REGISTRY.md).
 >
 > Текст README ниже частично описывает историческую Android 1.0.10; актуальный Gradle в `main` уже 1.0.14. **Supabase production Edge Function новее GitHub-копии, а утверждённая пользователем Android UI-сборка не определена.** Не публикуйте APK или Edge Function на основании одного README.
 
