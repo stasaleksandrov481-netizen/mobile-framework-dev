@@ -40,6 +40,7 @@ export default function Home() {
           <a href="/pricing">Тарифы</a>
           <a href="/questions">Вопросы</a>
           <a href="/support">Поддержка</a>
+          <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>
           <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer"><UiIcon name="telegram" size={15} />Telegram</a>
         </div>
       </footer>

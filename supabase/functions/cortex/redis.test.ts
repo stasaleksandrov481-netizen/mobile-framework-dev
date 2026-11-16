@@ -41,6 +41,7 @@ test("Redis outage opens a circuit breaker; local validated catalog stays availa
   });
   assert.deepEqual(await cache.getFreeModels(model => model.endsWith(":free")), ["example/working:free"]);
   broken = true;
+  await cache.putFreeModels(["example/working:free"]);
   assert.deepEqual(await cache.getFreeModels(model => model.endsWith(":free")), ["example/working:free"]);
   assert.equal(calls, 2);
   // While the circuit is open, even parallel callers do not hit the depleted cache.
@@ -60,5 +61,22 @@ test("Redis hung network is bounded and subsequent attempts skip the circuit", a
   assert.equal(await cache.getFreeModels(() => true), null);
   assert.ok(Date.now() - started < 2000, "A failed cache must not hang indefinitely");
   assert.equal(await cache.getFreeModels(() => true), null);
+  assert.equal(calls, 1);
+});
+
+test("warm cache avoids Redis reads and parallel cold reads are coalesced", async () => {
+  let calls = 0;
+  const cache = createRedisCache({
+    UPSTASH_REDIS_REST_URL: "https://cortex-demo.upstash.io",
+    UPSTASH_REDIS_REST_TOKEN: "E".repeat(24),
+  }, async () => {
+    calls++;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return Response.json({ result: '["example/working:free"]' });
+  });
+  const models = await Promise.all(Array.from({ length: 40 }, () => cache.getFreeModels(m => m.endsWith(":free"))));
+  assert.equal(calls, 1);
+  assert.ok(models.every(value => value?.[0] === "example/working:free"));
+  assert.deepEqual(await cache.getFreeModels(m => m.endsWith(":free")), ["example/working:free"]);
   assert.equal(calls, 1);
 });
