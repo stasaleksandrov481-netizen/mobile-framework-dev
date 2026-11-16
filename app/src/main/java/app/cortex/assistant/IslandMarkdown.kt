@@ -148,7 +148,7 @@ internal object IslandMarkdown {
             "quote" -> "│  " + field(0) + (if (field(1).isNotBlank()) " — " + field(1) else "")
             "flow" -> data.take(5).joinToString(" → ")
             else -> data.ifEmpty { fields }.take(5).joinToString(" · ").take(320)
-        }.take(420)
+        }?.take(420)
     }
 
     private fun appendInline(out: SpannableStringBuilder, input: String, accent: Int, depth: Int = 0) {
