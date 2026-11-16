@@ -68,10 +68,14 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                     }
                     "island-options" -> {
                         val profile = objectValue.optString("profile").takeIf { it in setOf("auto", "fast", "deep") } ?: "auto"
+                        val modelId = objectValue.optString("modelId").takeIf {
+                            it.length <= 90 && it.matches(Regex("^[a-z0-9._-]+/[a-z0-9._-]+(?::free)?$"))
+                        } ?: "auto"
                         val energy = objectValue.optString("energy").takeIf { it in setOf("economy", "balanced", "maximum") } ?: "balanced"
                         val nativeStyle = prefs.getString("island-style", "{}").orEmpty()
                         val voiceStylePending = prefs.getBoolean("island-command-sync", false)
                         prefs.edit().putString("profile", profile)
+                            .putString("aiModel", modelId)
                             .putString("energy", energy)
                             .putString("addressName", objectValue.optString("addressName").take(60))
                             .putString("island-style", if (voiceStylePending) nativeStyle else objectValue.optJSONObject("appearance")?.toString() ?: "{}")

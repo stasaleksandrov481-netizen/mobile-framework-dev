@@ -68,10 +68,38 @@ export async function body(request: Request, limit = 770_000): Promise<Record<st
 }
 
 export type ModelProfile = "auto" | "fast" | "deep";
-export function chatInput(input: Record<string, unknown>): { messages: Turn[]; limit: number; device: boolean; repair: boolean; plan: boolean; visual: boolean; webSearch: boolean; profile?: ModelProfile } {
-  const { messages, style = "balanced", device_tools = false, repair_tools = false, action_plan = false, visual_plan = false, web_search = false, profile } = input;
-  if (Object.keys(input).some(key => !["messages", "style", "device_tools", "repair_tools", "action_plan", "visual_plan", "web_search", "profile"].includes(key)) ||
+// Upper provider price bounds in USD per million native input/output tokens.
+// Values are verified against OpenRouter's model catalog. OpenRouter's actual
+// generation cost, including discounts and cache reads, determines settlement.
+export const MODEL_PRICE_CEILINGS: Record<string, { prompt: number; completion: number }> = {
+  "anthropic/claude-haiku-5.5": { prompt: 0.10, completion: 0.50 },
+  "anthropic/claude-sonnet-5.5": { prompt: 2, completion: 10 },
+  "anthropic/claude-opus-5.5": { prompt: 4, completion: 20 },
+  "anthropic/claude-fable-5.2": { prompt: 8, completion: 40 },
+  "openai/gpt-6-luna": { prompt: 0.10, completion: 0.50 },
+  "openai/gpt-6.1-sol": { prompt: 2, completion: 10 },
+  "openai/gpt-6-astra": { prompt: 10, completion: 50 },
+  "deepseek/deepseek-v4.1-flash": { prompt: 0.0507, completion: 0.2028 },
+  "google/gemini-4-hydrogen": { prompt: 1.50, completion: 7.50 },
+  "google/gemini-4-carbon": { prompt: 2, completion: 10 },
+  "qwen/qwen3.8-max-0902": { prompt: 2, completion: 6 },
+  "moonshotai/kimi-k3.1-pro": { prompt: 0.2403, completion: 8.402 },
+  "mistralai/mistral-large-4-0": { prompt: 0.70, completion: 2.10 },
+  "x-ai/grok-4.7": { prompt: 2, completion: 6 },
+  "z-ai/glm-5.1": { prompt: 0.966, completion: 3.036 },
+};
+// An explicit client preference is an ID from this audited catalog, never an
+// arbitrary OpenRouter slug. Paid entries are gated by the server entitlement.
+export const SELECTABLE_MODELS = new Set([
+  "nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "google/gemma-4-31b-it:free", "cohere/north-mini-code:free",
+  ...Object.keys(MODEL_PRICE_CEILINGS),
+]);
+export function chatInput(input: Record<string, unknown>): { messages: Turn[]; limit: number; device: boolean; repair: boolean; plan: boolean; visual: boolean; webSearch: boolean; profile?: ModelProfile; modelId?: string } {
+  const { messages, style = "balanced", device_tools = false, repair_tools = false, action_plan = false, visual_plan = false, web_search = false, profile, model_id } = input;
+  if (Object.keys(input).some(key => !["messages", "style", "device_tools", "repair_tools", "action_plan", "visual_plan", "web_search", "profile", "model_id"].includes(key)) ||
     profile !== undefined && profile !== "auto" && profile !== "fast" && profile !== "deep" ||
+    model_id !== undefined && (typeof model_id !== "string" || !SELECTABLE_MODELS.has(model_id)) ||
     typeof device_tools !== "boolean" || typeof repair_tools !== "boolean" || typeof action_plan !== "boolean" ||
     typeof visual_plan !== "boolean" || typeof web_search !== "boolean" || visual_plan && device_tools ||
     (repair_tools || action_plan) && !device_tools || typeof style !== "string" || !Object.hasOwn(LIMITS, style) || !Array.isArray(messages) ||
@@ -86,7 +114,8 @@ export function chatInput(input: Record<string, unknown>): { messages: Turn[]; l
   });
   if (length > 51_000 || turns.at(-1)?.role !== "user") throw new Failure("invalid", 400);
   return { messages: turns, limit: LIMITS[style as keyof typeof LIMITS], device: device_tools, repair: repair_tools,
-    plan: action_plan, visual: visual_plan, webSearch: web_search && !device_tools && !action_plan && !visual_plan, profile };
+    plan: action_plan, visual: visual_plan, webSearch: web_search && !device_tools && !action_plan && !visual_plan,
+    profile, modelId: model_id as string | undefined };
 }
 
 function retrySeconds(headers: Headers): number {
@@ -174,8 +203,6 @@ function connectionFailure(error: unknown): Failure {
 }
 
 export type MeasuredUsage = { input: number; output: number; costMicros: number | null };
-// Internal token allowance, not a claim about the provider's native tokenizer.
-const SEARCH_UNITS_PER_CALL = 250;
 export type Reservation = { maxOutput: number; finish: (usage: MeasuredUsage | null) => Promise<Record<string, unknown> | null> };
 export type ModelResponse = {
   response: Response;
@@ -200,7 +227,7 @@ export async function completion(
   signal: AbortSignal, device = false, repair = false, firstTokenMs = 18_000, quick = false, plan = false,
   hold?: (estimatedInput: number, output: number) => Promise<Reservation>,
   visualOutput?: Record<string, unknown>,
-  paidPrice?: number,
+  paidPrice?: number | { prompt: number; completion: number },
   webSearch = false,
 ): Promise<ModelResponse> {
   if (!key || !models.length || models.some(model => paidPrice
@@ -210,7 +237,8 @@ export async function completion(
   const tools = plan ? (repair ? planRepairTools : planTools) : (repair ? repairTools : deviceTools);
   // Haiku 5.5 uses adaptive thinking and rejects sampling controls. In particular,
   // even a harmless-looking temperature/top_p makes this model fail with HTTP 400.
-  const haiku55 = models.every(model => model === "anthropic/claude-haiku-5.5");
+  const haiku55 = models.every(model => model.startsWith("anthropic/claude-") &&
+    model !== "anthropic/claude-sonnet-4.6");
   const guide = plan
     ? "\n\nWhen the user explicitly asks for device actions, call execute_phone_plan with every step in order. " +
       "Each step has kind and only the applicable parameters. A question, hypothetical example, or request for instructions should get a text answer.\n" + planGuide
@@ -232,32 +260,32 @@ export async function completion(
       engine: "parallel", max_results: 4, max_total_results: 12,
     } }], tool_choice: "auto", max_tool_calls: 3 } : {};
   const requested = visualOutput ? 740 : plan ? Math.max(limit, 1600) : limit;
-  // Model tokens come from provider usage; completed web-search calls incur
-  // fixed internal service units. The estimate protects in-flight requests.
+  // Chat credits settle from native OpenRouter usage and cost. Never add an
+  // invented number of "search tokens" to the provider's measured tokens.
   const bytes = new TextEncoder().encode(JSON.stringify({ messages, ...toolInput, visualOutput })).length;
   const estimatedInput = Math.ceil(bytes / (paidPrice ? 1 : 3)) + 128;
   // Reserve the worst case before allowing paid web tools to run. Release the
   // unused part at settlement when upstream reports fewer search calls.
-  const reservation = await hold?.(estimatedInput + (webSearch ? 3 * SEARCH_UNITS_PER_CALL : 0), requested);
+  const reservation = await hold?.(estimatedInput, requested);
   let usage: MeasuredUsage | null = null;
   let searchCalls = 0;
   let generationId = "";
   let settled: Promise<Record<string, unknown> | null> | undefined;
   const finish = () => settled ??= (async () => {
     if (!reservation) return null;
-    if ((!usage || paidPrice && usage.costMicros === null) && generationId) {
+    if (generationId) {
       try {
         const response = await network("https://openrouter.ai/api/v1/generation?id=" + encodeURIComponent(generationId),
           { headers: { Authorization: "Bearer " + key }, redirect: "error", signal: AbortSignal.timeout(2200) });
         if (response.ok) {
           const { data } = await response.json();
-          usage = measuredUsage({ usage: { prompt_tokens: data?.native_tokens_prompt, completion_tokens: data?.native_tokens_completion, cost: data?.total_cost } }) ?? usage;
+          const native = measuredUsage({ usage: { prompt_tokens: data?.native_tokens_prompt,
+            completion_tokens: data?.native_tokens_completion, cost: data?.total_cost } });
+          if (native) usage = { ...native, costMicros: native.costMicros ?? usage?.costMicros ?? null };
         } else await response.body?.cancel().catch(() => {});
       } catch { /* A disconnected generation may not report usage yet. */ }
     }
-    return await reservation.finish(usage && searchCalls > 0 ? {
-      ...usage, input: usage.input + searchCalls * SEARCH_UNITS_PER_CALL,
-    } : usage);
+    return await reservation.finish(usage);
   })();
   const observe = (value: unknown) => {
     usage = measuredUsage(value) ?? usage;
@@ -296,7 +324,9 @@ export async function completion(
         ...visualOutput,
         ...(quick && !visualOutput && !haiku55 ? { reasoning: { effort: "none", exclude: true } } : {}),
         provider: {
-          max_price: { prompt: paidPrice ?? 0, completion: paidPrice ?? 0, request: 0, image: 0, audio: 0, web_search: webSearch ? 0.03 : 0 },
+          max_price: { prompt: typeof paidPrice === "number" ? paidPrice : paidPrice?.prompt ?? 0,
+            completion: typeof paidPrice === "number" ? paidPrice : paidPrice?.completion ?? 0,
+            request: 0, image: 0, audio: 0, web_search: webSearch ? 0.03 : 0 },
           ...(device || visualOutput || webSearch ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),
         },
       }),

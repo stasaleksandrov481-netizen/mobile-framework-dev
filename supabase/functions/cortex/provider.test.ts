@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deviceTools, planGuide } from "./device.ts";
-import { chatInput, completion, relay } from "./provider.ts";
+import { chatInput, completion, relay, SELECTABLE_MODELS } from "./provider.ts";
 import { visualFormat } from "./visual.ts";
 
 test("Haiku 5.5 receives no incompatible sampling or disabled-thinking settings", async () => {
@@ -71,7 +71,7 @@ test("web search is an explicit opt-in with bounded per-answer tool calls", asyn
   assert.match(body, /https:\/\/example.com/);
 });
 
-test("reported web searches deduct service units from the same token reservation", async () => {
+test("OpenRouter search does not fabricate model tokens in the user's balance", async () => {
   let estimate = 0;
   let charged: { input: number; output: number } | null = null;
   const response = await completion(async () => new Response(
@@ -89,8 +89,44 @@ test("reported web searches deduct service units from the same token reservation
   }, undefined, undefined, true);
   const reader = relay(response, async () => undefined).getReader();
   while (!(await reader.read()).done) { /* Drain the completed stream. */ }
-  assert.ok(estimate >= 750);
-  assert.deepEqual(charged && { input: charged.input, output: charged.output }, { input: 540, output: 12 });
+  assert.ok(estimate > 0);
+  assert.deepEqual(charged && { input: charged.input, output: charged.output }, { input: 40, output: 12 });
+});
+
+test("paid settlement prefers OpenRouter generation cost over estimates or streamed prices", async () => {
+  let charged: { input: number; output: number; costMicros: number | null } | null = null;
+  let metadataReads = 0;
+  const response = await completion(async (url, init) => {
+    if (String(url).includes("/api/v1/generation?")) {
+      metadataReads++;
+      assert.match(String(url), /gen-test-1234/);
+      return Response.json({ data: { native_tokens_prompt: 77, native_tokens_completion: 21,
+        total_cost: 0.003412 } });
+    }
+    const sent = JSON.parse(String(init?.body));
+    assert.deepEqual(sent.provider.max_price, { prompt: 8, completion: 40,
+      request: 0, image: 0, audio: 0, web_search: 0 });
+    return new Response('data: {"id":"gen-test-1234","choices":[{"delta":{"content":"OK"}}]}\n\n' +
+      'data: {"usage":{"prompt_tokens":70,"completion_tokens":20,"cost":0.0001}}\n\n' +
+      'data: [DONE]\n\n', { headers: { "content-type": "text/event-stream" } });
+  }, "test-paid-key", ["anthropic/claude-fable-5.2"], [{ role: "user", content: "Привет" }], true,
+    740, new AbortController().signal, false, false, 12_000, false, false,
+    async (_input, output) => ({ maxOutput: output, finish: async (usage) => { charged = usage; return null; } }),
+    undefined, { prompt: 8, completion: 40 });
+  const reader = relay(response, async () => undefined).getReader();
+  while (!(await reader.read()).done) { /* Drain stream and settle. */ }
+  assert.equal(metadataReads, 1);
+  assert.deepEqual(charged, { input: 77, output: 21, costMicros: 3412 });
+});
+
+test("explicit model IDs use an audited server-side allowlist", () => {
+  const messages = [{ role: "user", content: "Привет" }];
+  assert.equal(SELECTABLE_MODELS.size, 19);
+  for (const model_id of SELECTABLE_MODELS) {
+    assert.equal(chatInput({ messages, model_id }).modelId, model_id);
+  }
+  for (const model_id of ["example/unauthorized", "openai/gpt-6-luna:free", "x/evil;drop"])
+    assert.throws(() => chatInput({ messages, model_id }));
 });
 
 test("Android browser, store, recents and rotation tools have bounded schemas", () => {

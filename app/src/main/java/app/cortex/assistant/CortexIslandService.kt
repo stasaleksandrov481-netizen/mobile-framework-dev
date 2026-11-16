@@ -459,6 +459,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         setExpanded(true)
         val streamed = StringBuilder()
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
+            modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
             beforeScreen = { setExpanded(false) },
             toolsAllowed = { preferences.getBoolean("phoneActions", true) && Settings.canDrawOverlays(this) },
             progress = { updateStatus("executing", it) },

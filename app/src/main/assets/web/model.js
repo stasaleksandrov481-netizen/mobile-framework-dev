@@ -12,10 +12,32 @@ const Cortex = (() => {
   const languages = { auto: "Авто", "ru-RU": "Русский", "en-US": "Английский" };
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
   const models = { auto: "Авто", fast: "Быстро", deep: "Подробно" };
+  const aiModels = [
+    { id: "auto", name: "Авто", brand: "CORTEX", domain: "", detail: "Подберу подходящую модель", paid: false },
+    { id: "nvidia/nemotron-3.5-lightning:free", name: "Nemotron Lightning", brand: "NVIDIA", domain: "nvidia.com", detail: "Быстрые ответы", paid: false },
+    { id: "nvidia/nemotron-3-ultra-550b-a55b:free", name: "Nemotron Ultra", brand: "NVIDIA", domain: "nvidia.com", detail: "Сложные задачи", paid: false },
+    { id: "google/gemma-4-31b-it:free", name: "Gemma 4 31B", brand: "Google", domain: "google.com", detail: "Универсальная", paid: false },
+    { id: "cohere/north-mini-code:free", name: "North Mini Code", brand: "Cohere", domain: "cohere.com", detail: "Код и инструкции", paid: false },
+    { id: "anthropic/claude-fable-5.2", name: "Claude Fable 5.2", brand: "Anthropic", domain: "anthropic.com", detail: "$8 / $40", paid: true },
+    { id: "anthropic/claude-opus-5.5", name: "Claude Opus 5.5", brand: "Anthropic", domain: "anthropic.com", detail: "$4 / $20", paid: true },
+    { id: "anthropic/claude-sonnet-5.5", name: "Claude Sonnet 5.5", brand: "Anthropic", domain: "anthropic.com", detail: "$2 / $10", paid: true },
+    { id: "anthropic/claude-haiku-5.5", name: "Claude Haiku 5.5", brand: "Anthropic", domain: "anthropic.com", detail: "$0.10 / $0.50", paid: true },
+    { id: "openai/gpt-6-astra", name: "GPT-6 Astra", brand: "OpenAI", domain: "openai.com", detail: "$10 / $50", paid: true },
+    { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", brand: "OpenAI", domain: "openai.com", detail: "$2 / $10", paid: true },
+    { id: "openai/gpt-6-luna", name: "GPT-6 Luna", brand: "OpenAI", domain: "openai.com", detail: "$0.10 / $0.50", paid: true },
+    { id: "google/gemini-4-carbon", name: "Gemini 4 Carbon", brand: "Google", domain: "google.com", detail: "$2 / $10", paid: true },
+    { id: "google/gemini-4-hydrogen", name: "Gemini 4 Hydrogen", brand: "Google", domain: "google.com", detail: "$1.50 / $7.50", paid: true },
+    { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", brand: "DeepSeek", domain: "deepseek.com", detail: "$0.0507 / $0.2028", paid: true },
+    { id: "qwen/qwen3.8-max-0902", name: "Qwen 3.8 Max", brand: "Qwen", domain: "qwenlm.ai", detail: "$2 / $6", paid: true },
+    { id: "moonshotai/kimi-k3.1-pro", name: "Kimi K3.1 Pro", brand: "Moonshot AI", domain: "kimi.com", detail: "$0.2403 / $8.402", paid: true },
+    { id: "mistralai/mistral-large-4-0", name: "Mistral Large 4", brand: "Mistral", domain: "mistral.ai", detail: "$0.70 / $2.10", paid: true },
+    { id: "x-ai/grok-4.7", name: "Grok 4.7", brand: "xAI", domain: "x.ai", detail: "$2 / $6", paid: true },
+    { id: "z-ai/glm-5.1", name: "GLM 5.1", brand: "Z.ai", domain: "z.ai", detail: "$0.966 / $3.036", paid: true }
+  ];
   const defaults = {
     quality: "balanced", reduceMotion: false, rememberSaved: true,
     language: "auto", haptics: true, voiceContinue: true,
-    phoneActions: true, visualLaunch: false, model: "auto", notifyReplies: false,
+    phoneActions: true, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
     overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };
   const array = input => Array.isArray(input) ? input : [];
@@ -70,6 +92,7 @@ const Cortex = (() => {
   if (persisted.preferences?.powerSave) preferences.reduceMotion = true;
   if (!Object.hasOwn(motion, preferences.quality)) preferences.quality = defaults.quality;
   if (!Object.hasOwn(models, preferences.model)) preferences.model = defaults.model;
+  if (!aiModels.some(item => item.id === preferences.aiModel)) preferences.aiModel = defaults.aiModel;
   if (!Object.hasOwn(languages, preferences.language)) preferences.language = defaults.language;
   if (!["always", "wake", "off"].includes(preferences.overlayMode)) preferences.overlayMode = "off";
   if (!["economy", "balanced", "maximum"].includes(preferences.energy)) preferences.energy = "balanced";
@@ -294,7 +317,7 @@ const Cortex = (() => {
 
   if (old && Object.keys(old).length) save();
   return {
-    state, defaults, motion, languages, styles, models, instructionFields, profile, memory, chat, account,
+    state, defaults, motion, languages, styles, models, aiModels, instructionFields, profile, memory, chat, account,
     createChat, touch, turns, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

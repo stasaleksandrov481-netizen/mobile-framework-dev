@@ -44,6 +44,18 @@ const CortexUI = (() => {
   function choices(values, selected, action) {
     return `<div class="filters">${Object.entries(values).map(([value, label]) => pill(label, action, value, selected === value)).join("")}</div>`;
   }
+  function modelLogo(item) {
+    return item.domain
+      ? `<img class="ai-provider-icon" src="https://www.google.com/s2/favicons?domain=${esc(item.domain)}&amp;sz=64" alt="" loading="lazy">`
+      : '<img class="ai-provider-icon" src="art/mark.svg" alt="">';
+  }
+  function modelChoices(selected, compact = false) {
+    return `<div class="ai-model-list ${compact ? "compact" : ""}">${M.aiModels.map(item =>
+      `<button type="button" class="ai-model-option" aria-pressed="${selected === item.id}" ${attributes("ai-model", item.id)}>
+        ${modelLogo(item)}<span class="ai-model-copy"><strong>${esc(item.name)}</strong><small>${esc(item.brand)}${item.paid || !compact ? " · " + esc(item.detail) : ""}</small></span>
+        ${item.paid ? '<span class="ai-model-tier">PRO</span>' : ""}
+      </button>`).join("")}</div>`;
+  }
   function heading(title, subtitle, actions = "") {
     return `<header class="section-header">
       ${iconButton("back", "Назад", "back", "", "section-back")}
@@ -78,6 +90,12 @@ const CortexUI = (() => {
       <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
         enterkeyhint="send"></textarea>
       <div class="composer-actions">
+        <details class="ai-model-picker"><summary aria-label="Выбрать модель ИИ" title="Выбрать модель ИИ">
+          ${modelLogo(M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0])}
+          <span class="ai-model-chevron" aria-hidden="true"></span></summary>
+          <div class="ai-model-popover"><header>Модель ИИ <small>$ за 1 млн: вход / выход</small></header>
+          ${modelChoices(M.state.preferences.aiModel, true)}</div>
+        </details>
         <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("go", "models")} hidden>
           <span class="quota-ring-art" aria-hidden="true"></span>
         </button>
@@ -407,15 +425,11 @@ const CortexUI = (() => {
       </section>` + button("Настроить CORTEX", "sliders", "go", "phone-tools", "primary"));
   }
   function models(ctx) {
-    const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection) + `<section class="panel stack">
-      ${choices(M.models, model, "model-profile")}
-      <p class="muted">${({
-        auto: "Автоматический выбор подходящей бесплатной модели.",
-        fast: "Приоритет скорости ответа, если модель доступна.",
-        deep: "Приоритет качества для сложных задач."
-      })[model]} При перегрузке модели сервер пробует резерв. У бесплатных моделей общая дневная квота OpenRouter.</p>
-      ${ctx.connection.profiles ? "" : '<p class="muted">Выбор применяется на сервере CORTEX с поддержкой профилей.</p>'}</section>`);
+    return detail("Модели ИИ", "Для переписки с CORTEX", quotaPanel(ctx.connection) + `<section class="panel stack">
+      ${modelChoices(M.state.preferences.aiModel)}
+      <p class="muted">Цены в $ за 1 млн входных / выходных токенов. PRO-модели требуют подписки. Списание по фактической стоимости OpenRouter.</p>
+      <h2 class="group-label">Режим авто</h2>${choices(M.models, M.state.preferences.model, "model-profile")}
+    </section>`);
   }
   function language() {
     return detail("Язык", "Ответы и распознавание речи", `<section class="panel stack"><h2>Язык CORTEX</h2>

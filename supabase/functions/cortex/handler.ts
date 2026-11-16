@@ -1,7 +1,7 @@
 import {
   type Account, type Network, type ModelProfile, type ModelResponse, type MeasuredUsage, Failure, body, chatInput, completeText, completion,
   confirmedQuota, failureBody, relay, retryableModelError,
-  supportInput, verifyCompletion,
+  supportInput, verifyCompletion, MODEL_PRICE_CEILINGS,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
 import { createRedisCache } from "./redis.ts";
@@ -748,7 +748,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (caller.account) await claimEarlyBonus(caller.account);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
-          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
+          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined, modelId: undefined,
         };
         const gate = await control.gate(request, caller.account);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
@@ -765,14 +765,33 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           (input.visual || input.plan) && ["pro", "ultra"].includes(access?.plan || ""));
         const premium = Boolean(hasPaidPlan && paidKey && wantsAdvanced && access?.advanced_tokens && paidModelId.test(paidDeep));
         const basic = Boolean(hasPaidPlan && paidKey && paidModelId.test(paidFast));
+        // Model selection applies only to conversational replies. Phone plans
+        // retain their verified tool-compatible model routing.
+        const chosen = !input.visual && !input.plan && !input.device && !input.repair ? input.modelId : undefined;
+        const chosenFree = chosen?.endsWith(":free") ? chosen : undefined;
+        const chosenPaid = chosen && !chosenFree ? chosen : undefined;
+        if (chosenPaid && (!hasPaidPlan || !access?.advanced_tokens || !(paidKey || key))) {
+          throw new Failure("paid_unavailable", 403);
+        }
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
         const candidates = input.visual ? [...visualTools, ...visualSchemas]
-          : [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
+          : [...new Set([chosenFree, ...(chosen ? [] : [modelOverride]), ...preferred, ...models]
+            .filter((model): model is string => typeof model === "string" && FREE_MODEL.test(model)))];
         await database("rpc/cortex_track_ai_request", "POST", { p_subject: id,
           p_kind: !isChat ? "check" : input.visual ? "visual" : "chat" });
         let quota: Quota | undefined;
         const hold = (model?: string, advanced = false) => async (estimatedInput: number, output: number) => {
-          const amounts = { p_subject: id, p_input: estimatedInput, p_output: output };
+          // The balance is monetary: one CORTEX credit = $0.20 / 1M.
+          // Reserve each direction against its actual model-specific provider
+          // price ceiling, never a flat multiplier (Opus/Fable cost far more).
+          const pricing = model ? MODEL_PRICE_CEILINGS[model] || {
+            prompt: advanced ? 0.60 : 0.20, completion: advanced ? 0.60 : 0.20,
+          } : null;
+          const inputFactor = pricing ? pricing.prompt / 0.20 : 1;
+          const outputFactor = pricing ? pricing.completion / 0.20 : 1;
+          const amounts = { p_subject: id,
+            p_input: Math.max(1, Math.ceil(estimatedInput * inputFactor)),
+            p_output: Math.max(1, Math.ceil(output * outputFactor)) };
           const result = await database<{ attempt?: string; max_output?: number; quota: Quota; error?: string; retry_after?: number }>(
             model ? "rpc/cortex_paid_reserve" : "rpc/cortex_ai_reserve", "POST",
             model ? { ...amounts, p_model: model, p_advanced: advanced }
@@ -789,8 +808,17 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
             throw new BudgetFailure(code, result.retry_after || (code === "daily_limit" ? reset : 0), quota);
           }
           if (!result.attempt || !result.max_output) throw new Failure("storage_config", 503);
+          const maxOutput = Math.floor(result.max_output / outputFactor);
+          if (maxOutput < 1) {
+            // A high-priced model must not be invoked with max_tokens=0 when
+            // the remaining credit balance is smaller than one output token.
+            await database("rpc/cortex_paid_finish", "POST", {
+              p_attempt: result.attempt, p_input: null, p_output: null, p_cost: null,
+            }).catch(() => {});
+            throw new BudgetFailure("advanced_limit", 0, quota);
+          }
           return {
-            maxOutput: result.max_output,
+            maxOutput,
             async finish(usage: MeasuredUsage | null) {
               const payload = { p_attempt: result.attempt, p_input: usage?.input ?? null, p_output: usage?.output ?? null };
               for (let retry = 0; retry < 2; retry++) {
@@ -811,7 +839,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const firstTokenMs = input.visual ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
         const signal = AbortSignal.any([request.signal, upstream.signal,
           AbortSignal.timeout(input.visual ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
-        const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
+        const scope = input.visual ? "visual:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
         const ordered = input.visual ? [
@@ -825,7 +853,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // A rotated Vault key may serve both free and paid routes. Only accounts
         // with an advanced-token budget can spend against Haiku's paid ceiling.
         const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
-        const paidCandidates = [ ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
+        const paidCandidates = chosenFree ? [] : chosenPaid ? [{ model: chosenPaid, advanced: true }] : [
+          ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
           ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
           ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
             ? [{ model: paidFast, advanced: false }] : []) ];
@@ -889,7 +918,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
                 input.limit, signal, input.device, input.repair,
                 paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
-                hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined,
+                hold(paid ? model : undefined, advanced), format, paid ? MODEL_PRICE_CEILINGS[model] ||
+                  { prompt: advanced ? 0.60 : 0.20, completion: advanced ? 0.60 : 0.20 } : undefined,
                 input.webSearch);
               modelCooldown.delete(scope + model);
               return result;
