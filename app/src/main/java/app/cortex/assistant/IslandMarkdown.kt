@@ -26,27 +26,43 @@ internal object IslandMarkdown {
     private val tableSeparator = Regex("""^:?-{3,}:?$""")
     private val INLINE_TOKENS = arrayOf("**", "__", "~~", "*", "_")
     private val RULES = setOf("---", "***", "___")
+    private val callout = Regex("""^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)]\s*""")
     private const val MAX_VISIBLE = 24_000
     private val MONO_BG = 0xFF191919.toInt()
     private val MUTED = 0xFFACACAC.toInt()
 
     fun render(source: String, accent: Int = Color.WHITE): CharSequence {
         val result = SpannableStringBuilder()
-        var codeBlock = false
-        // Bound rendering cost when a model streams a large response.
+        var fence: String? = null
+        // A native TextView must never interpret arbitrary model HTML or CSS.
+        // UI fences are presented as semantic text instead of raw DSL lines.
         for (raw in source.take(MAX_VISIBLE).lineSequence()) {
-            if (raw.trimStart().startsWith("```")) {
-                codeBlock = !codeBlock
+            val trimmed = raw.trim()
+            val marker = trimmed.takeWhile { it == '`' || it == '~' }
+            if (marker.length >= 3 && marker.all { it == marker[0] }) {
+                if (fence == null) fence = if (trimmed.drop(marker.length).trim() == "cortex-ui") "ui" else "code"
+                else fence = null
                 continue
             }
+            val rich = if (fence == "ui") richText(raw) else null
+            if (fence == "ui" && rich == null) continue
             val cells = raw.trim().takeIf { it.startsWith('|') && it.endsWith('|') }
                 ?.trim('|')?.split('|')?.map { it.trim() }
-            if (!codeBlock && cells != null && cells.all { tableSeparator.matches(it) }) continue
+            if (fence == null && cells != null && cells.all { tableSeparator.matches(it) }) continue
             if (result.isNotEmpty()) result.append('\n')
             val start = result.length
+            val codeBlock = fence == "code"
             if (codeBlock) {
                 result.append(raw.ifEmpty { " " })
                 decorateCode(result, start, result.length, block = true)
+                continue
+            }
+            if (fence == "ui") {
+                appendInline(result, rich.orEmpty(), accent)
+                if (trimmed.startsWith("title |") && result.length > start) {
+                    result.setSpan(StyleSpan(Typeface.BOLD), start, result.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    result.setSpan(RelativeSizeSpan(1.12f), start, result.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
                 continue
             }
             val header = heading.find(raw)
@@ -76,8 +92,23 @@ internal object IslandMarkdown {
                     appendInline(result, raw.substring(unordered.value.length), accent)
                 }
                 quote -> {
-                    result.append("│  ")
-                    appendInline(result, raw.trimStart().removePrefix("> "), accent)
+                    val quoted = raw.trimStart().removePrefix("> ").trimStart()
+                    val calloutMatch = callout.find(quoted)
+                    if (calloutMatch != null) {
+                        val title = when (calloutMatch.groupValues[1]) {
+                            "TIP" -> "Совет"; "IMPORTANT" -> "Важно"; "WARNING" -> "Внимание"
+                            "CAUTION" -> "Осторожно"; else -> "Заметка"
+                        }
+                        result.append("│  ").append(title)
+                        val detail = quoted.removePrefix(calloutMatch.value).trim()
+                        if (detail.isNotBlank()) {
+                            result.append(" · ")
+                            appendInline(result, detail, accent)
+                        }
+                    } else {
+                        result.append("│  ")
+                        appendInline(result, quoted, accent)
+                    }
                 }
                 else -> appendInline(result, raw, accent)
             }
@@ -94,6 +125,30 @@ internal object IslandMarkdown {
             }
         }
         return result
+    }
+
+    /** Compact native presentation for composable assistant widgets.
+     * No arbitrary markup or user-controlled Android View creation.
+     */
+    private fun richText(raw: String): String? {
+        val fields = raw.split('|').map { it.trim() }
+        val data = fields.drop(1)
+        fun field(index: Int) = data.getOrNull(index).orEmpty().take(180)
+        return when (fields.firstOrNull().orEmpty()) {
+            "grid", "stack", "row", "end", "divider" -> null
+            "title", "section" -> field(0)
+            "stat" -> listOf(field(0), field(1), field(2)).filter(String::isNotBlank).joinToString("  ·  ")
+            "kv", "score" -> field(0) + ": " + field(1) + (if (fields[0] == "score") " / " + field(2) else "")
+            "bar", "donut" -> field(0) + "  ·  " + (field(2).ifBlank { field(1) + "%" })
+            "trend" -> field(0) + (if (field(2).isNotBlank()) "  ·  " + field(2) else "")
+            "step" -> "•  " + field(1) + (if (field(2).isNotBlank()) " — " + field(2) else "")
+            "notice" -> field(1) + (if (field(2).isNotBlank()) " — " + field(2) else "")
+            "tag" -> field(0)
+            "compare" -> field(0) + " → " + field(1)
+            "quote" -> "│  " + field(0) + (if (field(1).isNotBlank()) " — " + field(1) else "")
+            "flow" -> data.take(5).joinToString(" → ")
+            else -> data.ifEmpty { fields }.take(5).joinToString(" · ").take(320)
+        }?.take(420)
     }
 
     private fun appendInline(out: SpannableStringBuilder, input: String, accent: Int, depth: Int = 0) {
