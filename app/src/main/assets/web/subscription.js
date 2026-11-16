@@ -63,7 +63,12 @@ const CortexSubscription = (() => {
       <section class="sub-section"><h2>Тарифы</h2>${!canBuy ? `<p class="sub-status">${current === "guest" ? "Для покупки понадобится аккаунт." : "Оплата подписок пока закрыта."}</p>` : ""}
       <div class="sub-plans">${catalogue}</div>${features}</section>
       <p class="sub-note">Локальные команды, сценарии, напоминания и настройки островка бесплатны и безлимитны.</p>
-      <section class="sub-section"><h2>История платежей</h2>${history}</section></div>`);
+      <section class="sub-section"><h2>История платежей</h2>${history}</section>
+      <nav class="sub-legal" aria-label="Документы и помощь">
+        ${button("Политика конфиденциальности", "", "subscription-info", "privacy", "quiet")}
+        ${button("Пользовательское соглашение", "", "subscription-info", "terms", "quiet")}
+        ${button("Поддержка", "", "subscription-info", "support", "quiet")}
+      </nav></div>`);
   }
   return { page };
 })();

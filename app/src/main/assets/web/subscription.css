@@ -28,3 +28,5 @@
 @keyframes sub-meter{from{width:0}}
 @keyframes sub-in{from{opacity:0;transform:translateY(7px)}}
 @media(prefers-reduced-motion:reduce){.sub-page *{animation:none!important;transition:none!important}}
+
+.sub-legal { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 4px; }

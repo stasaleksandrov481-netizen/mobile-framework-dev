@@ -2,6 +2,7 @@ import { timingSafeEqual, randomUUID } from "node:crypto";
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const subjectPattern = /^(?:yandex_[A-Za-z0-9_-]{43}|[a-f0-9-]{36})$/;
+const paymentEmail = /^[^\s@<>(),:;\\"]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
 const plans = new Set(["start", "pro", "ultra"]);
 const paymentStates = {
   PENDING: "pending", CONFIRMED: "confirmed", CHARGEBACKED: "refunded", CANCELED: "canceled",
@@ -134,6 +135,16 @@ export function createBillingHandler(env = process.env, network = fetch) {
 
   async function checkout(input) {
     if (!plans.has(input.plan)) throw new BillingError(400, "invalid_plan");
+    // The signed gateway supplies the account address, never the checkout form.
+    const email = input.email;
+    if (typeof email !== "string" || email.length > 254 || email.trim() !== email || !paymentEmail.test(email) ||
+        email.indexOf("@") > 64 || email.startsWith(".") || email.includes("..") || email.includes(".@")) {
+      throw new BillingError(400, "invalid_email");
+    }
+    const method = Number(env.PLATEGA_PAYMENT_METHOD || 2);
+    if (mode === "live" && (!Number.isInteger(method) || method < 1)) {
+      throw new BillingError(503, "payments_disabled");
+    }
     const order = await database("rpc/cortex_billing_order", {
       p_subject: input.subject, p_plan: input.plan, p_mode: mode
     });
@@ -147,14 +158,10 @@ export function createBillingHandler(env = process.env, network = fetch) {
     if (mode === "test") {
       return present(await record(order, randomUUID(), "pending"));
     }
-    const method = Number(env.PLATEGA_PAYMENT_METHOD || 2);
-    if (!Number.isInteger(method) || method < 1 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email || "")) {
-      throw new BillingError(503, "payments_disabled");
-    }
     const response = await provider("/transaction/process", "POST", {
       paymentMethod: method, paymentDetails: { amount: order.amount / 100, currency: "RUB" },
       description: "CORTEX " + order.plan, return: returnUrl, failedUrl: returnUrl, payload: "cortex:" + order.id,
-      metadata: { user_email: input.email }
+      metadata: { user_email: email }
     });
     const url = httpsUrl(response.redirect, true);
     if (!uuid.test(response.transactionId || "") || !url) throw new BillingError(502, "payment_provider");

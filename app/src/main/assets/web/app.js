@@ -1392,6 +1392,10 @@
       haptic(); navigate(value, { origin: control });
     },
     go: (value, control) => navigate(value, { origin: control }),
+    "subscription-info": page => {
+      if (!["privacy", "terms", "support"].includes(page)) return;
+      if (!sendDevice("open-link", { url: "https://cortexapp.ru/" + page })) flash("Не удалось открыть ссылку.");
+    },
     "subscription-refresh": () => { if (!subscriptionLoad) void refreshSubscription(); },
     "subscription-checkout": value => void subscriptionAction("checkout", value),
     "subscription-renew": value => void subscriptionAction("renew", value),

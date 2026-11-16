@@ -65,3 +65,42 @@ test("payment status is scoped to the account and webhook writes exclude test mo
   assert.equal((await request(handler, { operation: "status", subject, id }, { authorization: "Bearer edge" })).code, 404);
   assert.equal((await request(handler, { id: providerId }, {}, { webhook: "1" })).code, 503);
 });
+
+test("checkout rejects missing or invalid account email before reserving an order", async () => {
+  const handler = createBillingHandler({ ...env, CORTEX_BILLING_MODE: "live" }, () => assert.fail("network call"));
+  for (const email of [undefined, {}, "no-at.example", "buyer@example..com", "buyer@example.com\n", "a".repeat(65) + "@example.com"]) {
+    const response = await request(handler, { operation: "checkout", subject, plan: "pro", email }, { authorization: "Bearer edge" });
+    assert.deepEqual(response, { code: 400, json: { error: "invalid_email" } });
+  }
+});
+
+for (const operation of ["checkout", "renew"]) {
+  test(operation + " forwards the authenticated buyer email unchanged in Platega metadata", async () => {
+    const email = "Subscriber+renew@example.com";
+    const order = { id, subject, mode: "live", plan: "pro", amount: 39900 };
+    const redirect = "https://pay.platega.io/checkout";
+    const calls = [];
+    const handler = createBillingHandler({ ...env, CORTEX_BILLING_MODE: "live" }, async (url, options) => {
+      const { pathname } = new URL(url);
+      const payload = JSON.parse(options.body);
+      calls.push(pathname);
+      if (pathname === "/rest/v1/rpc/cortex_billing_order") {
+        assert.deepEqual(payload, { p_subject: subject, p_plan: "pro", p_mode: "live" });
+        return Response.json(order);
+      }
+      if (pathname === "/transaction/process") {
+        assert.deepEqual(payload.metadata, { user_email: email });
+        assert.deepEqual(payload.paymentDetails, { currency: "RUB", amount: 399 });
+        assert.equal(payload.payload, "cortex:" + id);
+        return Response.json({ transactionId: providerId, redirect });
+      }
+      assert.equal(pathname, "/rest/v1/rpc/cortex_billing_payment");
+      assert.equal(payload.p_state, "pending");
+      return Response.json({ ...order, state: "pending", checkout_url: redirect });
+    });
+    const response = await request(handler, { operation, subject, plan: "pro", email }, { authorization: "Bearer edge" });
+    assert.equal(response.code, 200);
+    assert.equal(response.json.checkout_url, redirect);
+    assert.deepEqual(calls, ["/rest/v1/rpc/cortex_billing_order", "/transaction/process", "/rest/v1/rpc/cortex_billing_payment"]);
+  });
+}

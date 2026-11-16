@@ -208,6 +208,9 @@ window.CortexControl = (() => {
     if (inbox.open) inbox.close();
     host.textContent = "";
     lastInboxCheck = 0;
+    // A different account needs its own presence row even on the same device.
+    session = crypto.randomUUID();
+    lastHeartbeat = 0;
     refresh();
   });
   setTimeout(refresh, 1100);

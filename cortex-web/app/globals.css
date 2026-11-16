@@ -438,3 +438,19 @@ svg { display: block; flex-shrink: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+.footer-links { flex-wrap: wrap; }
+.pricing-list { margin: 0 0 25px; padding: 0; }
+.pricing-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+  padding: 17px 0;
+  border-top: 1px solid #292929;
+}
+.pricing-row dd { margin: 0; }
+.pricing-row strong, .pricing-row span { display: block; }
+.pricing-row span { margin-top: 3px; color: #b8b8b8; font-size: 13px; line-height: 1.5; }
+@media (max-width: 520px) {
+  .pricing-row { grid-template-columns: 1fr; }
+}
