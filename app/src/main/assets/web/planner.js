@@ -23,8 +23,8 @@ const CortexPlanner = (() => {
   };
   const directions = { down: "Вниз", up: "Вверх", left: "Влево", right: "Вправо" };
   const islandDefaults = {
-    background: "#080808", text: "#ffffff", border: "#c6c6c6", accent: "#ffffff", faceColor: "#ffffff",
-    opacity: 96, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .65, motion: "liquid",
+    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
+    opacity: 100, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .45, motion: "liquid",
     face: false, status: true, progress: true, results: true
   };
   const islandPresets = {
@@ -273,9 +273,9 @@ const CortexPlanner = (() => {
       if (typeof fallback === "boolean" || typeof fallback === "number" && Number.isFinite(current) ||
           typeof fallback === "string" && (key === "motion" ? ["liquid", "soft", "none"].includes(current) : /^#[0-9a-f]{6}$/i.test(current))) value[key] = current;
     }
-    if (!Object.hasOwn(given, "widthScale") && value.background.toLowerCase() === "#080808" && value.opacity === 100) {
+    if (value.background.toLowerCase() === "#080808") {
       value.background = islandDefaults.background;
-      value.opacity = islandDefaults.opacity;
+      if (value.opacity >= 96) value.opacity = islandDefaults.opacity;
     }
     return value;
   }
@@ -287,11 +287,9 @@ const CortexPlanner = (() => {
       <div class="plan-island-wrap" style="transform:translate(${clamp(data.offsetX, -75, 75) / 2}px,${clamp(data.offsetY, 0, 80) / 3}px)">
         <div class="plan-island-sample" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
           --island-accent:${data.accent};--island-opacity:${clamp(data.opacity, 40, 100)}%;
-          --island-width:${132 * size * clamp(data.widthScale, 80, 125) / 10000}px;--island-height:${40 * size * clamp(data.heightScale, 90, 125) / 10000}px;
+          --island-width:${72 * size * clamp(data.widthScale, 80, 125) / 10000}px;--island-height:${36 * size * clamp(data.heightScale, 90, 125) / 10000}px;
           --island-radius:${clamp(data.corner, 12, 32)}px;--island-weight:${clamp(data.borderWidth, 0, 3)}px">
-          ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}"><i></i><i></i><b></b></span>` : '<span class="plan-logo" aria-hidden="true"></span>'}
-          ${data.status ? "<span>Слушаю…</span>" : ""}
-          ${data.progress ? '<i aria-hidden="true"></i>' : ""}</div>
+          <span class="plan-logo" aria-hidden="true"></span></div>
         <span class="plan-size-grip" aria-hidden="true"></span>
       </div>`;
   }

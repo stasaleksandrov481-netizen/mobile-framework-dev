@@ -14,7 +14,7 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
     private var generation = 0L
 
     fun send(
-        text: String, profile: String, beforeScreen: () -> Unit,
+        text: String, profile: String, modelId: String? = null, beforeScreen: () -> Unit,
         toolsAllowed: () -> Boolean, progress: (String) -> Unit, delta: (String) -> Unit,
         finished: (String, Boolean) -> Unit
     ) {
@@ -47,6 +47,7 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         messages.put(message("user", text))
         val route = if (profile == "deep") "deep" else "fast"
         val payload = JSONObject().put("messages", messages).put("style", "brief").put("profile", route)
+        if (modelId != null) payload.put("model_id", modelId)
         request = gateway.chat(payload, { event ->
             if (turn == generation && event.optString("status") == "fallback") progress("Пробую резервную модель…")
             if (turn == generation && event.has("delta")) delta(event.optString("delta"))

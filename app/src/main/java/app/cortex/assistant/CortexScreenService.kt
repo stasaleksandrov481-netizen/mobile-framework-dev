@@ -72,7 +72,10 @@ class CortexScreenService : AccessibilityService() {
         withTimeoutOrNull(timeout) { revisions.first { it != previous } }
     }
 
-    override fun onInterrupt() { CortexActionState.stop() }
+    // Android can interrupt accessibility *feedback* during ordinary focus changes.
+    // This is not a request to cancel the user's multi-step automation. Only a
+    // genuine service disconnect (onDestroy), or the explicit Stop action, does so.
+    override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         if (connected === this) {

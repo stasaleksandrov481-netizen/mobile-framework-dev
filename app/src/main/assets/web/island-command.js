@@ -7,9 +7,9 @@ const CortexIslandCommands = (() => {
   const noun = /(?:^|[^а-яё])(?:островок|островка|островке|островку|островком|капсула|капсулу|капсулы|капсуле)(?:$|[^а-яё])/u;
   const imperative = /^(?:кортекс[, ]*)?(?:пожалуйста[, ]*)?(?:уменьши|увеличь|сделай|сдвинь|подвинь|перемести|верни|сбрось|восстанови|включи|выключи|покажи|скрой|убери|добавь|поставь|настрой|измени)(?![а-яё])/u;
   const defaults = Object.freeze({
-    background: "#080808", text: "#ffffff", border: "#c6c6c6", accent: "#ffffff", faceColor: "#ffffff",
-    opacity: 96, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22,
-    borderWidth: .65, motion: "liquid", face: false, status: true, progress: true, results: true,
+    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
+    opacity: 100, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22,
+    borderWidth: .45, motion: "liquid", face: false, status: true, progress: true, results: true,
   });
 
   function parse(text, previous = defaults, mode = "wake") {
@@ -27,6 +27,7 @@ const CortexIslandCommands = (() => {
     if (/(полоск[ауи]? прогресс|индикатор прогресс|прогресс|статус|результат|смайлик|символ)/u.test(sentence)) {
       const key = /прогресс/u.test(sentence) ? "progress" : /статус/u.test(sentence) ? "status" :
         /результат/u.test(sentence) ? "results" : "face";
+      if (key === "face") return { style, reply: "В компактном островке теперь только анимированный логотип CORTEX." };
       if (/(выключи|убери|скрой)/u.test(sentence)) style[key] = false;
       else if (/(включи|добавь|покажи)/u.test(sentence)) style[key] = true;
       else return null;
@@ -35,7 +36,7 @@ const CortexIslandCommands = (() => {
     }
     if (/(рамк|границ)/u.test(sentence)) {
       if (/(выключи|убери|скрой)/u.test(sentence)) style.borderWidth = 0;
-      else if (/(включи|добавь|покажи|верни)/u.test(sentence)) style.borderWidth = .65;
+      else if (/(включи|добавь|покажи|верни)/u.test(sentence)) style.borderWidth = .45;
       else return null;
       return { style, reply: style.borderWidth ? "Вернул рамку островка." : "Убрал рамку островка." };
     }
@@ -62,7 +63,7 @@ const CortexIslandCommands = (() => {
       if (/(бел|светл)/u.test(sentence)) Object.assign(style, {
         background: "#e7e7e7", text: "#161616", border: "#555555", accent: "#363636", faceColor: "#777777",
       });
-      else Object.assign(style, { background: "#080808", text: "#ffffff", border: "#c6c6c6", accent: "#ffffff", faceColor: "#ffffff" });
+      else Object.assign(style, { background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff" });
       return { style, reply: /(бел|светл)/u.test(sentence) ? "Выбрал светлый островок." : "Выбрал тёмный островок." };
     }
     const decrease = /(уменьши|меньше|поменьше|уже|пониже)/u.test(sentence);

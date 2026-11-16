@@ -40,6 +40,8 @@
   const form = composition.firstElementChild;
   const input = form.querySelector("#composer-input");
   const send = form.querySelector(".send-button");
+  const quotaRing = form.querySelector(".quota-ring");
+  const modelPicker = form.querySelector(".ai-model-picker");
   const microphone = form.querySelector(".mic-button");
   const voiceButton = form.querySelector(".voice-button");
   const stop = form.querySelector(".stop-button");
@@ -78,7 +80,7 @@
   }
 
   function syncIslandOptions() {
-    return sendDevice("island-options", { profile: S.preferences.model, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
+    return sendDevice("island-options", { profile: S.preferences.model, modelId: S.preferences.aiModel, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
       reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
       addressName: S.preferences.addressName, appearance: Planner.style() });
   }
@@ -366,6 +368,28 @@
   addEventListener("popstate", () => { closeSheet(); closeHistory(true); readRoute(); });
 
   function syncComposer() {
+    if (modelPicker) {
+      const selected = M.aiModels.find(item => item.id === S.preferences.aiModel) || M.aiModels[0];
+      const summary = modelPicker.querySelector("summary");
+      const icon = summary?.querySelector("img");
+      const url = selected.domain ? `https://www.google.com/s2/favicons?domain=${selected.domain}&sz=64` : "art/mark.svg";
+      if (icon && icon.getAttribute("src") !== url) icon.src = url;
+      if (summary) summary.title = `Модель: ${selected.name}`;
+      modelPicker.querySelectorAll(".ai-model-option").forEach(button =>
+        button.setAttribute("aria-pressed", String(button.dataset.value === selected.id)));
+    }
+    const quota = connection.quota;
+    if (quotaRing) {
+      const known = quota?.unit === "tokens" && (quota.unlimited || Number(quota.limit) > 0);
+      quotaRing.hidden = !known;
+      if (known) {
+        const fraction = quota.unlimited ? 1 : Math.max(0, Math.min(1, Number(quota.remaining) / Number(quota.limit)));
+        quotaRing.style.setProperty("--quota-fraction", `${Math.round(fraction * 100)}%`);
+        const label = quota.unlimited ? "Токены без лимита" : `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")} токенов`;
+        quotaRing.setAttribute("aria-label", label + ". Открыть использование");
+        quotaRing.title = label;
+      }
+    }
     if (composition.hidden) return;
     const filled = Boolean(input.value.trim());
     const working = route === "chat" && pending?.chatId === chatId;
@@ -573,6 +597,7 @@
       connection.profiles = data.device_profiles === true;
       setAccount(data.account);
       connection.quota = data.quota || null;
+      syncComposer();
     } catch {
       if (epoch !== statusEpoch) return;
       connection.status = "offline";
@@ -636,6 +661,7 @@
     const quota = event.detail;
     if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
     connection.quota = quota;
+    syncComposer();
     if (["profile", "models", "subscription"].includes(route)) render();
   });
   addEventListener("cortex-guest-id", event => {
@@ -856,14 +882,18 @@
       "Опирайся на доступы и реальные результаты Android. " +
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
     const result = await Api.request("chat", {
-      payload: { messages: M.turns(chat, policy), style: M.profile().style,
-        ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }) },
+      payload: { messages: M.turns(chat, policy), style: M.profile().style, web_search: true,
+        ...((connection.profiles || !connection.checked) && { profile: S.preferences.model }),
+        ...(S.preferences.aiModel !== "auto" && { model_id: S.preferences.aiModel }) },
       notify: S.preferences.notifyReplies
     }, {
       signal: job.controller.signal,
-      onStatus() {
+      onStatus(status) {
         if (pending !== job) return;
-        job.action = "Пробую резервную модель…";
+        job.action = status === "web_search" ? "Ищу информацию в интернете…"
+          : status === "web_ready" ? "Проверяю, нужны ли свежие данные…" : "Пробую резервную модель…";
+        if (status === "web_ready") job.webEnabled = true;
+        if (status === "web_search") job.webSearching = true;
         if (activeChat(job)) render({ bottom: true });
       },
       onDelta(delta) {
@@ -904,7 +934,7 @@
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
-      chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }),
+      chat.messages.push({ role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
         ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
       M.touch(chat);
@@ -1289,6 +1319,7 @@
     }
     if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
       voiceSpoken(voice, message.ok === true);
+      void refreshConnection();
     }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";
@@ -1386,7 +1417,7 @@
     S.preferences[key] = value;
     saved();
     appearance();
-    if (["model", "phoneActions", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
+    if (["model", "aiModel", "phoneActions", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
     render();
   }
 
@@ -1508,6 +1539,17 @@
         flash("Не удалось применить режим. Проверьте разрешения Android.");
     },
     "model-profile"(value) { if (Object.hasOwn(M.models, value)) preference("model", value); },
+    "ai-model"(value) {
+      const selected = M.aiModels.find(item => item.id === value);
+      if (!selected) return;
+      if (selected.paid && !["start", "pro", "ultra"].includes(connection.quota?.plan || "")) {
+        flash("Для этой модели нужна подписка CORTEX.");
+        navigate("subscription");
+        return;
+      }
+      if (modelPicker) modelPicker.open = false;
+      preference("aiModel", value);
+    },
     "account-options": accountOptions,
     "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),
     "resend-code": resendCode,

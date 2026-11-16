@@ -44,6 +44,18 @@ const CortexUI = (() => {
   function choices(values, selected, action) {
     return `<div class="filters">${Object.entries(values).map(([value, label]) => pill(label, action, value, selected === value)).join("")}</div>`;
   }
+  function modelLogo(item) {
+    return item.domain
+      ? `<img class="ai-provider-icon" src="https://www.google.com/s2/favicons?domain=${esc(item.domain)}&amp;sz=64" alt="" loading="lazy">`
+      : '<img class="ai-provider-icon" src="art/mark.svg" alt="">';
+  }
+  function modelChoices(selected, compact = false) {
+    return `<div class="ai-model-list ${compact ? "compact" : ""}">${M.aiModels.map(item =>
+      `<button type="button" class="ai-model-option" aria-pressed="${selected === item.id}" ${attributes("ai-model", item.id)}>
+        ${modelLogo(item)}<span class="ai-model-copy"><strong>${esc(item.name)}</strong><small>${esc(item.brand)}${item.paid || !compact ? " · " + esc(item.detail) : ""}</small></span>
+        ${item.paid ? '<span class="ai-model-tier">PRO</span>' : ""}
+      </button>`).join("")}</div>`;
+  }
   function heading(title, subtitle, actions = "") {
     return `<header class="section-header">
       ${iconButton("back", "Назад", "back", "", "section-back")}
@@ -78,6 +90,15 @@ const CortexUI = (() => {
       <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
         enterkeyhint="send"></textarea>
       <div class="composer-actions">
+        <details class="ai-model-picker"><summary aria-label="Выбрать модель ИИ" title="Выбрать модель ИИ">
+          ${modelLogo(M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0])}
+          <span class="ai-model-chevron" aria-hidden="true"></span></summary>
+          <div class="ai-model-popover"><header>Модель ИИ <small>$ за 1 млн: вход / выход</small></header>
+          ${modelChoices(M.state.preferences.aiModel, true)}</div>
+        </details>
+        <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("go", "models")} hidden>
+          <span class="quota-ring-art" aria-hidden="true"></span>
+        </button>
         <button class="composer-button mic-button" type="button" aria-label="Диктовать сообщение" ${attributes("dictate")}>${icon("mic", 21)}</button>
         <button class="composer-button voice-button" type="button" aria-label="Голосовой разговор" ${attributes("voice-chat")}>${icon("wave", 22)}</button>
         <button class="composer-button send-button" type="submit" aria-label="Отправить сообщение" hidden disabled>${icon("sendUp", 23)}</button>
@@ -103,9 +124,24 @@ const CortexUI = (() => {
   }
 
   function actionProgress(job) {
-    return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.waiting ? "history" : "bolt", 18)}</span>
-      <span><strong>${job.waiting ? "План на паузе" : "Выполняю…"}</strong>
+    return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.webEnabled || job.webSearching ? "globe" : job.waiting ? "history" : "bolt", 18)}</span>
+      <span><strong>${job.webSearching ? "Поиск в интернете" : job.webEnabled ? "Интернет" : job.waiting ? "План на паузе" : "Выполняю…"}</strong>
         <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action)}</small></span></div>`;
+  }
+
+  function webSourceBadges(text, active) {
+    if (!active) return "";
+    const hosts = new Set();
+    for (const match of text.matchAll(/\]\((https?:\/\/[^\s)]+)\)/gu)) {
+      if (hosts.size >= 5) break;
+      const href = CortexMarkdown.webUrl(match[1]);
+      if (!href) continue;
+      const host = new URL(href).hostname.toLowerCase();
+      if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) hosts.add(host);
+    }
+    return hosts.size ? `<div class="web-source-badges" aria-label="Сайты-источники">${icon("globe", 14)}<span>Источники</span>` +
+      [...hosts].map(host => `<span class="web-source-badge"><img src="/favicons/${esc(host)}" alt="" loading="lazy">${esc(host)}</span>`).join("") +
+      "</div>" : "";
   }
 
   const replyMark = `<span class="reply-mark" aria-hidden="true">${sign}</span>`;
@@ -115,12 +151,12 @@ const CortexUI = (() => {
     const messages = (item?.messages || []).map((message, index) => message.role === "user"
       ? `<article class="message user${ctx.messageEnter && index === item.messages.length - 1 ? " new-turn" : ""}" aria-label="Вы">${esc(message.text)}</article>`
       : `<article class="message assistant${ctx.messageEnter && index === item.messages.length - 1 ? " new-response" : ""}" aria-label="Ответ CORTEX">
-        ${replyMark}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
+        ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
         </div></article>`).join("");
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
-      ${replyMark}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
+      ${replyMark}${webSourceBadges(ctx.pending.text, ctx.pending.webSearching)}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
     const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">
@@ -389,15 +425,11 @@ const CortexUI = (() => {
       </section>` + button("Настроить CORTEX", "sliders", "go", "phone-tools", "primary"));
   }
   function models(ctx) {
-    const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection) + `<section class="panel stack">
-      ${choices(M.models, model, "model-profile")}
-      <p class="muted">${({
-        auto: "Автоматический выбор подходящей бесплатной модели.",
-        fast: "Приоритет скорости ответа, если модель доступна.",
-        deep: "Приоритет качества для сложных задач."
-      })[model]} При перегрузке модели сервер пробует резерв. У бесплатных моделей общая дневная квота OpenRouter.</p>
-      ${ctx.connection.profiles ? "" : '<p class="muted">Выбор применяется на сервере CORTEX с поддержкой профилей.</p>'}</section>`);
+    return detail("Модели ИИ", "Для переписки с CORTEX", quotaPanel(ctx.connection) + `<section class="panel stack">
+      ${modelChoices(M.state.preferences.aiModel)}
+      <p class="muted">Цены в $ за 1 млн входных / выходных токенов. PRO-модели требуют подписки. Списание по фактической стоимости OpenRouter.</p>
+      <h2 class="group-label">Режим авто</h2>${choices(M.models, M.state.preferences.model, "model-profile")}
+    </section>`);
   }
   function language() {
     return detail("Язык", "Ответы и распознавание речи", `<section class="panel stack"><h2>Язык CORTEX</h2>

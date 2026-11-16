@@ -80,7 +80,17 @@ const definitions = [
     number, text: text(600, "Text of the SMS draft", 0),
   }, ["number"]),
   define("search_web", "search", "Open a web search when the user asks to search or find something in a browser.", { query: text(220) }),
+  define("open_web_page", "open_web", "Open an explicitly requested HTTPS web page in the phone browser. Never infer a URL for an account, payment or login page.", {
+    target: { ...text(1200, "Full https:// URL"), pattern: "^https://[^\\s]+$" },
+  }),
+  define("find_app_in_store", "play_store", "Search the Android app store for an app the user wants to find or install. Do not install it automatically.", {
+    query: text(100, "App name to search for"),
+  }),
   define("search_maps", "maps", "Open a location search in the Android maps app.", { query: text(220) }),
+  define("show_recent_apps", "recents", "Show Android's recent-apps overview. Does not close or uninstall apps."),
+  define("set_auto_rotate", "rotate", "Enable or disable automatic screen rotation when the user explicitly asks. Requires Android system settings permission.", {
+    mode: choice("on", "off"),
+  }),
   define("draft_calendar_event", "calendar", "Open a calendar draft for the user's event. Start and end are optional.", {
     title: text(100), start: date, end: date,
   }, ["title"]),

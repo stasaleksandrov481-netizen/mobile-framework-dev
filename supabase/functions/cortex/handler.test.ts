@@ -4,6 +4,7 @@ import { createHandler } from "./handler.ts";
 import { createControl } from "./control.ts";
 import { checkedVisualPlan } from "./visual.ts";
 import { AUDIO_CODEC } from "./audio.ts";
+import { MODEL_PRICE_CEILINGS } from "./provider.ts";
 
 const install = "A".repeat(43);
 const otherInstall = "B".repeat(43);
@@ -18,6 +19,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
   const requests: string[] = [];
+  const paidHolds: Array<{ p_model: string; p_input: number; p_output: number; p_advanced: boolean }> = [];
   const reservations: Array<Array<{ bucket: string; seconds: number; maximum: number }>> = [];
   const aiRequests: Array<{ p_subject: string; p_kind: string }> = [];
   const usage = new Map<string, number>();
@@ -60,14 +62,16 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
 
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
       assert.equal(body.usage.include, true);
-      if (body.model === "anthropic/claude-haiku-5.5") {
+      if (MODEL_PRICE_CEILINGS[body.model]) {
         assert.equal(paid, true);
         assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer test-paid-key");
-        assert.equal(body.provider.max_price.prompt, 0.60);
-        assert.equal(body.provider.max_price.completion, 0.60);
-        assert.equal("temperature" in body, false);
-        assert.equal("top_p" in body, false);
-        assert.equal("reasoning" in body, false);
+        assert.equal(body.provider.max_price.prompt, MODEL_PRICE_CEILINGS[body.model].prompt);
+        assert.equal(body.provider.max_price.completion, MODEL_PRICE_CEILINGS[body.model].completion);
+        if (body.model.startsWith("anthropic/claude-")) {
+          assert.equal("temperature" in body, false);
+          assert.equal("top_p" in body, false);
+          assert.equal("reasoning" in body, false);
+        }
       } else {
         assert.equal(body.provider.max_price.prompt, 0);
         assert.equal(body.provider.max_price.completion, 0);
@@ -93,7 +97,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       }
       if (body.stream) {
         if (streamedReply) return streamedReply();
-        const measured = body.model === "anthropic/claude-haiku-5.5" ? ',"cost":0.000021' : '';
+        const measured = MODEL_PRICE_CEILINGS[body.model] ? ',"cost":0.000021' : '';
         return new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: {"usage":{"prompt_tokens":82,"completion_tokens":18' + measured + '}}\n\ndata: [DONE]\n\n',
           { headers: { "content-type": "text/event-stream" } });
       }
@@ -185,14 +189,16 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       case "/rest/v1/rpc/cortex_paid_reserve": {
         assert.equal(paid, true);
         assert.equal(body.p_subject, accountId);
-        assert.equal(body.p_model, "anthropic/claude-haiku-5.5");
-        assert.equal(body.p_advanced, true);
+        assert.ok(MODEL_PRICE_CEILINGS[body.p_model] || body.p_model === "google/gemini-3.8-flash-lite-tts");
+        assert.equal(body.p_advanced, body.p_model !== "google/gemini-3.8-flash-lite-tts");
+        paidHolds.push(body);
         const attempt = crypto.randomUUID();
         attempts.set(attempt, accountId);
         return Response.json({ quota: { ...quota(accountId), plan: "pro" }, attempt, max_output: body.p_output });
       }
       case "/rest/v1/rpc/cortex_paid_finish": {
-        assert.ok(body.p_cost > 0);
+        assert.ok(body.p_cost === null || body.p_cost > 0);
+        if (body.p_input !== null) usage.set(accountId, quota(accountId).used + body.p_input + body.p_output);
         return Response.json(quota(accountId));
       }
       case "/rest/v1/rpc/cortex_ai_reserve": {
@@ -235,7 +241,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       body: payload === undefined ? undefined : JSON.stringify(payload),
     }));
   }
-  return { call, models, requests, reservations, aiRequests, raw: app };
+  return { call, models, requests, reservations, aiRequests, paidHolds, raw: app };
 }
 
 test("guest traffic shares an atomic global budget even when install and IP rotate", async () => {
@@ -325,6 +331,59 @@ test("paid assistant prefers Haiku 5.5 while free guests stay on free models", a
   assert.match(models.at(-1)!, /:free$/);
 });
 
+test("explicit model routing uses provider price limits and never upgrades a free selection", async () => {
+  const { call, models, requests } = fixture(false, undefined, 15000, 50, true, true);
+  const authorization = { Authorization: "Bearer " + "T".repeat(43) };
+  const paid = await call("chat", { ...chatPayload("Привет", false), model_id: "openai/gpt-6-luna" }, authorization);
+  assert.equal(paid.status, 200);
+  assert.match(await paid.text(), /data: \[DONE\]/);
+  assert.equal(models[0], "openai/gpt-6-luna");
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_reserve"));
+  const count = requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_reserve").length;
+  const free = await call("chat", { ...chatPayload("Привет", false), model_id: "google/gemma-4-31b-it:free" }, authorization);
+  assert.equal(free.status, 200);
+  assert.match(await free.text(), /data: \[DONE\]/);
+  assert.equal(models.at(-1), "google/gemma-4-31b-it:free");
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_reserve").length, count);
+});
+
+test("Opus, Fable and the newest providers reserve credits proportional to their native prices", async () => {
+  const { call, models, paidHolds } = fixture(false, undefined, 15000, 50, true, true);
+  const authorization = { Authorization: "Bearer " + "T".repeat(43) };
+  for (const model of ["openai/gpt-6-luna", "anthropic/claude-opus-5.5",
+    "anthropic/claude-fable-5.2", "moonshotai/kimi-k3.1-pro", "x-ai/grok-4.7"]) {
+    const response = await call("chat", { ...chatPayload("Привет", false), model_id: model }, authorization);
+    assert.equal(response.status, 200, model);
+    await response.text();
+    assert.equal(models.at(-1), model);
+    const hold = paidHolds.at(-1)!;
+    assert.equal(hold.p_model, model);
+    assert.ok(hold.p_input >= Math.ceil(128 * MODEL_PRICE_CEILINGS[model].prompt / 0.20));
+    assert.ok(hold.p_output >= Math.ceil(740 * MODEL_PRICE_CEILINGS[model].completion / 0.20));
+  }
+  assert.ok(paidHolds[2].p_output > paidHolds[1].p_output);
+  assert.ok(paidHolds[1].p_output > paidHolds[0].p_output);
+});
+
+test("a guest cannot select a paid model or inject an arbitrary OpenRouter ID", async () => {
+  const { call, models } = fixture();
+  const premium = await call("chat", { ...chatPayload("Привет", false), model_id: "openai/gpt-6-luna" });
+  assert.equal(premium.status, 403);
+  assert.equal((await premium.json()).error, "paid_unavailable");
+  const injection = await call("chat", { ...chatPayload("Привет", false), model_id: "attacker/model" });
+  assert.equal(injection.status, 400);
+  assert.equal(models.length, 0);
+});
+
+test("an explicitly selected paid model never silently answers through a free fallback", async () => {
+  const failed = fixture(false, () => Response.json({ error: { message: "upstream offline" } }, { status: 503 }),
+    15000, 50, true, true);
+  const response = await failed.call("chat", { ...chatPayload("Привет", false), model_id: "anthropic/claude-fable-5.2" },
+    { Authorization: "Bearer " + "T".repeat(43) });
+  assert.ok(response.status >= 400);
+  assert.deepEqual(failed.models, ["anthropic/claude-fable-5.2"]);
+});
+
 test("speech is server-authenticated, throttled and returns only validated PCM", async () => {
   const { call, requests, reservations } = fixture();
   assert.equal((await call("speech", { text: "Привет" })).status, 401);
@@ -335,11 +394,28 @@ test("speech is server-authenticated, throttled and returns only validated PCM",
   const speech = await call("speech", { text: "Привет" }, headers);
   assert.equal(speech.status, 200);
   assert.equal(speech.headers.get("x-cortex-audio-format"), "pcm_s16le_24000_mono");
+  const charged = JSON.parse(speech.headers.get("x-cortex-quota") || "null");
+  assert.equal(charged.unit, "tokens");
+  assert.ok(charged.used >= 100, "voice synthesis must deduct shared quota");
   assert.deepEqual(new Uint8Array(await speech.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
   assert.ok(requests.includes("POST /api/v1/audio/speech"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_reserve"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_reserve"));
+  assert.ok(!reservations.some(limits => limits.some(limit =>
+    limit.bucket.startsWith("speech:") && limit.bucket !== "speech:all" && limit.seconds === 86_400)),
+  "personal speech usage should be bounded by tokens, not an extra daily request count");
   assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all" &&
     limit.seconds === 86_400 && limit.maximum === 500)));
+});
+
+test("paid voice synthesis uses the existing subscription token allowance", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, true, true);
+  const response = await call("speech", { text: "Привет" }, { Authorization: "Bearer " + "T".repeat(43) });
+  assert.equal(response.status, 200);
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_reserve"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_finish"));
+  assert.equal(JSON.parse(response.headers.get("x-cortex-quota")!).unit, "tokens");
 });
 
 test("speech falls back only for retryable upstream failures", async () => {
@@ -352,6 +428,8 @@ test("speech falls back only for retryable upstream failures", async () => {
   const declined = await invalid.call("speech", { text: "Привет" }, headers);
   assert.equal(declined.status, 502);
   assert.equal(invalid.requests.filter(url => url === "POST /api/v1/audio/speech").length, 1);
+  assert.ok(invalid.requests.includes("POST /rest/v1/rpc/cortex_ai_finish"),
+    "failed speech must release its reserved token balance");
 });
 
 test("upgraded APKs receive 4x smaller voice data while older APKs retain identical PCM", async () => {
