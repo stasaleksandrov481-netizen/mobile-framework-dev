@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
+import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import nextConfig from "../next.config.ts";
 
 test("health probes coalesce parallel requests and cache success", async () => {
@@ -59,6 +60,37 @@ test("Auth errors cannot leak raw database, SMTP or account-enumeration details"
   assert.equal(isRateLimited(Object.assign(new Error("temporary"), { status: 429 })), true);
   assert.match(safeAuthErrorMessage(Object.assign(new Error("Too many requests"), { status: 429 })), /Слишком много/);
   assert.equal(safeAuthErrorMessage(new Error("Invalid login credentials")), "Неверная почта или пароль.");
+});
+
+test("Co-operators load from server config, seller is operator B, and incomplete data fails closed", () => {
+  const keys = ["NAME", "INN", "ADDRESS"].flatMap(field => [
+    `CORTEX_LEGAL_OPERATOR_A_${field}`, `CORTEX_LEGAL_OPERATOR_B_${field}`,
+  ]);
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    for (const key of keys) delete process.env[key];
+    assert.equal(dataOperators().length, 0);
+    assert.equal(operatorDetailsComplete(), false);
+    process.env.CORTEX_LEGAL_OPERATOR_A_NAME = "Оператор A";
+    process.env.CORTEX_LEGAL_OPERATOR_A_INN = "0".repeat(12);
+    process.env.CORTEX_LEGAL_OPERATOR_B_NAME = "Оператор B";
+    process.env.CORTEX_LEGAL_OPERATOR_B_INN = "0".repeat(12);
+    const operators = dataOperators();
+    assert.deepEqual(operators.map(person => person.name), ["Оператор A", "Оператор B"]);
+    assert.equal(paymentMerchant()?.name, "Оператор B");
+    assert.equal(operatorDetailsComplete(), false);
+    process.env.CORTEX_LEGAL_OPERATOR_A_ADDRESS = "Адрес A";
+    assert.equal(operatorDetailsComplete(), false);
+    process.env.CORTEX_LEGAL_OPERATOR_B_ADDRESS = "Адрес B";
+    assert.equal(operatorDetailsComplete(), true);
+    process.env.CORTEX_LEGAL_OPERATOR_B_INN = "invalid";
+    assert.equal(operatorDetailsComplete(), false);
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
 });
 
 test("Security headers restrict third-party origins and prohibit API caching", async () => {

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { legalParty } from "@/lib/merchant-details";
+import { paymentMerchant } from "@/lib/merchant-details";
 
 export const metadata = {
   title: "Пользовательское соглашение — CORTEX",
@@ -7,19 +7,20 @@ export const metadata = {
 };
 
 export default function TermsPage() {
-  const merchant = legalParty("SELLER");
+  const merchant = paymentMerchant();
   return (
     <div className="shell">
       <main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / УСЛОВИЯ</p>
         <h1>Пользовательское соглашение</h1>
-        <p className="legal-lead">Действует с 16 ноября 2026 года. Правила использования сайта cortexapp.ru, аккаунта и приложения CORTEX для Android.</p>
+        <p className="legal-lead">Редакция 2 от 16 ноября 2026 года. Правила использования сайта cortexapp.ru, аккаунта и приложения CORTEX для Android.</p>
 
         <div className="legal-notice">
-          <strong>Исполнитель</strong>
-          {merchant ? <p>{merchant.name}<br />{merchant.registration}<br />{merchant.address}</p> :
-            <p>Публичная регистрация и платные заказы закрыты до публикации проверенных реквизитов исполнителя. Связь: <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>.</p>}
+          <strong>Исполнитель платных услуг</strong>
+          {merchant ? <p>{merchant.name}<br />{merchant.registration}{merchant.address ? <><br />{merchant.address}</> : null}</p> :
+            <p>Реквизиты исполнителя готовятся к публикации.</p>}
+          <p>Операторы персональных данных указаны отдельно в <Link href="/privacy">политике</Link>. Платные заказы остаются недоступны до завершения юридических и технических проверок. Связь: <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>.</p>
         </div>
 
         <h2>1. Принятие условий и аккаунт</h2>
