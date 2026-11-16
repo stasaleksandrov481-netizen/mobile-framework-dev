@@ -178,7 +178,7 @@ svg { display: block; flex-shrink: 0; }
   font-size: 11px;
   font-weight: 500;
 }
-.footer-links { display: flex; align-items: center; gap: 27px; }
+.footer-links { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; column-gap: 27px; row-gap: 10px; }
 .footer-links a { display: inline-flex; align-items: center; gap: 7px; transition: color .2s; }
 .footer-links a:hover { color: #f7f7f7; }
 
@@ -428,12 +428,12 @@ svg { display: block; flex-shrink: 0; }
   .hero-actions .button { width: 100%; justify-content: space-between; min-height: 53px; padding-inline: 19px 12px; }
   .hero-actions .button--disabled { justify-content: center; }
   .bonus-note { margin-top: 20px; font-size: 11.5px; }
-  .site-footer { align-items: flex-start; flex-wrap: wrap; gap: 12px; font-size: 10px; }
-  .footer-links { gap: 17px; }
+  .site-footer { flex-direction: column; align-items: center; gap: 16px; padding-bottom: 28px; font-size: 10px; text-align: center; }
+  .footer-links { justify-content: center; column-gap: 17px; row-gap: 13px; }
   .auth-back { font-size: 11px; }
   .auth-main { align-items: flex-start; padding-top: 46px; padding-bottom: 45px; }
   .auth-kicker { margin-bottom: 19px; font-size: 9px; }
-  .auth-form-area h1 { font-size: 46px; }
+  .auth-form-area h1 { font-size: clamp(33px, 9vw, 46px); overflow-wrap: anywhere; }
   .auth-description { margin: 14px 0 23px; font-size: 13px; }
   .registration-form > input { height: 52px; }
   .auth-submit { margin-top: 17px; }
@@ -444,6 +444,12 @@ svg { display: block; flex-shrink: 0; }
   .legal-lead { margin-bottom: 28px !important; }
   .legal-page h2 { margin-top: 36px; font-size: 18px; }
   .legal-notice { padding: 16px 18px 13px; }
+}
+
+@media (max-width: 360px) {
+  .otp-code .otp-digit { height: 51px; border-radius: 10px; font-size: 20px; }
+  .auth-footer { justify-content: center; text-align: center; }
+  .auth-footer-links { justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
