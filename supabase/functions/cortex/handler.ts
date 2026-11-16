@@ -395,7 +395,15 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
 
   async function subject(request: Request, account: Account | null): Promise<string | null> {
     if (account) return account.id;
-    const install = guests ? await installIdentity(request) : null;
+    if (!guests) return null;
+    // ANDROID_ID is stable across an app reinstall for the same signing key,
+    // Android user and device. Never treat this client-provided value as proof
+    // of device integrity; the global and per-IP limits remain mandatory.
+    const androidId = request.headers.get("x-cortex-device") || "";
+    if (/^[a-f0-9]{16}$/.test(androidId)) {
+      return "guest_" + await hash("cortex-android-guest-v1:" + androidId);
+    }
+    const install = await installIdentity(request);
     return install ? "guest_" + install : null;
   }
 
