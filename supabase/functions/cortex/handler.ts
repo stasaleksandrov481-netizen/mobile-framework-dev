@@ -858,8 +858,12 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
           ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
             ? [{ model: paidFast, advanced: false }] : []) ];
-        const routeModels = [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
-        const maxAttempts = paidCandidates.length + (input.visual ? 2 : 3);
+        // An explicit model choice is exact. Never silently answer with a free
+        // fallback while the composer still displays a premium model name.
+        const routeModels = chosenPaid ? paidCandidates : chosenFree
+          ? [{ model: chosenFree, advanced: false }]
+          : [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
+        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.visual ? 2 : 3);
         const messages = [...input.messages];
         if (access?.context_chars) {
           let chars = messages.reduce((total, turn) => total + turn.content.length, 0);
@@ -897,7 +901,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           if (failure && lastModel) restModel(lastModel, failure);
           while (!signal.aborted && next < maxAttempts) {
             if (next >= routeModels.length) {
-              if (catalogChecked || input.visual) break;
+              if (catalogChecked || input.visual || chosen) break;
               catalogChecked = true;
               const live = await freeCatalog();
               routeModels.push(...live.filter(model => !choices.includes(model) &&

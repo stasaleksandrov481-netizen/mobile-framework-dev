@@ -375,6 +375,15 @@ test("a guest cannot select a paid model or inject an arbitrary OpenRouter ID", 
   assert.equal(models.length, 0);
 });
 
+test("an explicitly selected paid model never silently answers through a free fallback", async () => {
+  const failed = fixture(false, () => Response.json({ error: { message: "upstream offline" } }, { status: 503 }),
+    15000, 50, true, true);
+  const response = await failed.call("chat", { ...chatPayload("Привет", false), model_id: "anthropic/claude-fable-5.2" },
+    { Authorization: "Bearer " + "T".repeat(43) });
+  assert.ok(response.status >= 400);
+  assert.deepEqual(failed.models, ["anthropic/claude-fable-5.2"]);
+});
+
 test("speech is server-authenticated, throttled and returns only validated PCM", async () => {
   const { call, requests, reservations } = fixture();
   assert.equal((await call("speech", { text: "Привет" })).status, 401);
