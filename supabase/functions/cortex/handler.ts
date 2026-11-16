@@ -188,8 +188,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     const value = database<string | null>("rpc/cortex_provider_key", "POST", {})
       .then(key => key?.trim() || environmentModelKey)
       .catch(error => {
-        if (providerCache?.value === value) providerCache = undefined;
+        // An available deployment fallback is a valid result. Keep it cached
+        // instead of querying a broken Vault RPC for every concurrent request.
         if (environmentModelKey) return environmentModelKey;
+        if (providerCache?.value === value) providerCache = undefined;
         throw error;
       });
     providerCache = { value, until: Date.now() + 90_000 };
@@ -244,12 +246,20 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   let readyCache = { value: false, until: 0 };
-  async function ready(): Promise<boolean> {
-    if (readyCache.until > Date.now()) return readyCache.value;
-    let value = false;
-    try { await database("cortex_sessions?select=token_hash&limit=0"); value = true; } catch { /* Report as configuration. */ }
-    readyCache = { value, until: Date.now() + 8000 };
-    return value;
+  let readyPending: Promise<boolean> | undefined;
+  function ready(): Promise<boolean> {
+    if (readyCache.until > Date.now()) return Promise.resolve(readyCache.value);
+    if (readyPending) return readyPending;
+    const run = (async () => {
+      let value = false;
+      try { await database("cortex_sessions?select=token_hash&limit=0"); value = true; }
+      catch { /* Report as configuration. */ }
+      readyCache = { value, until: Date.now() + 8000 };
+      return value;
+    })();
+    readyPending = run;
+    void run.finally(() => { if (readyPending === run) readyPending = undefined; });
+    return run;
   }
 
   async function auth<T>(path: string, payload?: unknown, method = "POST", userToken?: string): Promise<T> {

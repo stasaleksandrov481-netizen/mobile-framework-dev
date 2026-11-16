@@ -19,6 +19,15 @@ Audit date: 2026-11-16. This is a deployment checklist, not a claim of immunity 
 - JSON media-type checks prevent simple browser form submissions to state-changing gateway routes.
 - Native client has bounded parallel requests, bounded pending queue, bounded JSON and SSE responses, and cancellation when the UI is closed.
 - GitHub CodeQL security scans, automated dependency-update proposals and Android / server-side security regression tests.
+- Cold-start readiness probes now coalesce concurrent calls, and a valid environment provider-key fallback is cached even when the Vault RPC fails. These prevent extra database calls during bursts.
+
+## Reproducible safe load test
+
+Run `node qa/load-cortex.mjs http://127.0.0.1:3101` against a locally started production build of `cortex-web` (`npm run build`, then `npm run start -- --port 3101`). The script refuses non-loopback hosts and only sends GET requests to `/api/healthz` and `/api/status`.
+
+- 2026-11-16, local optimized Next.js build, Redis intentionally unconfigured: **3,500 / 3,500 HTTP 200**, in six bursts at 10, 50 and 100 concurrent connections; `/api/healthz` p95 81.9 ms at concurrency 100; `/api/status` p95 72.8 ms at concurrency 100.
+- Synthetic Supabase gateway test: 240 simultaneous `status` requests with one installation ID yielded 30 success / 210 rate-limit responses; 60 simultaneous AI checks yielded 12 success / 48 rate-limit responses, without contacting a paid provider.
+- These figures measure a local process and mocked backend, **not** production DDoS resilience, number of sustainable users, Supabase capacity, or Vercel billing limits. Production load testing requires a staging deployment, provider coordination, and explicit cost caps.
 
 ## Required before public beta
 
