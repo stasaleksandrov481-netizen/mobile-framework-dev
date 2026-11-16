@@ -169,7 +169,8 @@ internal class CortexDeviceBridge(
             }
             "open-link" -> {
                 val url = body.optString("url")
-                val ok = if (url.startsWith("https://") || url.startsWith("http://")) launch(Intent(Intent.ACTION_VIEW, Uri.parse(url))) else false
+                val safeUrl = CortexSafeUrl.parse(url)
+                val ok = safeUrl != null && launch(Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl.toASCIIString())))
                 emit(JSONObject().put("type", "link").put("ok", ok))
             }
             "open-login" -> {

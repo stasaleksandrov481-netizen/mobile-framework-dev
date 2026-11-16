@@ -64,9 +64,8 @@ internal class CortexPhoneActions(private val context: Context) {
                 return status(if (sent) "opened" else "unavailable").put("name", app.name).put("package", app.pkg).put("verified", false)
             }
             "open_web" -> {
-                val url = Uri.parse(target)
-                if (url.scheme?.lowercase(Locale.ROOT) !in setOf("https", "http") || url.host.isNullOrEmpty() || url.userInfo != null) return status("invalid")
-                return started(Intent(Intent.ACTION_VIEW, url).addCategory(Intent.CATEGORY_BROWSABLE))
+                val url = CortexSafeUrl.parse(target) ?: return status("invalid")
+                return started(Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())).addCategory(Intent.CATEGORY_BROWSABLE))
                     .put("host", url.host.orEmpty())
             }
             "play_store" -> {

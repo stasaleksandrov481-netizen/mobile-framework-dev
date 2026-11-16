@@ -41,6 +41,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val main = Handler(Looper.getMainLooper())
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
     private val lifecycle = Any()
+    @Volatile private var revocationAttemptedAt = 0L
     private val installId = installToken(context)
     private val deviceId = runCatching {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -89,6 +90,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         val task = FutureTask<Unit> {
             val outcome = JSONObject()
             try {
+                if (request.optString("operation") != "logout") retryPendingRevocation(id)
                 outcome.put("result", perform(request, id) { event ->
                     main.post { if (jobs.containsKey(id)) onEvent(event) }
                 })
@@ -166,11 +168,16 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
             "auth-cancel" -> synchronized(loginLock) { store.clear("login"); JSONObject().put("cancelled", true) }
             "logout" -> synchronized(loginLock) {
-                runCatching { call("DELETE", "session", null, id) }
+                // A local logout must be immediate even without connectivity,
+                // but the remotely valid bearer must not be forgotten forever.
+                val active = store.get()
+                if (active != null) store.put(active, "pending-revoke")
+                val revoked = runCatching { call("DELETE", "session", null, id) }.isSuccess
+                if (revoked && active != null && store.get("pending-revoke") == active) store.clear("pending-revoke")
                 store.clear("login")
                 store.clear()
                 CortexScenarios.selectAccount(context, null)
-                JSONObject().put("ok", true)
+                JSONObject().put("ok", true).put("revocation_pending", active != null && !revoked)
             }
             else -> throw GatewayFailure("endpoint_missing")
         }
@@ -185,15 +192,30 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         CortexScenarios.selectAccount(context, result.optJSONObject("account")?.optString("id"))
     }
 
+    private fun retryPendingRevocation(id: String) {
+        val pending = store.get("pending-revoke") ?: return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (revocationAttemptedAt > 0L && now - revocationAttemptedAt < 60_000L) return
+        revocationAttemptedAt = now
+        // Best-effort short retry: never block regular assistance for a long
+        // network timeout. The token is stored encrypted with Android Keystore.
+        if (runCatching { call("DELETE", "session", null, id, bearerOverride = pending, timeoutMs = 2500) }.isSuccess) {
+            synchronized(loginLock) {
+                if (store.get("pending-revoke") == pending) store.clear("pending-revoke")
+            }
+        }
+    }
+
     private fun call(method: String, route: String, payload: JSONObject?, id: String,
-                     onEvent: ((JSONObject) -> Unit)? = null): JSONObject {
+                     onEvent: ((JSONObject) -> Unit)? = null, bearerOverride: String? = null,
+                     timeoutMs: Int? = null): JSONObject {
         val connection = (URL(endpoint + route).openConnection() as HttpURLConnection)
         connections[id] = connection
         try {
             if (!jobs.containsKey(id)) throw InterruptedException()
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = 12_000
-            connection.readTimeout = if (route.startsWith("auth/")) 20_000 else 92_000
+            connection.connectTimeout = timeoutMs ?: 12_000
+            connection.readTimeout = timeoutMs ?: if (route.startsWith("auth/")) 20_000 else 92_000
             connection.requestMethod = method
             connection.setRequestProperty("Accept", if (onEvent == null) "application/json" else "text/event-stream")
             connection.setRequestProperty("X-Cortex-Install", installId)
@@ -201,7 +223,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")
-            val token = store.get()
+            val token = bearerOverride ?: store.get()
             if (!token.isNullOrEmpty()) connection.setRequestProperty("Authorization", "Bearer $token")
             if (payload != null) {
                 connection.doOutput = true
@@ -386,7 +408,9 @@ private class SecureSession(context: Context) {
     @Synchronized fun put(token: String, name: String = "session") {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val combined = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString(name, Base64.encodeToString(combined, Base64.NO_WRAP)).apply()
+        check(prefs.edit().putString(name, Base64.encodeToString(combined, Base64.NO_WRAP)).commit()) {
+            "Could not persist encrypted session"
+        }
     }
     @Synchronized fun get(name: String = "session"): String? {
         val raw = prefs.getString(name, null) ?: return null
@@ -397,6 +421,8 @@ private class SecureSession(context: Context) {
             String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
         }.getOrNull()
     }
-    @Synchronized fun clear(name: String = "session") { prefs.edit().remove(name).apply() }
+    @Synchronized fun clear(name: String = "session") {
+        check(prefs.edit().remove(name).commit()) { "Could not clear encrypted session" }
+    }
     private companion object { val keyLock = Any() }
 }
