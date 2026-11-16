@@ -137,7 +137,7 @@ internal class CortexNotificationJournal(private val context: Context) {
                 val body = (extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)
                     ?: extras?.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
                     .replace(Regex("[\\r\\n]+"), " ").trim().take(130)
-                val part = listOf(title, body).filter(String::isNotBlank).joinToString(": ")
+                val part = CortexSensitiveText.notificationPart(title, body)
                 if (part.isBlank()) null else "• ${appName(post.packageName)}: $part"
             }.toList()
         return if (lines.isEmpty()) "Сейчас нет доступных уведомлений с текстом. Удалённые уведомления CORTEX не сохраняет."

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
+import android.text.InputType
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -380,14 +381,21 @@ class CortexScreenService : AccessibilityService() {
         }
     }
 
-    private fun sensitive(node: AccessibilityNodeInfo) =
-        node.isPassword || (Build.VERSION.SDK_INT >= 34 && node.isAccessibilityDataSensitive) ||
-            (node.isEditable && PRIVATE_ID.containsMatchIn(node.viewIdResourceName.orEmpty().substringAfterLast('/')))
+    private fun sensitive(node: AccessibilityNodeInfo): Boolean {
+        if (node.isPassword || (Build.VERSION.SDK_INT >= 34 && node.isAccessibilityDataSensitive)) return true
+        val variation = node.inputType and InputType.TYPE_MASK_VARIATION
+        val type = node.inputType and InputType.TYPE_MASK_CLASS
+        if (type == InputType.TYPE_CLASS_TEXT && (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+                variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) return true
+        if (type == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD) return true
+        if (node.isEditable && CortexSensitiveUi.privateField(node.viewIdResourceName, node.hintText?.toString())) return true
+        return CortexSensitiveText.containsSecret(node.text?.toString()?.take(512).orEmpty())
+    }
 
     internal companion object {
         var connected: CortexScreenService? = null
             private set
-        private val PRIVATE_ID = Regex("""(?i)password|passcode|credit_card|card_number|one_time|otp_input|pin_code|private_key""")
         private val MANUAL_PACKAGES = Regex("""(?:com\.(?:android|google\.android)\.(?:permissioncontroller|packageinstaller|credentials)|com\.google\.android\.gms)""")
     }
 }
