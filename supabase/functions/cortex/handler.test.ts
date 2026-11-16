@@ -294,6 +294,29 @@ test("simulated concurrent AI flood is bounded before any model call", async () 
   assert.ok(models.length <= 24, "Rejected requests must not call any upstream AI model");
 });
 
+test("guest AI quota follows the signed Android device ID across reinstalls", async () => {
+  const { call, aiRequests } = fixture();
+  const device = "0123456789abcdef";
+  const first = { "x-cortex-device": device };
+  const reinstall = { "x-cortex-install": otherInstall, "x-cortex-device": device };
+  const quota = async (headers: Record<string, string>) =>
+    (await (await call("status", undefined, headers)).json()).quota;
+  const original = await quota(first);
+  assert.match(original.id, /^guest_[A-Za-z0-9_-]{43}$/);
+  assert.equal((await quota(reinstall)).id, original.id);
+  assert.notEqual((await quota({ "x-cortex-device": "fedcba9876543210" })).id, original.id);
+  assert.notEqual((await quota({ "x-cortex-device": "invalid" })).id, original.id);
+  assert.notEqual((await quota({ "x-cortex-install": otherInstall })).id,
+    (await quota({})).id, "older clients keep install-scoped guest identity");
+
+  for (const headers of [first, reinstall]) {
+    const response = await call("check", {}, headers);
+    assert.equal(response.status, 200);
+    await response.body?.cancel();
+  }
+  assert.deepEqual(aiRequests.slice(-2).map(request => request.p_subject), [original.id, original.id]);
+});
+
 test("uses a stable guest ID and rejects the next AI call at the daily limit", async () => {
   const { call, models } = fixture(false, undefined, 100);
   const read = async (headers: Record<string, string> = {}) => (await (await call("status", undefined, headers)).json()).quota;
