@@ -218,7 +218,8 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
   function call(path: string, payload?: unknown, headers: Record<string, string> = {}, method?: string) {
     return app(new Request("https://examplecortex.supabase.co/functions/v1/cortex/v1/" + path, {
       method: method ?? (payload === undefined ? "GET" : "POST"),
-      headers: { "x-cortex-install": install, "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0", ...headers },
+      headers: { "x-cortex-install": install, "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0",
+        ...(payload === undefined ? {} : { "content-type": "application/json" }), ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
     }));
   }
@@ -625,7 +626,7 @@ test("beta simulation: malformed chat requests cannot reach the AI provider", as
 test("beta simulation: malformed JSON and oversized chat body fail before provider contact", async () => {
   const { raw, call, models } = fixture();
   const endpoint = "https://examplecortex.supabase.co/functions/v1/cortex/v1/chat";
-  const headers = { "x-cortex-install": install };
+  const headers = { "x-cortex-install": install, "content-type": "application/json" };
   const broken = await raw(new Request(endpoint, { method: "POST", headers, body: '{"messages": [' }));
   assert.equal(broken.status, 400);
   assert.equal((await broken.json()).error, "invalid");
@@ -633,6 +634,27 @@ test("beta simulation: malformed JSON and oversized chat body fail before provid
   assert.equal(massive.status, 413);
   assert.equal((await massive.json()).error, "too_large");
   assert.equal(models.length, 0);
+});
+
+test("browser-simple content types cannot submit state-changing gateway requests", async () => {
+  const { raw, models, requests } = fixture();
+  const endpoint = "https://examplecortex.supabase.co/functions/v1/cortex/v1/chat";
+  for (const type of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=abc"]) {
+    const response = await raw(new Request(endpoint, {
+      method: "POST", headers: { "x-cortex-install": install, "content-type": type },
+      body: JSON.stringify(chatPayload("Hello")),
+    }));
+    assert.equal(response.status, 415, type);
+    assert.equal((await response.json()).error, "invalid_content_type");
+  }
+  assert.equal(models.length, 0);
+  assert.ok(!requests.some(path => path.includes("/rpc/cortex_ai_reserve")));
+  const permitted = await raw(new Request(endpoint, {
+    method: "POST", headers: { "x-cortex-install": install, "content-type": "application/json; charset=UTF-8" },
+    body: JSON.stringify(chatPayload("Hello")),
+  }));
+  assert.equal(permitted.status, 200);
+  await permitted.text();
 });
 
 test("beta simulation: interrupted streamed tool call must never execute", async () => {

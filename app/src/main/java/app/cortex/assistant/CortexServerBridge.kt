@@ -11,15 +11,20 @@ import androidx.webkit.JavaScriptReplyProxy
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.UUID
 import java.util.concurrent.FutureTask
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -28,7 +33,10 @@ import javax.crypto.spec.GCMParameterSpec
 /** Bridge to the CORTEX Supabase Edge Function. No API provider keys in the APK. */
 internal class CortexServerBridge(private val context: Context) : AutoCloseable {
     private val store = SecureSession(context)
-    private val executor = Executors.newFixedThreadPool(3)
+    // A stalled upstream must not turn repeated UI requests into an unbounded
+    // queue of JSON payloads, Futures and retained callbacks.
+    private val executor = ThreadPoolExecutor(3, 3, 0L, TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue<Runnable>(16))
     private val jobs = ConcurrentHashMap<String, FutureTask<Unit>>()
     private val main = Handler(Looper.getMainLooper())
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
@@ -95,9 +103,17 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
             main.post { if (jobs.remove(id) != null) done(outcome) }
         }
-        synchronized(lifecycle) {
-            if (!executor.isShutdown && jobs.putIfAbsent(id, task) == null) executor.execute(task)
+        val accepted = synchronized(lifecycle) {
+            if (executor.isShutdown || jobs.size >= 19 || jobs.putIfAbsent(id, task) != null) false
+            else try {
+                executor.execute(task)
+                true
+            } catch (_: RejectedExecutionException) {
+                jobs.remove(id, task)
+                false
+            }
         }
+        if (!accepted) main.post { done(JSONObject().put("error", "busy")) }
     }
 
     fun cancel(id: String) {
@@ -194,7 +210,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
             val status = connection.responseCode
             if (status !in 200..299) {
-                val body = connection.errorStream?.bufferedReader()?.use { it.readText().take(2000) }.orEmpty()
+                val body = connection.errorStream?.let { readBounded(it, 2_000) }.orEmpty()
                 val error = runCatching { JSONObject(body) }.getOrNull()
                 val code = error?.optString("error").orEmpty().ifBlank { if (status == 429) "rate_limit" else "server" }
                 if (code == "sign_in" && !token.isNullOrEmpty()) synchronized(loginLock) {
@@ -211,7 +227,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 quota?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
                 connection.inputStream.bufferedReader().use { sse(it, onEvent) }
             } else {
-                val text = connection.inputStream.bufferedReader().use { it.readText() }
+                val text = readBounded(connection.inputStream, 1_000_000)
                 if (!jobs.containsKey(id)) throw InterruptedException()
                 JSONObject(text).also {
                     if (route == "status" && it.optString("fault").isEmpty() && it.has("account")) synchronized(loginLock) {
@@ -246,7 +262,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.doOutput = true
             connection.outputStream.use { it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)) }
             if (connection.responseCode !in 200..299) {
-                val json = runCatching { JSONObject(connection.errorStream?.bufferedReader()?.use { it.readText().take(300) }.orEmpty()) }.getOrNull()
+                val json = runCatching { JSONObject(connection.errorStream?.let { readBounded(it, 300) }.orEmpty()) }.getOrNull()
                 throw GatewayFailure(json?.optString("error", "speech_unavailable") ?: "speech_unavailable")
             }
             if (connection.getHeaderField("X-Cortex-Audio-Format") != "pcm_s16le_24000_mono" ||
@@ -271,11 +287,22 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         }
     }
 
+    private fun readBounded(stream: InputStream, maxChars: Int): String = try {
+        CortexBoundedText.read(InputStreamReader(stream, Charsets.UTF_8), maxChars)
+    } catch (_: IllegalArgumentException) {
+        throw GatewayFailure("response_too_large")
+    }
+
     private fun sse(reader: BufferedReader, onEvent: (JSONObject) -> Unit): JSONObject {
         val text = StringBuilder()
         val result = JSONObject()
         var completed = false
-        for (line in reader.lineSequence()) {
+        var events = 0
+        var receivedChars = 0
+        while (true) {
+            val line = boundedLine(reader, 65_536) ?: break
+            receivedChars += line.length
+            if (++events > 5_000 || receivedChars > 1_000_000) throw GatewayFailure("response_too_large")
             if (Thread.currentThread().isInterrupted) throw GatewayFailure("timeout")
             if (!line.startsWith("data:")) continue
             val value = line.substring(5).trim()
@@ -299,6 +326,19 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         if (text.isNotEmpty()) result.put("text", text.toString())
         if (result.length() == 0) throw GatewayFailure("empty")
         return result
+    }
+
+    // BufferedReader.readLine() can otherwise accumulate an unlimited SSE line
+    // before the caller has any chance to check its length.
+    private fun boundedLine(reader: BufferedReader, limit: Int): String? {
+        val line = StringBuilder()
+        while (true) {
+            val char = reader.read()
+            if (char < 0) return if (line.isEmpty()) null else line.toString()
+            if (char == '\n'.code) return line.toString().trimEnd('\r')
+            if (line.length >= limit) throw GatewayFailure("response_too_large")
+            line.append(char.toChar())
+        }
     }
     override fun close() = synchronized(lifecycle) {
         jobs.keys.toList().forEach(::cancel)
