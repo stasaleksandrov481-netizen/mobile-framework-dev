@@ -12,7 +12,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
 import java.util.Locale
 
-/** Plays server speech when available and falls back to Android speech offline or on quota errors. */
+/** Plays ephemeral server speech and falls back to Android speech on provider errors. */
 internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private val applicationContext = context.applicationContext
     private val bridge = CortexServerBridge(applicationContext)
@@ -34,8 +34,19 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                 request = null
             }
             val encoded = response.optJSONObject("result")?.optString("audio").orEmpty()
-            val pcm = runCatching { Base64.decode(encoded, Base64.NO_WRAP) }.getOrNull()
+            val format = response.optJSONObject("result")?.optString("audio_format")
+                ?.takeIf { it.isNotBlank() } ?: CortexAudioCodec.PCM_FORMAT
+            val wire = runCatching { Base64.decode(encoded, Base64.NO_WRAP) }.getOrNull()
+            val pcm = when (format) {
+                CortexAudioCodec.PCM_FORMAT -> wire
+                CortexAudioCodec.ADPCM_FORMAT -> wire?.let { packed ->
+                    CortexAudioCodec.decode(packed).also { packed.fill(0.toByte()) }
+                }
+                else -> null
+            }
             if (pcm == null || pcm.isEmpty() || pcm.size % 2 != 0) {
+                wire?.fill(0.toByte())
+                pcm?.fill(0.toByte())
                 useAndroidVoice(turn, normalized, complete)
                 return@speech
             }
@@ -84,6 +95,8 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
             synchronized(this) { if (track === current) track = null }
             runCatching { current?.stop() }
             runCatching { current?.release() }
+            // Previous spoken responses must not remain readable in retained memory.
+            pcm.fill(0.toByte())
             handler.post {
                 synchronized(this) {
                     if (turn != generation) return@post

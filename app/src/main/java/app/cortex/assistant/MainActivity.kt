@@ -64,6 +64,9 @@ class MainActivity : ComponentActivity() {
             val context = applicationContext
             Thread({
                 File(context.filesDir, "voices").deleteRecursively()
+                // Remove recordings from earlier builds, including the old cache location.
+                File(context.cacheDir, "voices").deleteRecursively()
+                File(context.cacheDir, "cortex-voices").deleteRecursively()
                 context.deleteSharedPreferences("cortex-voices")
             }, "CortexStorageCleanup").start()
         }

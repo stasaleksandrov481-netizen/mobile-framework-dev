@@ -48,11 +48,11 @@ internal class WakeAudioFeed private constructor(
 
     private fun capture() {
         var failed = false
+        val chunk = ByteArray(FRAME_BYTES)
+        val tail = ArrayDeque<ByteArray>()
+        val pending = ArrayDeque<ByteArray>()
         try {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
-            val chunk = ByteArray(FRAME_BYTES)
-            val tail = ArrayDeque<ByteArray>()
-            val pending = ArrayDeque<ByteArray>()
             var previous: Port? = null
             var offset = 0
             var blockedFrames = 0
@@ -114,6 +114,12 @@ internal class WakeAudioFeed private constructor(
             disconnect()
             if (wasOpen) runCatching { recorder.stop() }
             recorder.release()
+            // Scrub retained microphone frames when the voice session ends.
+            chunk.fill(0.toByte())
+            tail.forEach { it.fill(0.toByte()) }
+            pending.forEach { it.fill(0.toByte()) }
+            tail.clear()
+            pending.clear()
             if (failed && wasOpen) onFailure()
         }
     }
