@@ -3,6 +3,7 @@ import Link from "next/link";
 import InteractiveGrid from "@/components/InteractiveGrid";
 import { RegistrationForm } from "@/components/Registration";
 import UiIcon from "@/components/UiIcon";
+import { registrationIsOpen } from "@/lib/registration-gate";
 
 export const metadata: Metadata = {
   title: "Регистрация — CORTEX",
@@ -20,7 +21,14 @@ export default function RegisterPage() {
       </header>
 
       <main className="auth-main">
-        <RegistrationForm />
+        {registrationIsOpen() ? <RegistrationForm /> : (
+          <section className="auth-form-area" aria-labelledby="auth-title">
+            <p className="auth-kicker">CORTEX · РАННИЙ ДОСТУП</p>
+            <h1 id="auth-title">Регистрация пока закрыта.</h1>
+            <p className="auth-description">О начале регистрации сообщим в официальном канале CORTEX.</p>
+            <a className="button button--primary auth-submit" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">Новости CORTEX</a>
+          </section>
+        )}
       </main>
 
       <footer className="auth-footer">

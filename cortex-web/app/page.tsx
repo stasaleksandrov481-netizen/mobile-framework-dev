@@ -2,6 +2,7 @@ import Link from "next/link";
 import DownloadCTA from "@/components/DownloadCTA";
 import UiIcon from "@/components/UiIcon";
 import { safeHttpsDownloadUrl } from "@/lib/safe-url";
+import { registrationIsOpen } from "@/lib/registration-gate";
 
 const downloadUrl = safeHttpsDownloadUrl(process.env.NEXT_PUBLIC_CORTEX_ANDROID_DOWNLOAD_URL);
 
@@ -26,9 +27,11 @@ export default function Home() {
             CORTEX управляет Android по твоей команде. Меньше нажатий. Больше свободы.
           </p>
           <div className="hero-actions">
-            <Link id="register" className="button button--primary" href="/register">
-              Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
-            </Link>
+            {registrationIsOpen() ? (
+              <Link id="register" className="button button--primary" href="/register">
+                Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+              </Link>
+            ) : <span className="button button--primary button--disabled">Регистрация скоро</span>}
             <DownloadCTA url={downloadUrl} />
           </div>
           <p className="bonus-note"><strong>+5 000 ИИ-токенов</strong> за раннюю регистрацию. О запуске сообщим по почте, если согласишься получать уведомление.</p>

@@ -9,6 +9,7 @@ Status: 2026-11-16. The deployment is deliberately protected by Vercel Authentic
 - `/api/*` and `/auth/*` responses are marked `no-store` and `noindex`.
 - Untrusted Supabase Auth errors map to safe user messages rather than being rendered verbatim.
 - The registration UI separates agreement acceptance, account-data consent and optional launch mail. New acceptances are recorded with database time and an immutable document version by an authenticated RPC (requires migration `cortex_registration_consent_audit`).
+- Public registration UI is fail-closed unless `CORTEX_ENABLE_REGISTRATION=true`, `CORTEX_RF_DATA_COMPLIANCE_VERIFIED=true` and the `CORTEX_LEGAL_OPERATOR_*` fields are complete. This does **not** disable direct Supabase Auth signups; the Auth-side gate and CAPTCHA must also be configured before opening.
 - The notification endpoint requires `CRON_SECRET`, an explicit release flag and a valid HTTPS APK URL before sending. SMTP credentials and the Supabase service-role key remain server-only.
 - Supabase admin privilege escalation functions inspected on 2026-11-16 require a verified account, MFA AAL2, an owner role or a single-use hashed invitation as appropriate. `SECURITY DEFINER` advisories alone do not demonstrate a bypass.
 - Vercel Firewall has an exploit-path deny rule and per-IP status polling limit. Vercel platform DDoS mitigation is active independent of these rules.
