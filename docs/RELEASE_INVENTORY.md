@@ -4,17 +4,17 @@
 
 | Компонент | Проверенное состояние | Что учитывать |
 | --- | --- | --- |
-| GitHub default | `main`, `7b7c6393c8985e6204114125d7e7ca0420481f4d` на момент проверки | Ветка меняется; перепроверять SHA перед каждой работой |
-| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; последний проверенный production deployment `dpl_FmATqgf9MHjZhcYeH6EYZrYJd5Me`, ref `main`, SHA выше | Это **сайт**, не доказательство правильности Android APK |
+| GitHub default | `main`, новый объединённый SHA `05a18101c67b121db7ac64fcbd9c9fe27c6c988c` | Ветка меняется; перепроверять SHA перед каждой работой |
+| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; production deployment `dpl_uf52Do9kUru568A2SttwLYGKw74h` **READY**, ref `main`, SHA `05a1810`; авторизованный сайт HTTP 200 | Это **сайт**, не доказательство правильности Android APK |
 | Android в `main` | `app/build.gradle.kts`: `versionName=1.0.14`, `versionCode=114` | Пользователь 17.11 сообщил о неверном интерфейсе. Одобренную сборку/ветку ещё надо установить |
 | Android альтернативы | `release/cortex-1.0.14-20261116`, `fix/cortex-beta-ui-singleflight-20261116`, `audit/beta-stability-20261116` и исторические UI-ветки | Они могут **расходиться с `main`**; не считать ни одну верной без сверки с используемым APK |
 | Supabase production | Edge Function `cortex`, версия **44**, проект `jjcqrjztxohnifmziksy` | Файлы живой функции отличаются от `supabase/functions/cortex/` в GitHub; среди дополнительных файлов `settings.ts` |
 | AI device identity | Живая Edge Function использует `rpc/cortex_ai_device_identity` и принимает `X-Cortex-Device` | Функция RPC существует в production; старые Android-вызовы отправляют заголовок лишь на `presence`, а бесплатные AI-вызовы могут возвращать 426 |
-| Security PR | [#47](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/47), `security/stable-guest-device-quota-20261117` | Пока **не сливать** без утверждения релизной ветки/интерфейса. После сверки PR оставлен только с Android-заголовком, без серверного кода |
+| Security PR | [#47](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/47), `security/stable-guest-device-quota-20261117` | Android-правка объединена с PR #46 и #48 в [PR #49](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/49), слита в `main` SHA `05a1810` без серверного кода |
 
 ## Новая интеграционная ветка (17.11.2026)
 
-`release/cortex-unified-20261117` собирает изменения из PR #46 (островок/Markdown/команды), PR #47 (заголовок Android ID) и документы PR #48. Это **кандидат**, а не уже опубликованная сборка. Старые серверные изменения из GitHub намеренно не включены, чтобы не откатить живой Supabase v44. Пользователь должен подтвердить интерфейс по реальному APK до широкого выпуска.
+`release/cortex-unified-20261117` собирает изменения из PR #46 (островок/Markdown/команды), PR #47 (заголовок Android ID) и документы PR #48. Слита в `main` через PR #49, тестовый debug APK собран и сохранён в GitHub Actions run `43959855136`. **Публичный подписанный APK не выпущен**; интерфейс на реальном устройстве ещё не подтверждён. Серверные изменения из старого GitHub-кода намеренно не включены, чтобы не откатить живой Supabase v44.
 
 ## В чём расхождение
 
