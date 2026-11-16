@@ -10,6 +10,7 @@ import android.util.Base64
 import androidx.webkit.JavaScriptReplyProxy
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import java.net.URL
@@ -66,6 +67,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         return id
     }
 
+    fun speech(text: String, done: (JSONObject) -> Unit): String {
+        val id = UUID.randomUUID().toString()
+        enqueue(id, JSONObject().put("operation", "speech").put("text", text.take(550)), {}, done)
+        return id
+    }
+
     fun inbox(done: (JSONObject) -> Unit) {
         enqueue(UUID.randomUUID().toString(), JSONObject().put("operation", "support-inbox"), {}, done)
     }
@@ -106,6 +113,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "support-inbox" -> call("GET", "support/inbox", null, id)
             "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent)
+            "speech" -> speechBytes(request.optString("text"), id)
             "support" -> call("POST", "support", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "auth-start" -> synchronized(loginLock) {
                 call("POST", "auth/start?return=android&scheme=${BuildConfig.APPLICATION_ID}", JSONObject(), id).also {
@@ -214,6 +222,49 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                     }
                 }
             }
+        } finally {
+            connections.remove(id, connection)
+            connection.disconnect()
+        }
+    }
+
+    private fun speechBytes(text: String, id: String): JSONObject {
+        if (text.isBlank() || text.length > 550) throw GatewayFailure("invalid")
+        val connection = (URL(endpoint + "speech").openConnection() as HttpURLConnection)
+        connections[id] = connection
+        try {
+            if (!jobs.containsKey(id)) throw InterruptedException()
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 32_000
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Accept", "application/octet-stream")
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("X-Cortex-Install", installId)
+            connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
+            store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            connection.doOutput = true
+            connection.outputStream.use { it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode !in 200..299) {
+                val json = runCatching { JSONObject(connection.errorStream?.bufferedReader()?.use { it.readText().take(300) }.orEmpty()) }.getOrNull()
+                throw GatewayFailure(json?.optString("error", "speech_unavailable") ?: "speech_unavailable")
+            }
+            if (connection.getHeaderField("X-Cortex-Audio-Format") != "pcm_s16le_24000_mono" ||
+                !connection.contentType.orEmpty().startsWith("application/octet-stream")) throw GatewayFailure("speech_unavailable")
+            val buffer = ByteArray(8192)
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { source ->
+                while (true) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    val count = source.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 2_400_000) throw GatewayFailure("speech_unavailable")
+                    output.write(buffer, 0, count)
+                }
+            }
+            val audio = output.toByteArray()
+            if (audio.isEmpty() || audio.size % 2 != 0) throw GatewayFailure("speech_unavailable")
+            return JSONObject().put("audio", Base64.encodeToString(audio, Base64.NO_WRAP))
         } finally {
             connections.remove(id, connection)
             connection.disconnect()

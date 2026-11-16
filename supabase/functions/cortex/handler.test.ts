@@ -43,6 +43,12 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       init?.body ? JSON.parse(String(init.body)) : {};
     requests.push(method + " " + url.pathname);
 
+    if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/audio/speech") {
+      assert.equal(new Headers(init?.headers).get("Authorization"), paid ? "Bearer test-paid-key" : "Bearer test-key");
+      assert.deepEqual(body, { model: "google/gemini-3.8-flash-lite-tts", input: "Привет", voice: "Kore", response_format: "pcm" });
+      return new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "application/octet-stream" } });
+    }
+
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
       assert.equal(body.usage.include, true);
       if (body.model === "anthropic/claude-haiku-5.5") {
@@ -231,6 +237,21 @@ test("paid assistant prefers Haiku 5.5 while free guests stay on free models", a
   assert.equal(guestResponse.status, 200);
   assert.match(await guestResponse.text(), /data: \[DONE\]/);
   assert.match(models.at(-1)!, /:free$/);
+});
+
+test("speech is server-authenticated, throttled and returns only validated PCM", async () => {
+  const { call, requests } = fixture();
+  assert.equal((await call("speech", { text: "Привет" })).status, 401);
+  const headers = { Authorization: "Bearer " + "T".repeat(43) };
+  assert.equal((await call("speech", { text: " " }, headers)).status, 400);
+  assert.equal((await call("speech", { text: "x".repeat(551) }, headers)).status, 400);
+  assert.equal((await call("speech", { text: "Привет", model: "malicious/model" }, headers)).status, 400);
+  const speech = await call("speech", { text: "Привет" }, headers);
+  assert.equal(speech.status, 200);
+  assert.equal(speech.headers.get("x-cortex-audio-format"), "pcm_s16le_24000_mono");
+  assert.deepEqual(new Uint8Array(await speech.arrayBuffer()), new Uint8Array([1, 2, 3, 4]));
+  assert.ok(requests.includes("POST /api/v1/audio/speech"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_reserve"));
 });
 
 test("Android Yandex callback uses PKCE and does not put a bearer token in the redirect", async () => {

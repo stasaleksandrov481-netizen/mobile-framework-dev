@@ -913,17 +913,19 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const outcome = await respond(chat, job);
+      const memoryReply = retry ? null : M.memoryCommand(text);
+      const outcome = memoryReply === null ? await respond(chat, job) : { text: memoryReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
       M.touch(chat);
-      if (chat.saved) saved();
+      const memorized = memoryReply === null && !outcome.local && M.learnFromUser(text);
+      if (chat.saved || memoryReply !== null || memorized) saved();
       if (voiceTurn && voice === voiceTurn) {
         if (outcome.external) closeVoice();
-        else voiceReplyReady(voiceTurn);
+        else voiceReplyReady(voiceTurn, outcome.text);
       }
     } catch (error) {
       if (pending !== job) return;
@@ -1142,7 +1144,7 @@
     Wave.state(waveMode());
     voicePanel.querySelector("[data-voice-status]").textContent = text;
     const labels = { starting: "Включаю микрофон", listening: "Завершить запись", hearing: "Завершить запись",
-      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить",
+      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить", speaking: "Перебить",
       waiting: "Говорить", error: "Повторить" };
     voiceControl.innerHTML = icon(["waiting", "error", "starting"].includes(phase) ? "mic" : "stop", 17);
     voiceControl.setAttribute("aria-label", labels[phase]);
@@ -1158,6 +1160,7 @@
     voice = null;
     clearTimeout(job.timer);
     if (job.recognition) sendDevice("voice-cancel", { id: job.recognition });
+    if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
     voicePanel.hidden = true;
     delete voicePanel.dataset.voicePhase;
     Wave.state(waveMode());
@@ -1208,18 +1211,33 @@
     if (["listening", "hearing"].includes(job.phase)) {
       recognizing(job);
       sendDevice("voice-finish", { id: job.recognition });
-    } else if (["thinking", "opening"].includes(job.phase)) {
+    } else if (["thinking", "opening", "speaking"].includes(job.phase)) {
       if (pending?.voice === job) stopAnswer();
+      if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
       clearTimeout(job.timer);
       voiceStatus("waiting", "Готовлю микрофон…");
       job.timer = setTimeout(() => listen(job), 300);
     } else if (job.phase === "waiting" || job.phase === "error") listen(job);
   }
 
-  function voiceReplyReady(job) {
+  function voiceReplyReady(job, answer) {
     clearTimeout(job.timer);
-    voiceStatus("waiting", "Ответ в чате");
-    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 340);
+    job.speechId = M.id("speech");
+    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
+      voiceStatus("speaking", "Озвучиваю ответ…");
+      job.timer = setTimeout(() => {
+        if (voice !== job || job.phase !== "speaking") return;
+        sendDevice("voice-stop", { id: job.speechId });
+        voiceSpoken(job, false);
+      }, 44000);
+    } else voiceSpoken(job, false);
+  }
+
+  function voiceSpoken(job, ok) {
+    clearTimeout(job.timer);
+    job.speechId = null;
+    voiceStatus("waiting", ok ? "Готов слушать" : "Ответ в чате");
+    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 420);
   }
 
   function finishDictation(job, text) {
@@ -1280,6 +1298,9 @@
     if (Planner.handle(message)) return;
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
+    }
+    if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
+      voiceSpoken(voice, message.ok === true);
     }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";

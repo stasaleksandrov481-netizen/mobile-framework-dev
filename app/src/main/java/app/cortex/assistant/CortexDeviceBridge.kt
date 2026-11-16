@@ -25,6 +25,8 @@ internal class CortexDeviceBridge(
     private val context get() = activity.applicationContext
     private val engineDelegate = lazy { CortexActionEngine(activity) }
     private val engine by engineDelegate
+    private val voiceOutputDelegate = lazy { CortexVoiceOutput(activity) }
+    private val voiceOutput by voiceOutputDelegate
     private var pendingImage = false
     private var pendingExport: String? = null
     private var scenarioExport: String? = null
@@ -136,6 +138,13 @@ internal class CortexDeviceBridge(
             }
             "voice-finish" -> speech.finish(body.optString("id"))
             "voice-cancel" -> speech.cancel(body.optString("id"))
+            "voice-speak" -> {
+                val id = body.optString("id").take(90)
+                voiceOutput.speak(body.optString("text")) { ok ->
+                    emit(JSONObject().put("type", "voice-output").put("id", id).put("ok", ok))
+                }
+            }
+            "voice-stop" -> if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
             "copy" -> {
                 val text = body.optString("text").take(200_000)
                 val ok = runCatching {
@@ -185,6 +194,7 @@ internal class CortexDeviceBridge(
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (engineDelegate.isInitialized()) engine.close()
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
     }
 
     fun scheduleEntry(id: String) = emit(JSONObject().put("type", "schedule-open").put("id", id))

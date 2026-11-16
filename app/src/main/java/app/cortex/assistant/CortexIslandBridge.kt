@@ -51,7 +51,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                         }.apply()
                         if (mode == "off") {
                             configureWake(false)
-                            activity.stopService(Intent(activity, CortexIslandService::class.java))
+                            CortexIslandService.shutdownFromApp(activity)
                         } else if (prefs.getBoolean(CortexIslandService.WAKE_PAUSED, false)) {
                             refresh()
                         } else if (Settings.canDrawOverlays(activity)) {

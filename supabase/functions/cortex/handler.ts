@@ -121,6 +121,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
   const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
   const haikuModel = "anthropic/claude-haiku-5.5";
+  const speechModel = "google/gemini-3.8-flash-lite-tts";
   const paidFast = env.CORTEX_PAID_FAST_MODEL?.trim() || "";
   const paidDeep = env.CORTEX_PAID_DEEP_MODEL?.trim() || "";
   const paidModelId = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
@@ -183,7 +184,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (environmentModelKey) return environmentModelKey;
         throw error;
       });
-    providerCache = { value, until: Date.now() + 30_000 };
+    providerCache = { value, until: Date.now() + 90_000 };
     return value;
   }
 
@@ -397,7 +398,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (aiSettings && aiSettings.until > Date.now()) return aiSettings.value;
     const value = database<Array<{ model?: string }>>("cortex_ai_settings?select=model&singleton=eq.true&limit=1")
       .then(rows => rows[0]?.model || "");
-    aiSettings = { value, until: Date.now() + 5000 };
+    aiSettings = { value, until: Date.now() + 45_000 };
     void value.catch(() => { if (aiSettings?.value === value) aiSettings = undefined; });
     return value;
   }
@@ -567,6 +568,57 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (token) await database("cortex_sessions?token_hash=eq." + await hash(token), "DELETE");
         return json({ ok: true });
       }
+      if (method === "POST" && path === "/v1/speech") {
+        // PCM is kept server-side until the upstream response is validated. Never
+        // proxy the OpenRouter credential or allow arbitrary model selection.
+        const caller = await actor(request);
+        if (!caller.account) throw new Failure("sign_in", 401);
+        const gate = await control.gate(request, caller.account);
+        if (gate.mode !== "open") throw new Failure(gate.mode, 403);
+        const input = await body(request, 2200);
+        const text = input.text;
+        if (Object.keys(input).some(field => field !== "text") || typeof text !== "string" ||
+          !text.trim() || text.length > 550 || /[\u0000-\u0008\u000b\u000e-\u001f]/u.test(text)) throw new Failure("invalid", 400);
+        await reserve(
+          { bucket: "speech:" + caller.bucket, seconds: 60, maximum: 4 },
+          { bucket: "speech:" + caller.bucket, seconds: 86_400, maximum: 30 },
+          { bucket: "speech:all", seconds: 60, maximum: 80 },
+        );
+        const key = paidKey || await providerKey().catch(() => "");
+        if (!key) throw new Failure("unconfigured", 503);
+        const upstream = await network("https://openrouter.ai/api/v1/audio/speech", {
+          method: "POST", redirect: "error", signal: AbortSignal.timeout(26_000),
+          headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: speechModel, input: text.trim(), voice: "Kore", response_format: "pcm" }),
+        });
+        if (!upstream.ok) {
+          await upstream.body?.cancel();
+          throw new Failure(upstream.status === 429 ? "provider_limit" : "speech_unavailable", 502);
+        }
+        if ((upstream.headers.get("content-type") || "").includes("json")) {
+          await upstream.body?.cancel();
+          throw new Failure("speech_unavailable", 502);
+        }
+        const parts: Uint8Array[] = [];
+        let size = 0;
+        const reader = upstream.body?.getReader();
+        if (!reader) throw new Failure("speech_unavailable", 502);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > 2_400_000) throw new Failure("speech_unavailable", 502);
+            parts.push(value);
+          }
+        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        if (!size || size % 2) throw new Failure("speech_unavailable", 502);
+        const pcm = new Uint8Array(size);
+        let offset = 0;
+        for (const part of parts) { pcm.set(part, offset); offset += part.length; }
+        return new Response(pcm, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+          "X-Cortex-Audio-Format": "pcm_s16le_24000_mono" } });
+      }
       if (method === "POST" && (path === "/v1/chat" || path === "/v1/check")) {
         const caller = await actor(request);
         if (caller.account) await claimEarlyBonus(caller.account);
@@ -626,7 +678,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 8_000 : quick ? 5_500 : 15_000;
+        const firstTokenMs = input.visual ? 7_000 : quick ? 4_500 : 13_000;
         const signal = AbortSignal.any([request.signal, upstream.signal,
           AbortSignal.timeout(input.visual ? 46_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
@@ -640,7 +692,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
         // Haiku 5.5 is a paid model. Reserve it against the advanced-token and
         // $0.60/M-token liability ceiling; never silently bill free users.
-        const haikuReady = Boolean(isChat && hasPaidPlan && paidKey && access?.advanced_tokens);
+        // A rotated Vault key may serve both free and paid routes. Only accounts
+        // with an advanced-token budget can spend against Haiku's paid ceiling.
+        const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
         const paidCandidates = [ ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
           ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
           ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
@@ -702,9 +756,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               }
               const format = !input.visual ? undefined : visualTools.includes(model)
                 ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
-              const result = await completion(network, paid ? paidKey : key, [model], messages, isChat && !input.visual,
+              const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
                 input.limit, signal, input.device, input.repair,
-                paid && model === haikuModel ? 20_000 : firstTokenMs, quick, input.plan,
+                paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
               modelCooldown.delete(scope + model);
               return result;

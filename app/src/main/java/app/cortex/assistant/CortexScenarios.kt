@@ -23,6 +23,8 @@ internal object CortexScenarios {
     private fun itemsKey(owner: String) = if (owner.isEmpty()) "items" else "items:$owner"
     private fun owner(context: Context) = store(context).getString("owner", "").orEmpty()
 
+    fun currentOwner(context: Context): String = owner(context)
+
     @Synchronized
     fun selectAccount(context: Context, candidate: String?) {
         val next = candidate?.takeIf { id.matches(it) || yandexId.matches(it) }.orEmpty()
