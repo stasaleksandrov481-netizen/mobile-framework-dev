@@ -425,7 +425,12 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         val geometry = placement ?: return
         val params = window ?: return
         val box = geometry.window(opening || moving)
-        val x = box.left - geometry.screen.bounds.left
+        // A left-gravity overlay changes its physical anchor when Android
+        // shrinks the expanded touch window to the compact capsule. Some OEM
+        // window managers briefly compose that move as a leftward snap.
+        // Anchor the WINDOW by its centre instead: width changes cannot shift
+        // the capsule, whose artwork is still positioned in screen coordinates.
+        val x = (box.exactCenterX() - geometry.screen.bounds.exactCenterX()).roundToInt()
         val y = box.top - geometry.screen.bounds.top
         val flags = windowFlags(keyboardFocus)
         val changed = x != params.x || y != params.y || box.width() != params.width ||
@@ -508,7 +513,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             windowFlags(false),
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.LEFT
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
             if (Build.VERSION.SDK_INT >= 30) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
