@@ -31,6 +31,7 @@
 ## Где оставлять контекст
 
 - [Состояние релизов и расхождения](docs/RELEASE_INVENTORY.md)
+- [Карта 53 GitHub-веток](docs/BRANCH_REGISTRY.md)
 - [Журнал передач между агентами](docs/AGENT_HANDOFF.md)
 - [Шаблон PR](.github/PULL_REQUEST_TEMPLATE.md)
 
