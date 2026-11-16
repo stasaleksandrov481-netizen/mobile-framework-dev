@@ -11,7 +11,8 @@ const ticketId = "2f343286-09bb-4e8e-9aa3-21ecc664219b";
 const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
 function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50,
-  emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false) {
+  emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
+  enforceRateLimits = false) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -20,6 +21,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
   const aiRequests: Array<{ p_subject: string; p_kind: string }> = [];
   const usage = new Map<string, number>();
   const attempts = new Map<string, string>();
+  const rateCounters = new Map<string, number>();
   let approvedAccount: Record<string, unknown> | undefined;
   let exchangeClaimed = false;
   let guestRegistered = false;
@@ -164,6 +166,15 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         if (body.p_limits.some((rule: { bucket: string }) => rule.bucket === rejectRateBucket)) {
           return Response.json({ code: "PT429", message: "rate_limit" }, { status: 429 });
         }
+        if (enforceRateLimits) {
+          const limits = body.p_limits as Array<{ bucket: string; seconds: number; maximum: number }>;
+          const key = (limit: { bucket: string; seconds: number }) => limit.bucket + ":" + limit.seconds;
+          // Simulate atomic database reservation, including duplicate buckets at distinct windows.
+          if (limits.some(limit => (rateCounters.get(key(limit)) || 0) >= limit.maximum)) {
+            return Response.json({ code: "PT429", message: "rate_limit" }, { status: 429 });
+          }
+          for (const limit of limits) rateCounters.set(key(limit), (rateCounters.get(key(limit)) || 0) + 1);
+        }
         return Response.json(null);
       case "/rest/v1/cortex_installs":
       case "/rest/v1/cortex_app_sessions": return Response.json(null);
@@ -247,6 +258,33 @@ test("guest traffic shares an atomic global budget even when install and IP rota
   // A user prompt is one logical request even if free providers are retried.
   assert.equal(aiRequests.length, 2);
   assert.ok(models.length > aiRequests.length);
+});
+
+test("simulated concurrent status flood is rejected before expensive account and provider lookups", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 1000, true, false, 0, "", false, true);
+  const statuses = await Promise.all(Array.from({ length: 240 }, async () => {
+    const response = await call("status");
+    await response.body?.cancel();
+    return response.status;
+  }));
+  assert.equal(statuses.filter(status => status === 200).length, 30);
+  assert.equal(statuses.filter(status => status === 429).length, 210);
+  // Heavy reads and provider-key lookups must never scale with rejected requests.
+  assert.equal(requests.filter(path => path === "GET /rest/v1/cortex_sessions").length, 1);
+  assert.ok(requests.filter(path => path === "POST /rest/v1/rpc/cortex_ai_usage").length <= 30);
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_provider_key").length, 1);
+});
+
+test("simulated concurrent AI flood is bounded before any model call", async () => {
+  const { call, models } = fixture(false, undefined, 15000, 1000, true, false, 0, "", false, true);
+  const statuses = await Promise.all(Array.from({ length: 60 }, async () => {
+    const response = await call("check", {});
+    await response.body?.cancel();
+    return response.status;
+  }));
+  assert.equal(statuses.filter(status => status === 200).length, 12);
+  assert.equal(statuses.filter(status => status === 429).length, 48);
+  assert.ok(models.length <= 24, "Rejected requests must not call any upstream AI model");
 });
 
 test("uses a stable guest ID and rejects the next AI call at the daily limit", async () => {
