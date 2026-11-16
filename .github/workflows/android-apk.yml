@@ -57,6 +57,7 @@ jobs:
           npm run build --prefix cortex-web
           npm run lint --prefix cortex-web
           node --disable-warning=ExperimentalWarning --experimental-strip-types --test cortex-web/scripts/hardening.test.mjs
+          node --disable-warning=ExperimentalWarning --experimental-strip-types --test qa/health-route.test.mjs
           npm ci --prefix cortex-control --no-audit --no-fund
           npm run build --prefix cortex-control
 
