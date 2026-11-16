@@ -99,9 +99,13 @@ internal class IslandConversationPanel(
             addView(response, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         }
         response.apply {
-            setPadding(dp(5), dp(8), dp(6), dp(12))
-            setLineSpacing(dp(3).toFloat(), 1.14f)
-            letterSpacing = .006f
+            // The AI answer is text on the island canvas, never its own pill.
+            background = null
+            setBackgroundColor(Color.TRANSPARENT)
+            elevation = 0f
+            setPadding(dp(2), dp(8), dp(2), dp(11))
+            setLineSpacing(dp(2).toFloat(), 1.10f)
+            letterSpacing = 0f
             linksClickable = true
             movementMethod = LinkMovementMethod.getInstance()
             setLinkTextColor(Color.WHITE)
@@ -237,7 +241,9 @@ internal class IslandConversationPanel(
 
     private fun decorateReply() {
         // The answer is part of the same true-black surface, not a grey bubble.
+        answerScroll.background = null
         answerScroll.setBackgroundColor(Color.TRANSPARENT)
+        answerScroll.elevation = 0f
     }
 
     fun reveal(progress: Float) {
@@ -256,6 +262,7 @@ internal class IslandConversationPanel(
         appearance = value
         decorateReply()
         response.setTextColor(value.text)
+        response.setLinkTextColor(value.accent)
         status.setTextColor((value.text and 0x00FFFFFF) or 0xB0000000.toInt())
         divider.setBackgroundColor((value.text and 0x00FFFFFF) or 0x24000000)
         editor.setTextColor(value.text)
