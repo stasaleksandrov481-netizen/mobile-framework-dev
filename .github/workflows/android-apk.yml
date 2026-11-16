@@ -23,8 +23,9 @@ env:
   CORTEX_WEB_UPDATE_PUBLIC_KEY: ${{ vars.CORTEX_WEB_UPDATE_PUBLIC_KEY }}
 
 concurrency:
-  group: cortex-android-release
-  cancel-in-progress: false
+  # Keep production signing serialized, but avoid making every PR wait behind unrelated builds.
+  group: cortex-android-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   android:
