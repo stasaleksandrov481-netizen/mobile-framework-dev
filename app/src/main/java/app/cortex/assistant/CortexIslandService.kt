@@ -472,7 +472,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 reply = answer.trim()
                 updateStatus(if (ok) "done" else "error", "")
                 if (!hiddenByVoice && !poweringOff) setExpanded(true)
-                if (ok && fromVoice && !poweringOff) voiceOutput.speak(reply) { /* Speech is optional. */ }
+                if (fromVoice && !poweringOff && reply.isNotBlank()) voiceOutput.speak(reply) { /* Speech is optional. */ }
             })
     }
 
