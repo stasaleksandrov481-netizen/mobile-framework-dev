@@ -43,7 +43,7 @@ jobs:
           node-version: '24'
 
       - name: Verify gateway and billing
-        run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/redis.test.ts cortex-control/tests/billing.test.js
+        run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/provider.test.ts supabase/functions/cortex/redis.test.ts cortex-control/tests/billing.test.js
 
       - name: Verify island onboarding and content
         run: node --test qa/island-onboarding.test.mjs
