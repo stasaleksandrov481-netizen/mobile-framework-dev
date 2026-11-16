@@ -164,8 +164,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     else "Задача остановлена.", false, preserve)
             } catch (error: Exception) {
                 android.util.Log.w("CortexVisual", "Task failed: ${error.javaClass.simpleName}")
-                preserve = task.queue.isNotEmpty()
-                result = Result("Не удалось получить подтверждение Android.", false, preserve)
+                preserve = task.completed > 0 || task.queue.isNotEmpty() || task.plans > 0
+                result = Result("Не удалось получить подтверждение Android. Можно продолжить с текущего экрана.", false, preserve)
             } finally {
                 if (!result.ok) service?.stopTouch()
                 task.recognized = null
@@ -397,7 +397,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 } else null
                 if (screen != null && isSchoolSite(task.request)) report("Ищу решение…")
                 task.modelUsed = true
-                val result = plan(task, navigation, service, screen, feedback, explicitReading)
+                val result = plan(task, navigation, service, screen, feedback, explicitReading, report)
                 val plan = result.first ?: return Result(
                     if (feedback.isNotBlank() && feedback != VERIFIED_STAGE && feedback != READ_SCREEN) "$feedback ${result.second}"
                     else result.second, false, true)
@@ -789,7 +789,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     private suspend fun plan(
         task: Task, navigation: VisualNavigation, service: CortexScreenService, frame: VisualFrame?,
-        feedback: String, includeReading: Boolean
+        feedback: String, includeReading: Boolean, report: (String) -> Unit
     ): Pair<VisualPlan?, String> {
         task.plans++
         val namedApps = navigation.apps.filter { app ->
@@ -816,17 +816,30 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             .put(JSONObject().put("role", "user").put("content", user.toString()))
         val payload = JSONObject().put("messages", messages).put("style", "brief")
             .put("profile", if (task.profile == "deep") "deep" else "fast").put("visual_plan", true)
-        val result = withTimeoutOrNull<JSONObject>(48_000L) {
-            var id: String? = null
-            try {
-                suspendCancellableCoroutine { pending ->
-                    id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
+        // Planning is read-only. A short network interruption must not discard
+        // a verified multi-step task. Only retry transient failures, never
+        // provider quotas, authorization, or malformed plans.
+        var result: JSONObject? = null
+        for (attempt in 0..1) {
+            result = withTimeoutOrNull<JSONObject>(48_000L) {
+                var id: String? = null
+                try {
+                    suspendCancellableCoroutine { pending ->
+                        id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
+                    }
+                } finally {
+                    id?.let(gateway::cancel)
                 }
-            } finally {
-                id?.let(gateway::cancel)
             }
-        } ?: return null to "ИИ не ответил вовремя. Можно продолжить с текущего экрана."
-        val error = result.optString("error")
+            if (attempt == 0 && (result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS)) {
+                report("Восстанавливаю соединение с ИИ…")
+                delay(850L)
+                continue
+            }
+            break
+        }
+        val outcome = result ?: return null to "ИИ не ответил вовремя. Можно продолжить с текущего экрана."
+        val error = outcome.optString("error")
         if (error.isNotEmpty()) {
             val text = when (error) {
                 "daily_limit" -> "Суточный лимит CORTEX исчерпан. Запросы обновятся в 03:00 по Москве."
@@ -845,7 +858,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             }
             return null to "$text Можно продолжить с текущего экрана."
         }
-        val plan = VisualPlan.parse(result.optJSONObject("result")?.optString("text").orEmpty())
+        val plan = VisualPlan.parse(outcome.optJSONObject("result")?.optString("text").orEmpty())
         return plan to "Укажите, что открыть или нажать на этом экране."
     }
 
@@ -900,9 +913,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun clearPaused() { saved = null }
         fun clearPaused(source: String) { if (saved?.source == source) saved = null }
         fun canResume(source: String) = saved?.source == source
-        private const val MAX_PLANS = 12
-        private const val MAX_SCREEN_STEPS = 80
-        private const val TASK_TIMEOUT_MS = 720_000L
+        private val RETRYABLE_PLAN_ERRORS = setOf("offline", "timeout", "server", "server_busy")
+        private const val MAX_PLANS = 24
+        private const val MAX_SCREEN_STEPS = 120
+        private const val TASK_TIMEOUT_MS = 1_800_000L
         private val READ_ONLY = setOf("read_device")
         private val SYSTEM_NAVIGATION = setOf("app", "close_app", "home", "recents", "settings", "panel", "play_store", "display_refresh", "open_web", "app_info",
             "timer", "alarm", "search", "maps", "utility", "dial", "sms")
