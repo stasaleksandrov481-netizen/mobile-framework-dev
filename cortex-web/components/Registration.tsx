@@ -6,17 +6,10 @@ import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
+import { isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
 
 type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
 const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
-
-export function Registration() {
-  return (
-    <Link id="register" className="button button--primary" href="/register">
-      Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
-    </Link>
-  );
-}
 
 export function RegistrationForm() {
   const [mode, setMode] = useState<Mode>("signup");
@@ -25,6 +18,7 @@ export function RegistrationForm() {
   const [code, setCode] = useState("");
   const [notify, setNotify] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [wasSignin, setWasSignin] = useState(false);
@@ -74,7 +68,14 @@ export function RegistrationForm() {
       if (sendError) throw sendError;
       setCode("");
       setResendWait(60);
-    } catch { setError("Не удалось отправить новый код. Попробуйте позже."); }
+    } catch (failure) {
+      if (isRateLimited(failure)) {
+        setResendWait(300);
+        setError("Слишком много запросов. Попробуйте повторить через несколько минут.");
+      } else {
+        setError("Не удалось отправить новый код. Попробуйте позже.");
+      }
+    }
     finally { setBusy(false); }
   }
 
@@ -86,6 +87,7 @@ export function RegistrationForm() {
     try {
       if (mode === "signup") {
         if (!accepted) throw new Error("Примите условия обработки данных.");
+        if (!acceptedTerms) throw new Error("Примите пользовательское соглашение.");
         if (password.length < 10) throw new Error("Пароль должен содержать минимум 10 символов.");
         const { data, error: signupError } = await cortexAuth.auth.signUp({
           email: email.trim().toLowerCase(),
@@ -95,7 +97,8 @@ export function RegistrationForm() {
             data: {
               cortex_preregistration: true,
               cortex_notify_opt_in: notify,
-              cortex_privacy_acknowledged_version: "2026-11-15",
+              cortex_privacy_acknowledged_version: "2026-11-16",
+              cortex_terms_accepted_version: "2026-11-16",
               cortex_privacy_acknowledged_at: new Date().toISOString(),
               cortex_launch_notify_opt_in_at: notify ? new Date().toISOString() : null,
             },
@@ -149,16 +152,10 @@ export function RegistrationForm() {
         setMode("done");
       }
     } catch (failure) {
-      const message = failure instanceof Error ? failure.message : "Не удалось выполнить запрос.";
-      if (/Invalid login credentials/i.test(message)) {
-        setError("Неверная почта или пароль.");
-      } else if (/Email not confirmed/i.test(message)) {
-        setError("Сначала подтвердите адрес электронной почты.");
-      } else if (/Token has expired|invalid token/i.test(message)) {
-        setError("Код истёк или введён неверно. Проверьте письмо.");
-      } else {
-        setError(message);
+      if (isRateLimited(failure)) {
+        setResendWait(300);
       }
+      setError(safeAuthErrorMessage(failure));
     } finally {
       setBusy(false);
     }
@@ -226,7 +223,14 @@ export function RegistrationForm() {
               <label className="form-check">
                 <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
                 <span className="custom-check" aria-hidden="true"><UiIcon name="check" size={13} /></span>
-                <span className="check-label">Согласен на обработку данных для создания аккаунта согласно <Link href="/privacy" target="_blank" rel="noopener noreferrer">политике конфиденциальности</Link></span>
+                <span className="check-label">Даю <Link href="/consent" target="_blank" rel="noopener noreferrer">согласие на обработку данных</Link> для создания аккаунта. С <Link href="/privacy" target="_blank" rel="noopener noreferrer">политикой данных</Link> ознакомлен.</span>
+              </label>
+            )}
+            {mode === "signup" && (
+              <label className="form-check">
+                <input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} required />
+                <span className="custom-check" aria-hidden="true"><UiIcon name="check" size={13} /></span>
+                <span className="check-label">Принимаю <Link href="/terms" target="_blank" rel="noopener noreferrer">пользовательское соглашение</Link></span>
               </label>
             )}
             {mode === "signup" && (
@@ -258,22 +262,5 @@ export function RegistrationForm() {
         </>
       )}
     </section>
-  );
-}
-
-export function DownloadCTA({ url }: { url?: string }) {
-  const [available, setAvailable] = useState(false);
-  useEffect(() => {
-    setAvailable(Boolean(url) && Date.now() >= Date.parse("2026-11-20T00:00:00+03:00"));
-  }, [url]);
-
-  return available && url ? (
-    <a className="button button--secondary" href={url} rel="noopener noreferrer">
-      Установить <span className="button-icon"><UiIcon name="download" size={18} /></span>
-    </a>
-  ) : (
-    <span className="button button--secondary button--disabled" aria-label="Установка станет доступна 20 ноября">
-      <UiIcon name="clock" size={17} /> Установить <span className="button-soon">20.11</span>
-    </span>
   );
 }

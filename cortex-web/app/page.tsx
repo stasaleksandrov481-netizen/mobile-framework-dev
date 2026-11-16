@@ -1,4 +1,5 @@
-import { DownloadCTA, Registration } from "@/components/Registration";
+import Link from "next/link";
+import DownloadCTA from "@/components/DownloadCTA";
 import UiIcon from "@/components/UiIcon";
 import { safeHttpsDownloadUrl } from "@/lib/safe-url";
 
@@ -25,7 +26,9 @@ export default function Home() {
             CORTEX управляет Android по твоей команде. Меньше нажатий. Больше свободы.
           </p>
           <div className="hero-actions">
-            <Registration />
+            <Link id="register" className="button button--primary" href="/register">
+              Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+            </Link>
             <DownloadCTA url={downloadUrl} />
           </div>
           <p className="bonus-note"><strong>+5 000 ИИ-токенов</strong> за раннюю регистрацию. О запуске сообщим по почте, если согласишься получать уведомление.</p>
@@ -37,6 +40,7 @@ export default function Home() {
         <div className="footer-links">
           <a href="/privacy"><UiIcon name="shield" size={15} />Конфиденциальность</a>
           <a href="/terms">Условия</a>
+          <a href="/offer">Оферта</a>
           <a href="/pricing">Тарифы</a>
           <a href="/questions">Вопросы</a>
           <a href="/support">Поддержка</a>

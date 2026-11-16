@@ -28,6 +28,7 @@ export default function RegisterPage() {
         <div className="auth-footer-links">
           <Link href="/privacy">Конфиденциальность</Link>
           <Link href="/terms">Условия</Link>
+          <Link href="/consent">Согласие</Link>
           <Link href="/pricing">Тарифы</Link>
           <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>
         </div>

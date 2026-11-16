@@ -7,6 +7,9 @@ export const metadata: Metadata = {
   description: "Стоимость подписок CORTEX и дневные лимиты облачного ИИ.",
 };
 
+// Reuse the public price catalog via ISR instead of querying Supabase on every visit.
+export const revalidate = 300;
+
 const planInfo = {
   guest: ["Guest", "Облачный ИИ без регистрации"],
   free: ["Free", "Облачный ИИ с аккаунтом CORTEX"],
@@ -34,7 +37,7 @@ async function loadPlans(): Promise<Plan[] | null> {
     url.searchParams.set("order", "rank");
     const response = await fetch(url, {
       headers: { apikey: cortexPublishableKey },
-      cache: "no-store",
+      next: { revalidate: 300 },
       signal: AbortSignal.timeout(3500),
     });
     if (!response.ok) return null;
@@ -70,10 +73,11 @@ export default async function PricingPage() {
             ))}
           </dl>
         ) : <p role="status">Цены и лимиты временно не загрузились. Обновите страницу через несколько минут.</p>}
-        <p>Лимиты обновляются ежедневно в 03:00 по московскому времени. Продление подписки оформляется вручную на следующий месяц. Оплата на этапе согласования с Platega пока закрыта.</p>
+        <p>Лимиты обновляются ежедневно в 03:00 по московскому времени. Продление подписки оформляется отдельным платежом, без автоматического списания. Оплата станет доступна после завершения подключения платёжного провайдера.</p>
         <nav className="legal-links" aria-label="Документы CORTEX">
           <Link href="/questions">Частые вопросы</Link>
           <Link href="/terms">Пользовательское соглашение</Link>
+          <Link href="/offer">Публичная оферта и возвраты</Link>
           <Link href="/privacy">Политика конфиденциальности</Link>
           <Link href="/support">Поддержка</Link>
         </nav>

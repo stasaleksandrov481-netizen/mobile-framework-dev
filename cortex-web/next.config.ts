@@ -1,5 +1,13 @@
 import type { NextConfig } from "next";
 
+const supabaseOrigin = (() => {
+  try {
+    const candidate = new URL(process.env.NEXT_PUBLIC_CORTEX_SUPABASE_URL || "https://jjcqrjztxohnifmziksy.supabase.co");
+    if (candidate.protocol === "https:" && candidate.hostname.endsWith(".supabase.co")) return candidate.origin;
+  } catch { /* Build with the expected public Supabase origin. */ }
+  return "https://jjcqrjztxohnifmziksy.supabase.co";
+})();
+
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'none'",
@@ -10,7 +18,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+  `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace(/^https:/, "wss:")}`,
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "upgrade-insecure-requests",
@@ -23,6 +31,8 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+  { key: "Origin-Agent-Cluster", value: "?1" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
   { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
 ];
@@ -31,7 +41,17 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      { source: "/api/:path*", headers: [
+        { key: "Cache-Control", value: "no-store" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ] },
+      { source: "/auth/:path*", headers: [
+        { key: "Cache-Control", value: "no-store" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ] },
+    ];
   },
 };
 
