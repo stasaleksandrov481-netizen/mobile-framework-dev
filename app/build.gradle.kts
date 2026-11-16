@@ -81,7 +81,7 @@ dependencies {
     implementation("androidx.browser:browser:1.9.0")
     implementation("androidx.core:core:1.16.0")
     implementation("androidx.webkit:webkit:1.14.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
