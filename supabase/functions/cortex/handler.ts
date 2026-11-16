@@ -516,9 +516,18 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     try {
       if (method === "GET" && path === "/v1/status") {
         const storage = await ready();
+        if (storage) {
+          const install = await installIdentity(request);
+          await reserve(
+            { bucket: "status:caller:" + (install || "ip:" + await peer(request)),
+              seconds: 60, maximum: install ? 30 : 90 },
+            { bucket: "status:global", seconds: 60, maximum: 9000 },
+          );
+        }
         const [account, key] = storage
           ? await Promise.all([lookup(request), providerKey().catch(() => "")])
           : [null, ""];
+        if (storage && request.headers.has("authorization") && !account) throw new Failure("sign_in", 401);
         const [quota, publicId, guestId] = storage ? await Promise.all([
           usage(request, account).catch(() => null),
           account ? database<string>("rpc/cortex_public_account", "POST", { p_subject: account.id }).catch(() => null) : null,
@@ -564,9 +573,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         return json(result, response.status);
       }
       if (method === "GET" && path === "/v1/support/inbox") {
-        const { account } = await actor(request);
-        if (account) await claimGuest(request, account);
-        return json(await control.inbox(await ticketOwners(request, account)));
+        const caller = await actor(request);
+        await reserve(
+          { bucket: "inbox:" + caller.bucket, seconds: 60, maximum: 15 },
+          { bucket: "inbox:global", seconds: 60, maximum: 900 },
+        );
+        if (caller.account) await claimGuest(request, caller.account);
+        return json(await control.inbox(await ticketOwners(request, caller.account)));
       }
       if (method === "POST" && path === "/v1/presence") {
         const install = await installIdentity(request);
@@ -592,7 +605,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       if (method === "POST" && path === "/v1/auth/poll") return await poll(request);
       if (method === "DELETE" && path === "/v1/session") {
         const token = bearer(request);
-        if (token) await database("cortex_sessions?token_hash=eq." + await hash(token), "DELETE");
+        if (token) {
+          await reserve({ bucket: "session:delete:global", seconds: 60, maximum: 500 });
+          await database("cortex_sessions?token_hash=eq." + await hash(token), "DELETE");
+        }
         return json({ ok: true });
       }
       if (method === "POST" && path === "/v1/speech") {
@@ -677,6 +693,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
         const id = await subject(request, caller.account);
         if (!id) throw new Failure("sign_in", 401);
+        // Reject bursts before loading the model catalog and account quota.
+        await budget(caller);
         const [key, modelOverride, access] = await Promise.all([
           providerKey().catch(() => ""), configuredModel(), usage(request, caller.account),
         ]);
@@ -689,7 +707,6 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
         const candidates = input.visual ? [...visualTools, ...visualSchemas]
           : [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
-        await budget(caller);
         await database("rpc/cortex_track_ai_request", "POST", { p_subject: id,
           p_kind: !isChat ? "check" : input.visual ? "visual" : "chat" });
         let quota: Quota | undefined;
@@ -881,7 +898,11 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           status: error.status, headers: { ...JSON_HEADERS, "Retry-After": String(error.retryAfter || 1) },
         });
       }
-      if (error instanceof Failure) return json(failureBody(error), error.status);
+      if (error instanceof Failure) return Response.json(failureBody(error), {
+        status: error.status,
+        headers: { ...JSON_HEADERS,
+          ...(error.status === 429 ? { "Retry-After": String(error.retryAfter || 1) } : {}) },
+      });
       if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return json({ error: "timeout" }, 504);
       console.warn("CORTEX gateway request failed");
       return json({ error: "server" }, 503);
