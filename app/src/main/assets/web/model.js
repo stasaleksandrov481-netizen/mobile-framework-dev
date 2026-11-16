@@ -90,7 +90,8 @@ const Cortex = (() => {
   function localData(value, savedOnly = false) {
     return {
       edits: { cortex: object(value.edits?.cortex) },
-      chats: array(value.chats).filter(item => item && (!savedOnly || item.saved)),
+      chats: array(value.chats).filter(item => item && (!savedOnly || item.saved))
+        .map(item => ({ ...item, messages: array(item.messages).filter(message => !message.ephemeral) })),
       memories: object(value.memories),
       instructions: { ...object(value.instructions), cortex: object(value.instructions?.cortex) },
       notes: array(value.notes).filter(item => item && typeof item.id === "string")
@@ -118,7 +119,9 @@ const Cortex = (() => {
   function save() {
     try {
       localStorage.setItem(key, JSON.stringify({
-        ...state, chats: state.chats.filter(chat => chat.saved), accountData, guestImported
+        ...state, chats: state.chats.filter(chat => chat.saved)
+          .map(chat => ({ ...chat, messages: chat.messages.filter(message => !message.ephemeral) })),
+        accountData, guestImported
       }));
       return true;
     } catch {
@@ -153,6 +156,49 @@ const Cortex = (() => {
     data.enabled = data.enabled !== false;
     data.entries = array(data.entries).filter(entry => entry && !entry.example);
     return data;
+  }
+
+  const blockedMemory = /парол|password|токен|секрет|api[ _-]?key|cvv|cvc|otp|пин.?код|код из|номер карт|bearer|sk-or-v1-|-----begin|@|https?:\/\//iu;
+  const sensitiveValue = /\b(?:\d{6}|\d{12,19}|[A-Za-z0-9_-]{35,})\b/u;
+  function addMemoryFact(value, title) {
+    const data = memory();
+    const fact = value.trim().replace(/[.!?]+$/u, "").slice(0, 240);
+    if (!data.enabled || fact.length < 5 || blockedMemory.test(fact) || sensitiveValue.test(fact)) return false;
+    const existing = data.entries.find(entry => entry.title === title);
+    if (existing && existing.value.toLowerCase() === fact.toLowerCase()) return false;
+    if (existing) existing.value = fact;
+    else data.entries.unshift({ id: uid("fact"), enabled: true, title, value: fact });
+    data.entries = data.entries.slice(0, 16);
+    return true;
+  }
+
+  function memoryCommand(text) {
+    const input = String(text).trim();
+    if (/^(?:кортекс[, ]*)?(?:очисти память|удали память|забудь всё|забудь все)[.!?]*$/iu.test(input)) {
+      memory().entries = [];
+      return "Удалил все сохранённые факты обо мне. История чатов удаляется отдельно в настройках.";
+    }
+    if (/^(?:кортекс[, ]*)?(?:что ты обо мне помнишь|покажи мою память)[.!?]*$/iu.test(input)) {
+      const items = memory().entries.filter(item => item.enabled !== false);
+      return items.length ? "Я помню:\n" + items.map(item => "• " + item.value).join("\n") :
+        "Пока ничего о вас не запомнил.";
+    }
+    const explicit = /^(?:кортекс[, ]*)?запомни(?: пожалуйста)?[, ]+(?:что\s+)?(.+)$/iu.exec(input);
+    if (!explicit) return null;
+    return addMemoryFact(explicit[1], "По просьбе пользователя") ? "Запомнил. Этот факт можно удалить в разделе «Память»." :
+      "Не сохранил: память выключена либо запись содержит секретные данные.";
+  }
+
+  function learnFromUser(text) {
+    const message = String(text).trim().slice(0, 241);
+    const match = /^(меня зовут|я люблю|я предпочитаю|я работаю|я живу|я учусь|мой проект|мой язык|мне нравится)(\s+.{3,190})$/iu.exec(message);
+    if (!match) return false;
+    const name = match[1].toLowerCase();
+    const category = name === "меня зовут" ? "Имя" :
+      name === "мой проект" ? "Проект" : name === "мой язык" ? "Язык" :
+      name === "я работаю" ? "Работа" : name === "я живу" ? "Город" :
+      name === "я учусь" ? "Учёба" : "Предпочтения";
+    return addMemoryFact(message, category);
   }
 
   function chat(id) { return state.chats.find(item => item.id === id); }
@@ -215,7 +261,10 @@ const Cortex = (() => {
         "Отвечай спокойно и конкретно, учитывай ход беседы. " + replyLanguage,
       "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ". " + person.description,
       state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
-      "Используй Markdown для содержательной структуры: заголовки, списки, таблицы для сравнения и блоки кода. Если нужна заметка, совет или важный акцент, используй > [!NOTE], > [!TIP] или > [!IMPORTANT] отдельной строкой внутри цитаты. Действия выполняет клиент приложения и сообщает результат.",
+      "Оформляй содержательные ответы чистым Markdown: короткие абзацы, списки, заголовки только когда нужны, таблицы для сравнения, блоки кода с языком. " +
+        "Не превращай обычное приветствие в длинную инструкцию и не создавай плашки без причины. Для выделения заметки, совета или предупреждения используй цитату > [!NOTE], > [!TIP] или > [!IMPORTANT], если это действительно полезно. " +
+        "Не используй эмодзи. При необходимости ставь сдержанные встроенные SVG-иконки синтаксисом :icon[имя]:, доступные имена: check, info, alert, spark, shield, bolt, bell, heart, star, search, globe, note, file, link, history, settings. " +
+        "Иконки необязательны; максимум одна на смысловой блок. Не пиши HTML или SVG-код. Действия выполняет клиент приложения и сообщает результат.",
       ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
       facts ? "Память пользователя:\n" + facts : "",
       background ? "Фрагменты бесед как справочный контекст:\n" + background : "",
@@ -237,6 +286,6 @@ const Cortex = (() => {
   if (old && Object.keys(old).length) save();
   return {
     state, defaults, motion, languages, styles, models, instructionFields, profile, memory, chat, account,
-    createChat, touch, turns, save, useAccount, clearLocalData, id: uid
+    createChat, touch, turns, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

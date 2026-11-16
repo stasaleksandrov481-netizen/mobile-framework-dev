@@ -26,13 +26,22 @@ internal object CortexSupportNotification {
         if (enabled) resume(context) else pause(context)
     }
 
-    fun pause(context: Context) = context.getSystemService(JobScheduler::class.java).cancel(JOB)
+    fun pause(context: Context) {
+        runCatching { context.getSystemService(JobScheduler::class.java).cancel(JOB) }
+    }
 
     fun resume(context: Context) {
         if (paused(context) || !preferences(context).getBoolean("enabled", false)) return
-        val jobs = context.getSystemService(JobScheduler::class.java)
-        if (jobs.getPendingJob(JOB) == null) jobs.schedule(JobInfo.Builder(JOB, ComponentName(context, CortexSupportJob::class.java))
-            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60 * 1000L).build())
+        runCatching {
+            val jobs = context.getSystemService(JobScheduler::class.java)
+            if (jobs.getPendingJob(JOB) == null) {
+                val result = jobs.schedule(JobInfo.Builder(JOB, ComponentName(context, CortexSupportJob::class.java))
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(15 * 60 * 1000L).build())
+                if (result != JobScheduler.RESULT_SUCCESS) {
+                    android.util.Log.w("CortexSupport", "Periodic support check was not scheduled")
+                }
+            }
+        }.onFailure { android.util.Log.w("CortexSupport", "Android rejected periodic support job", it) }
     }
 
     fun update(context: Context, ids: JSONArray, seen: Boolean = false) {

@@ -95,6 +95,20 @@ class CortexActionSequenceTest {
         }
     }
 
+    @Test fun clockAndMessageIntentsWaitForUserConfirmation() {
+        for (kind in listOf("timer", "alarm", "dial", "sms")) {
+            var secondStarted = false
+            var final: CortexActionSequence.Result? = null
+            CortexActionSequence(listOf(step(kind), step("torch")), { true }, { _, index, _, done ->
+                if (index == 2) secondStarted = true
+                done(outcome("opened"))
+            }) { final = it }.start()
+            assertFalse(kind, secondStarted)
+            assertTrue(kind, requireNotNull(final).blocked)
+            assertFalse(kind, requireNotNull(final).ok)
+        }
+    }
+
     @Test fun lateCallbackAfterStopDoesNotStartNextStep() {
         var active = true
         var callback: ((JSONObject) -> Unit)? = null

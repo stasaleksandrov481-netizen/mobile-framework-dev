@@ -45,7 +45,8 @@ export function createControl(database: Database) {
 
   async function gate(request: Request, account?: { id: string; email: string } | null): Promise<Gate> {
     const settings = await configuration();
-    if (!settings) return OPEN;
+    // Missing settings must never bypass maintenance or closed-beta admission.
+    if (!settings) throw new Failure("storage_config", 503);
     const clientVersion = request.headers.get("x-cortex-version-code") || "";
     const versionCode = VALID_VERSION.test(clientVersion) ? Number(clientVersion) : 0;
     const needsUpdate = (settings.block_old_versions && versionCode < settings.min_version_code) ||

@@ -28,6 +28,20 @@ internal class CortexPhoneActions(private val context: Context) {
         true
     }.getOrDefault(false)
 
+    /** OEM Settings apps do not necessarily implement every public settings action. */
+    private fun openSettings(panel: Boolean, vararg candidates: String): JSONObject {
+        val actions = (candidates.toList() + Settings.ACTION_SETTINGS).distinct()
+        for ((index, action) in actions.withIndex()) {
+            val intent = Intent(action)
+            if (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) {
+                intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+            if (launch(intent)) return JSONObject().put("status", if (panel) "panel" else "opened")
+                .put("fallback", index != 0)
+        }
+        return JSONObject().put("status", "unavailable")
+    }
+
     private fun execute(command: JSONObject): JSONObject {
         val kind = command.optString("kind")
         val target = command.optString("target")
@@ -60,8 +74,10 @@ internal class CortexPhoneActions(private val context: Context) {
                 if (query.isBlank()) return status("invalid")
                 val encoded = Uri.encode(query)
                 val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + encoded)).setPackage("com.android.vending")
-                val opened = launch(market) || launch(Intent(Intent.ACTION_VIEW,
-                    Uri.parse("https://play.google.com/store/search?q=" + encoded + "&c=apps")))
+                // The generic market intent also works with non-Google app stores.
+                val opened = launch(market) || launch(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + encoded))) ||
+                    launch(Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/search?q=" + encoded + "&c=apps")))
                 return status(if (opened) "panel" else "unavailable")
             }
             "app_list" -> {
@@ -97,9 +113,10 @@ internal class CortexPhoneActions(private val context: Context) {
                     "notifications" -> Settings.ACTION_APP_NOTIFICATION_SETTINGS
                     else -> Settings.ACTION_SETTINGS
                 }
-                val intent = Intent(action)
-                if (action == Settings.ACTION_APP_NOTIFICATION_SETTINGS) intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                return started(intent).put("fallback", action == Settings.ACTION_SETTINGS)
+                return if (target in setOf("wifi", "wifi_ip", "bluetooth", "mobile", "network_operator", "apn", "data_usage",
+                        "airplane", "location", "nfc", "nfc_payment", "vpn")) {
+                    openSettings(false, action, Settings.ACTION_WIRELESS_SETTINGS)
+                } else openSettings(false, action)
             }
             "connectivity", "panel" -> {
                 val action = when (target) {
@@ -111,7 +128,15 @@ internal class CortexPhoneActions(private val context: Context) {
                     "nfc" -> Settings.ACTION_NFC_SETTINGS
                     else -> Settings.ACTION_WIRELESS_SETTINGS
                 }
-                return status(if (launch(Intent(action))) "panel" else "unavailable")
+                val alternative = when (target) {
+                    "wifi" -> Settings.ACTION_WIFI_SETTINGS
+                    "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS
+                    "airplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
+                    "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+                    "nfc" -> Settings.ACTION_NFC_SETTINGS
+                    else -> Settings.ACTION_WIRELESS_SETTINGS
+                }
+                return openSettings(true, action, alternative, Settings.ACTION_WIRELESS_SETTINGS)
             }
             "utility" -> return when (target) {
                 "camera_photo" -> started(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
@@ -165,9 +190,10 @@ internal class CortexPhoneActions(private val context: Context) {
                 return status(if (saved && enabled == (wanted == 1)) "done" else "requested").put("enabled", enabled)
             }
             "ringer" -> {
-                audio.ringerMode = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
+                val wanted = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
                     "silent" -> AudioManager.RINGER_MODE_SILENT; else -> AudioManager.RINGER_MODE_NORMAL }
-                return status("done")
+                audio.ringerMode = wanted
+                return status(if (audio.ringerMode == wanted) "done" else "requested")
             }
             "lock_screen" -> {
                 val service = CortexScreenService.connected
@@ -248,7 +274,7 @@ internal class CortexPhoneActions(private val context: Context) {
         val app = cameraApp(action)
         val intent = Intent(action)
         if (app != null) intent.setPackage(app.pkg)
-        val opened = launch(intent)
+        val opened = launch(intent) || (app != null && launch(Intent(action)))
         return JSONObject().put("status", if (opened) "opened" else "unavailable")
             .put("name", app?.name ?: "Камера").put("package", app?.pkg.orEmpty()).put("verified", false)
     }

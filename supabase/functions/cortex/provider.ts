@@ -189,6 +189,9 @@ export async function completion(
     throw new Failure("unconfigured", 503);
   }
   const tools = plan ? (repair ? planRepairTools : planTools) : (repair ? repairTools : deviceTools);
+  // Haiku 5.5 uses adaptive thinking and rejects sampling controls. In particular,
+  // even a harmless-looking temperature/top_p makes this model fail with HTTP 400.
+  const haiku55 = models.every(model => model === "anthropic/claude-haiku-5.5");
   const guide = plan
     ? "\n\nWhen the user explicitly asks for device actions, call execute_phone_plan with every step in order. " +
       "Each step has kind and only the applicable parameters. A question, hypothetical example, or request for instructions should get a text answer.\n" + planGuide
@@ -239,10 +242,11 @@ export async function completion(
       },
       body: JSON.stringify({
         ...(models.length === 1 ? { model: models[0] } : { models }), messages, stream,
-        max_tokens: reservation?.maxOutput ?? requested, temperature: plan || visualOutput ? .12 : .42, top_p: .9,
+        max_tokens: reservation?.maxOutput ?? requested,
+        ...(!haiku55 ? { temperature: plan || visualOutput ? .12 : .42, top_p: .9 } : {}),
         usage: { include: true }, ...toolInput,
         ...visualOutput,
-        ...(quick && !visualOutput ? { reasoning: { effort: "none", exclude: true } } : {}),
+        ...(quick && !visualOutput && !haiku55 ? { reasoning: { effort: "none", exclude: true } } : {}),
         provider: {
           max_price: { prompt: paidPrice ?? 0, completion: paidPrice ?? 0, request: 0, image: 0, audio: 0, web_search: 0 },
           ...(device || visualOutput ? { require_parameters: true } : {}), ...(quick ? { sort: "latency" } : {}),

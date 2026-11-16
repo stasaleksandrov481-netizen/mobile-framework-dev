@@ -120,14 +120,15 @@ class CortexScreenService : AccessibilityService() {
                     val scrollable = node.isScrollable || node.supports(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) ||
                         node.supports(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                     val checkable = if (node.isCheckable) node.isChecked else null
-                    if (raw.intersect(frameBounds) && (text.isNotBlank() || description.isNotBlank() || node.isClickable ||
+                    if (raw.intersect(frameBounds) && (text.isNotBlank() || description.isNotBlank() || node.isClickable || node.isLongClickable ||
                             editable || scrollable || checkable != null)) {
                         nodes += VisualNode((nodes.size + 1).toString(), path, text.ifBlank { description },
                             node.viewIdResourceName.orEmpty(), node.className?.toString()?.substringAfterLast('.').orEmpty(),
                             raw, node.isClickable, editable, scrollable, node.isFocused, checkable, node.isSelected,
                             enabled = node.isEnabled, description = description,
                             state = if (Build.VERSION.SDK_INT >= 30) VisualLabels.clean(node.stateDescription) else "",
-                            scrollAxis = if (scrollable) node.scrollAxis() else null)
+                            scrollAxis = if (scrollable) node.scrollAxis() else null,
+                            longClickable = node.isLongClickable)
                     }
                 }
                 for (index in 0 until minOf(node.childCount, 100)) {
@@ -174,6 +175,9 @@ class CortexScreenService : AccessibilityService() {
     internal fun click(frame: VisualFrame, node: VisualNode): Boolean =
         onNode(frame, node) { current -> current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
 
+    internal fun longClick(frame: VisualFrame, node: VisualNode): Boolean =
+        onNode(frame, node) { current -> current.isLongClickable && current.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) }
+
     internal fun setText(frame: VisualFrame, node: VisualNode, value: String): Boolean = onNode(frame, node) { current ->
         current.isEditable && current.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
@@ -201,6 +205,14 @@ class CortexScreenService : AccessibilityService() {
             if (!isCurrent(frame) || revision != frame.revision) return false
         } else if (!onNode(frame, node) { it.isEnabled }) return false
         return gesture(frame, center, center, 65L)
+    }
+
+    internal suspend fun longPress(frame: VisualFrame, node: VisualNode): Boolean {
+        val center = PointF(node.bounds.exactCenterX(), node.bounds.exactCenterY())
+        if (node.ocr) {
+            if (!isCurrent(frame) || revision != frame.revision) return false
+        } else if (!onNode(frame, node) { it.isEnabled }) return false
+        return gesture(frame, center, center, 650L)
     }
 
     internal fun semanticScroll(frame: VisualFrame, node: VisualNode, direction: String): Boolean = onNode(frame, node) {

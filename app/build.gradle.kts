@@ -1,9 +1,30 @@
+import java.net.URI
+import java.security.KeyFactory
+import java.security.interfaces.RSAPublicKey
+import java.security.spec.X509EncodedKeySpec
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
 val previousPreview = providers.gradleProperty("cortexPreview").map(String::toBoolean).orElse(false)
+fun quotedBuildValue(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+val webUpdateRoot = providers.environmentVariable("CORTEX_WEB_UPDATE_ROOT").orNull.orEmpty().trim()
+val webUpdatePublicKey = providers.environmentVariable("CORTEX_WEB_UPDATE_PUBLIC_KEY").orNull.orEmpty().trim()
+require(webUpdateRoot.isBlank() == webUpdatePublicKey.isBlank()) {
+    "Configure CORTEX_WEB_UPDATE_ROOT and CORTEX_WEB_UPDATE_PUBLIC_KEY together."
+}
+if (webUpdateRoot.isNotBlank()) {
+    val address = URI(webUpdateRoot)
+    require(address.scheme == "https" && !address.host.isNullOrBlank() && address.userInfo == null &&
+        address.port == -1 && address.query == null && address.fragment == null &&
+        ".." !in address.path.orEmpty().split('/')) { "Invalid signed WebView HTTPS update URL." }
+    val publicKey = KeyFactory.getInstance("RSA").generatePublic(
+        X509EncodedKeySpec(Base64.getDecoder().decode(webUpdatePublicKey))) as RSAPublicKey
+    require(publicKey.modulus.bitLength() >= 3072) { "Use a dedicated RSA 3072+ public signing key." }
+}
 
 val signingInputs = listOf(
     "CORTEX_KEYSTORE_FILE", "CORTEX_STORE_PASSWORD", "CORTEX_KEY_ALIAS", "CORTEX_KEY_PASSWORD"
@@ -21,8 +42,10 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 111
-        versionName = "1.0.11"
+        versionCode = 112
+        versionName = "1.0.12"
+        buildConfigField("String", "CORTEX_WEB_UPDATE_ROOT", quotedBuildValue(webUpdateRoot))
+        buildConfigField("String", "CORTEX_WEB_UPDATE_PUBLIC_KEY", quotedBuildValue(webUpdatePublicKey))
     }
     buildFeatures { buildConfig = true }
     signingConfigs {

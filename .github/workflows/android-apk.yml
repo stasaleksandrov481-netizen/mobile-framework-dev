@@ -10,12 +10,17 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish a signed update to GitHub Releases
+        description: Publish a public signed beta release (not for private ZBT)
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
+
+env:
+  # Public configuration only. The signing private key must never be embedded in an APK.
+  CORTEX_WEB_UPDATE_ROOT: ${{ vars.CORTEX_WEB_UPDATE_ROOT }}
+  CORTEX_WEB_UPDATE_PUBLIC_KEY: ${{ vars.CORTEX_WEB_UPDATE_PUBLIC_KEY }}
 
 concurrency:
   group: cortex-android-release
@@ -38,7 +43,21 @@ jobs:
           node-version: '24'
 
       - name: Verify gateway and billing
-        run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts cortex-control/tests/billing.test.js
+        run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/provider.test.ts supabase/functions/cortex/redis.test.ts cortex-control/tests/billing.test.js
+
+      - name: Verify island onboarding, privacy and phone awareness
+        run: node --test qa/island-onboarding.test.mjs qa/island-command.test.mjs qa/memory.test.mjs qa/notification-awareness.test.mjs qa/account-email.test.mjs qa/markdown-layout.test.mjs qa/statistics.test.mjs
+
+      - name: Verify signed WebView update packaging
+        run: python3 -m unittest discover -s tools -p 'test_package_web_update.py' -v
+
+      - name: Verify website and administrator console
+        run: |
+          npm ci --prefix cortex-web --no-audit --no-fund
+          npm run build --prefix cortex-web
+          npm run lint --prefix cortex-web
+          npm ci --prefix cortex-control --no-audit --no-fund
+          npm run build --prefix cortex-control
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -65,16 +84,20 @@ jobs:
         run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
 
       - name: Sign the CORTEX update
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
         id: signing
         shell: bash
         env:
-          CORTEX_REQUIRE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' }}
+          CORTEX_REQUIRE_PUBLISH: 'true'
           CORTEX_KEYSTORE_B64: ${{ secrets.CORTEX_KEYSTORE_B64 }}
           CORTEX_STORE_PASSWORD: ${{ secrets.CORTEX_STORE_PASSWORD }}
           CORTEX_KEY_ALIAS: ${{ secrets.CORTEX_KEY_ALIAS }}
           CORTEX_KEY_PASSWORD: ${{ secrets.CORTEX_KEY_PASSWORD }}
         run: |
+          if [[ -z "$CORTEX_WEB_UPDATE_ROOT" || -z "$CORTEX_WEB_UPDATE_PUBLIC_KEY" ]]; then
+            echo "::error::Public beta APK requires signed WebView update configuration. Set both CORTEX_WEB_UPDATE_ROOT and CORTEX_WEB_UPDATE_PUBLIC_KEY repository variables."
+            exit 1
+          fi
           if [[ -z "$CORTEX_KEYSTORE_B64" && -z "$CORTEX_STORE_PASSWORD" &&
                 -z "$CORTEX_KEY_ALIAS" && -z "$CORTEX_KEY_PASSWORD" ]]; then
             if [[ "$CORTEX_REQUIRE_PUBLISH" == 'true' ]]; then
@@ -132,14 +155,14 @@ jobs:
         if: steps.signing.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.apk.outputs.version }}
+          tag_name: v${{ steps.apk.outputs.version }}-beta.${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: CORTEX ${{ steps.apk.outputs.version }}
+          name: CORTEX ${{ steps.apk.outputs.version }} Beta ${{ github.run_number }}
           files: |
             release/${{ steps.apk.outputs.name }}
             release/SHA256SUMS.txt
           fail_on_unmatched_files: true
           overwrite_files: true
           draft: false
-          prerelease: false
-          make_latest: true
+          prerelease: true
+          make_latest: false

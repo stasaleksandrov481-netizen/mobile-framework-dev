@@ -6,10 +6,14 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -35,7 +39,15 @@ internal class LiquidIslandView(
     private val expandedClip = android.graphics.Path()
     private val box = Rect()
     private val location = IntArray(2)
+    private val laidOutAt = IntArray(2)
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val wordmarkTypeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    // Keep the light in the same place while the shell morphs: rebuilding a shader
+    // on every animation frame produces unnecessary allocations and flicker.
+    private val sheen = LinearGradient(0f, 0f, 0f, 1f,
+        intArrayOf(0x1FFFFFFF, 0x0BFFFFFF, 0x00FFFFFF),
+        floatArrayOf(0f, .35f, 1f), Shader.TileMode.CLAMP)
+    private val sheenMatrix = Matrix()
     private val signal = IslandSignal(density)
     private var placement: IslandPlacement? = null
     private var animator: ValueAnimator? = null
@@ -136,7 +148,7 @@ internal class LiquidIslandView(
         val start = expansion
         val faded = disappearance
         val end = if (open) 1f else 0f
-        val duration = ((if (style.motion == "soft") 220 else if (open) 490 else 370) * abs(start - end))
+        val duration = ((if (style.motion == "soft") 310 else if (open) 500 else 460) * abs(start - end))
             .toLong().coerceAtLeast(90L)
         powerDown = false
         animate(duration, if (open) OPEN_CURVE else CLOSE_CURVE, {
@@ -188,7 +200,8 @@ internal class LiquidIslandView(
     }
 
     private fun setContents() {
-        val appear = ease(.45f, .98f, expansion) * (1f - ease(0f, .29f, disappearance))
+        // Fade controls before the shrinking shell can clip and drag them sideways.
+        val appear = ease(.59f, .97f, expansion) * (1f - ease(0f, .29f, disappearance))
         conversation.alpha = appear
         conversation.reveal(appear)
         conversation.visibility = if (appear > .03f) VISIBLE else INVISIBLE
@@ -196,7 +209,7 @@ internal class LiquidIslandView(
         conversation.clipBounds = if (interactive) null else clipConversation()
         conversation.importantForAccessibility =
             if (interactive) IMPORTANT_FOR_ACCESSIBILITY_AUTO else IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        stop.visibility = if (activeStop && expansion < .14f && disappearance == 0f) VISIBLE else INVISIBLE
+        stop.visibility = if (activeStop && expansion < .025f && disappearance == 0f) VISIBLE else INVISIBLE
         importantForAccessibility = if (interactive) IMPORTANT_FOR_ACCESSIBILITY_NO else IMPORTANT_FOR_ACCESSIBILITY_YES
         invalidate()
     }
@@ -217,13 +230,23 @@ internal class LiquidIslandView(
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val geometry = placement ?: return
+        // WindowManager positions overlays asynchronously. Actual screen coordinates
+        // are authoritative; the requested frame may already have changed while the
+        // window itself is still at the old position.
+        getLocationOnScreen(location)
+        laidOutAt[0] = location[0]
+        laidOutAt[1] = location[1]
+        conversation.translationX = 0f
+        conversation.translationY = 0f
+        stop.translationX = 0f
+        stop.translationY = 0f
         val panel = geometry.panel
-        val x = (panel.left - box.left).roundToInt()
-        val y = (panel.top - box.top).roundToInt()
+        val x = (panel.left - location[0]).roundToInt()
+        val y = (panel.top - location[1]).roundToInt()
         conversation.layout(x, y, x + panel.width().roundToInt(), y + panel.height().roundToInt())
         val compact = geometry.compact
-        stop.layout((compact.right - box.left - dp(39)).roundToInt(), (compact.top - box.top).roundToInt(),
-            (compact.right - box.left).roundToInt(), (compact.bottom - box.top).roundToInt())
+        stop.layout((compact.right - location[0] - dp(39)).roundToInt(), (compact.top - location[1]).roundToInt(),
+            (compact.right - location[0]).roundToInt(), (compact.bottom - location[1]).roundToInt())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -239,9 +262,18 @@ internal class LiquidIslandView(
         val fade = 1f - ease(.25f, 1f, disappearance)
         val scale = 1f - (if (powerDown) .87f else .19f) * ease(.31f, 1f, disappearance)
         getLocationOnScreen(location)
+        // A position-only WindowManager update does not always re-layout children.
+        // Compensate in BOTH axes until it does, so they stay pinned on screen.
+        val shiftX = (laidOutAt[0] - location[0]).toFloat()
+        val shiftY = (laidOutAt[1] - location[1]).toFloat()
+        if (conversation.translationX != shiftX || conversation.translationY != shiftY) {
+            conversation.translationX = shiftX
+            conversation.translationY = shiftY
+            stop.translationX = shiftX
+            stop.translationY = shiftY
+        }
         val x = geometry.anchorX - location[0]
         val y = geometry.anchorY - location[1]
-        conversation.translationX = (box.left - location[0]).toFloat()
         body.set(
             x + (mix(compact.left, panel.left, t) - geometry.anchorX) * scale,
             y + (mix(compact.top, panel.top, t) - geometry.anchorY) * scale,
@@ -253,6 +285,24 @@ internal class LiquidIslandView(
         ink.color = style.background
         ink.alpha = (255 * fade * style.opacity).roundToInt()
         canvas.drawRoundRect(body, radius, radius, ink)
+        // A restrained, non-blue glass highlight gives the black surface depth.
+        sheenMatrix.setScale(1f, body.height().coerceAtLeast(1f))
+        sheenMatrix.postTranslate(0f, body.top)
+        sheen.setLocalMatrix(sheenMatrix)
+        ink.shader = sheen
+        ink.alpha = (255 * fade * style.opacity).roundToInt()
+        canvas.drawRoundRect(body, radius, radius, ink)
+        ink.shader = null
+        if (body.width() > dp(30) && fade > .01f) {
+            ink.style = Paint.Style.STROKE
+            ink.strokeWidth = density * .65f
+            ink.color = Color.WHITE
+            ink.alpha = (26 * fade).roundToInt()
+            canvas.drawRoundRect(body.left + density, body.top + density,
+                body.right - density, body.bottom - density,
+                (radius - density).coerceAtLeast(0f), (radius - density).coerceAtLeast(0f), ink)
+        }
+        ink.style = Paint.Style.FILL
         if (press) {
             ink.color = Color.WHITE
             ink.alpha = (25 * fade).roundToInt()
@@ -263,7 +313,7 @@ internal class LiquidIslandView(
             ink.strokeWidth = style.borderWidth * density
             ink.color = style.border
             val pulse = if (moving && phase == "done" && elapsed in 0..550) (1f - elapsed / 550f) * 105 else 0f
-            ink.alpha = ((mix(80f, 164f, t) + pulse) * fade).roundToInt().coerceIn(0, 255)
+            ink.alpha = ((mix(75f, 120f, t) + pulse) * fade).roundToInt().coerceIn(0, 255)
             canvas.drawRoundRect(body, radius, radius, ink)
         }
         val idleFace = moving && style.face && phase == "idle" && disappearance == 0f
@@ -300,7 +350,19 @@ internal class LiquidIslandView(
                         else -> statusText.take(10)
                     }
                     canvas.drawText(caption, body.left + body.width() * .39f, cy - (ink.ascent() + ink.descent()) / 2, ink)
-                } else signal.dot(canvas, sx, cy, compactAlpha)
+                } else {
+                    if (!style.face && body.width() > dp(110)) {
+                        ink.style = Paint.Style.FILL
+                        ink.color = style.text
+                        ink.alpha = (212 * compactAlpha).roundToInt()
+                        ink.textSize = 10.5f * density
+                        ink.typeface = wordmarkTypeface
+                        canvas.drawText("CORTEX", body.left + body.width() * .385f,
+                            cy - (ink.ascent() + ink.descent()) / 2f, ink)
+                        ink.typeface = null
+                    }
+                    signal.dot(canvas, if (style.face) sx else body.left + body.width() * .86f, cy, compactAlpha)
+                }
             }
             if (activeStop) {
                 val stopX = body.right - dp(17)
@@ -418,6 +480,6 @@ internal class LiquidIslandView(
 
     private companion object {
         val OPEN_CURVE = PathInterpolator(.12f, .78f, .22f, 1f)
-        val CLOSE_CURVE = PathInterpolator(.38f, .02f, .2f, 1f)
+        val CLOSE_CURVE = PathInterpolator(.24f, .02f, .22f, 1f)
     }
 }

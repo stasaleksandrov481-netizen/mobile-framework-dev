@@ -1,5 +1,6 @@
 package app.cortex.assistant
 
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -102,33 +103,21 @@ internal class PhoneNetwork(private val context: Context) {
         if (wifiGoal != null && (if (wifiGoal) wifiRadio() != WifiManager.WIFI_STATE_ENABLED else wifiRadio() != WifiManager.WIFI_STATE_DISABLED)) {
             when {
                 restricted -> limits += "Политика Android запрещает менять Wi-Fi на этом устройстве."
-                settings == null || navigation == null -> {
-                    if (settings != null) {
-                        beforeScreen()
-                        if (launchSettings(Settings.ACTION_WIFI_SETTINGS, settings)) limits += "Открыл настройки Wi-Fi."
-                    }
-                    limits += "Для нажатия переключателя нужен доступ «CORTEX — управление экраном»."
+                Build.VERSION.SDK_INT < 29 -> {
+                    @Suppress("DEPRECATION")
+                    val accepted = runCatching {
+                        context.getSystemService(WifiManager::class.java)?.setWifiEnabled(wifiGoal) == true
+                    }.getOrDefault(false)
+                    if (accepted && awaitRadio(wifiGoal)) changes += if (wifiGoal) "Включил Wi-Fi." else "Выключил Wi-Fi."
+                    else limits += "Android не разрешил переключить Wi-Fi."
                 }
+                navigation == null -> limits += "Android запрещает приложениям менять Wi-Fi напрямую. Разрешите «CORTEX — управление экраном» для переключения в быстрой панели."
                 else -> {
                     beforeScreen()
-                    report("Открываю настройки Wi-Fi…")
-                    val launched = navigation.launch(Intent(Settings.ACTION_WIFI_SETTINGS).setPackage(settings))
-                    val control = if (launched) navigation.await(3_000L) {
-                        safeSettings(it, settings) && switch(it, wifiLabels)?.checked == (wifiRadio() == WifiManager.WIFI_STATE_ENABLED)
-                    }?.let { switch(it, wifiLabels) } else null
-                    if (control == null) limits += if (launched) "Открыл Wi-Fi. Переключатель пока недоступен для управления."
-                        else "Android не открыл настройки Wi-Fi."
-                    else {
-                        val accepted = control.checked == wifiGoal || run {
-                            report(if (wifiGoal) "Включаю Wi-Fi…" else "Выключаю Wi-Fi…")
-                            screenUsable.click(control.frame, control.node) || screenUsable.tap(control.frame, control.node)
-                        }
-                        when {
-                            !accepted -> limits += "Android отклонил нажатие переключателя Wi-Fi."
-                            awaitRadio(wifiGoal) -> changes += if (wifiGoal) "Включил Wi-Fi." else "Выключил Wi-Fi."
-                            else -> limits += "Android не подтвердил изменение Wi-Fi."
-                        }
-                    }
+                    report(if (wifiGoal) "Переключаю Wi-Fi…" else "Выключаю Wi-Fi…")
+                    if (quickWifi(screenUsable, navigation, wifiGoal)) {
+                        changes += if (wifiGoal) "Включил Wi-Fi." else "Выключил Wi-Fi."
+                    } else limits += "На этом Android переключатель Wi-Fi недоступен через быструю панель. Изменение не подтверждено."
                 }
             }
         } else if (open || repair && request.wifi && !initial.wifiValidated && changes.isEmpty()) {
@@ -220,6 +209,36 @@ internal class PhoneNetwork(private val context: Context) {
         return false
     }
 
+    private suspend fun quickWifi(screen: CortexScreenService, navigation: VisualNavigation, enabled: Boolean): Boolean {
+        val original = screen.frame()
+        val alreadyOpen = original?.pkg?.contains("systemui", ignoreCase = true) == true
+        if (!alreadyOpen && !screen.global(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)) return false
+        try {
+            fun safe(frame: VisualFrame) = frame.pkg.contains("systemui", ignoreCase = true) &&
+                !frame.secure && !frame.hasPrivateFields
+            var frame = navigation.await(1_900L) { safe(it) && it.nodes.isNotEmpty() } ?: return false
+            var control = switch(frame, wifiLabels)
+            if (control == null) {
+                // Android 12+ often nests the Wi-Fi switch inside the SystemUI
+                // Internet tile. Interact with this precise tile only.
+                val tile = frame.tree.firstOrNull { node ->
+                    node.clickable && node.enabled && !node.editable && listOf(node.label, node.description)
+                        .any { VisualLabels.normalize(it) in internetTileLabels }
+                } ?: return false
+                if (!(screen.click(frame, tile) || screen.tap(frame, tile))) return false
+                frame = navigation.await(2_200L) { safe(it) && switch(it, wifiLabels) != null } ?: return false
+                control = switch(frame, wifiLabels)
+            }
+            val toggle = control ?: return false
+            if (toggle.checked != enabled && !(screen.click(toggle.frame, toggle.node) || screen.tap(toggle.frame, toggle.node))) {
+                return false
+            }
+            return awaitRadio(enabled)
+        } finally {
+            if (!alreadyOpen) screen.global(AccessibilityService.GLOBAL_ACTION_BACK)
+        }
+    }
+
     private suspend fun awaitConnection(): State {
         val deadline = SystemClock.uptimeMillis() + 2_400L
         var current = state()
@@ -285,6 +304,7 @@ internal class PhoneNetwork(private val context: Context) {
     private companion object {
         const val TETHER_SETTINGS = "android.settings.TETHER_SETTINGS"
         val wifiLabels = setOf("wi fi", "wifi", "wlan", "use wi fi", "использовать wi fi", "включить wi fi", "wifi switch")
+        val internetTileLabels = setOf("интернет", "internet", "internet connectivity", "wi fi", "wifi", "wlan")
         val hotspotLabels = setOf("wi fi hotspot", "wifi hotspot", "мобильная точка доступа", "точка доступа wi fi",
             "переносная точка доступа wi fi", "точка доступа", "hotspot", "use wi fi hotspot", "use hotspot",
             "использовать точку доступа", "включить точку доступа")

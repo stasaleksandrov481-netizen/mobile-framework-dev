@@ -4,6 +4,7 @@ import {
   supportInput, verifyCompletion,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
+import { createRedisCache } from "./redis.ts";
 import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
 
 const CAPABILITY = /^[A-Za-z0-9_-]{43}$/;
@@ -119,6 +120,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
   const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
+  const haikuModel = "anthropic/claude-haiku-5.5";
+  const speechModel = "google/gemini-3.8-flash-lite-tts";
+  const speechFallbackModel = "google/gemini-3.8-flash-tts";
   const paidFast = env.CORTEX_PAID_FAST_MODEL?.trim() || "";
   const paidDeep = env.CORTEX_PAID_DEEP_MODEL?.trim() || "";
   const paidModelId = /^[a-z0-9._-]+\/[a-z0-9._-]+$/;
@@ -128,7 +132,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     paidKey && paidModelId.test(paidFast) && paidModelId.test(paidDeep));
   const yandexId = env.YANDEX_CLIENT_ID?.trim() || "";
   const yandexSecret = env.YANDEX_CLIENT_SECRET?.trim() || "";
-  const yandex = Boolean(publicApi && /^[a-zA-Z0-9_-]{8,128}$/.test(yandexId) && yandexSecret);
+  // New Yandex sign-ins are retired. Existing issued sessions remain valid until expiry.
+  const yandex = false;
   const yandexRedirect = publicApi + "/functions/v1/cortex" + YANDEX_CALLBACK;
   const emailLogin = Boolean(api && publicKey && env.CORTEX_EMAIL_AUTH !== "false");
   const emailReady = emailLogin && env.CORTEX_EMAIL_AUTH === "true";
@@ -147,8 +152,14 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     "nvidia/nemotron-3.5-super-vl:free",
   ];
   const visualTools = ["nvidia/nemotron-3.5-lightning:free", "cohere/north-mini-code:free"];
-  const dayCap = Math.max(1, Math.min(1000, Math.floor(Number(env.CORTEX_DAILY_REQUEST_LIMIT) || 50)));
+  // A funded OpenRouter account may receive 1,000 free-model attempts/day.
+  // OpenRouter remains authoritative when the key has a smaller upstream cap.
+  const dayCap = Math.max(1, Math.min(1000, Math.floor(Number(env.CORTEX_DAILY_REQUEST_LIMIT) || 1000)));
   const minuteCap = Math.max(1, Math.min(20, Math.floor(Number(env.CORTEX_MINUTE_REQUEST_LIMIT) || 20)));
+  // Installation IDs and forwarded IP headers are caller-controlled. Enforce a
+  // shared budget for all guest traffic so rotating them cannot reset capacity.
+  const guestGlobalMinute = Math.max(30, Math.min(1000,
+    Math.floor(Number(env.CORTEX_GUEST_GLOBAL_MINUTE_LIMIT) || 180)));
   const allow = new Set((env.CORTEX_ALLOWED_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
   const guests = !allow.size && env.CORTEX_GUEST_ACCESS !== "false";
   const allowed = (email: string) => !allow.size || allow.has(email.toLowerCase());
@@ -181,25 +192,42 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (environmentModelKey) return environmentModelKey;
         throw error;
       });
-    providerCache = { value, until: Date.now() + 30_000 };
+    providerCache = { value, until: Date.now() + 90_000 };
     return value;
   }
 
   const control = createControl(database);
+  const redis = createRedisCache(env, network, () =>
+    database<{ url?: string; token?: string } | null>("rpc/cortex_redis_config", "POST", {}));
+  const bonusClaims = new Map<string, number>();
+  async function claimEarlyBonus(account: Account): Promise<void> {
+    const now = Date.now();
+    if (now < Date.parse("2026-11-20T00:00:00+03:00") || (bonusClaims.get(account.id) || 0) > now) return;
+    try {
+      await database("rpc/cortex_ai_claim_early_bonus", "POST", { p_subject: account.id, p_email: account.email });
+      if (bonusClaims.size >= 2048) bonusClaims.clear();
+      bonusClaims.set(account.id, now + 4 * 60 * 60 * 1000);
+    } catch { /* Bonus lookup must not block the account. */ }
+  }
   let catalog: { value: Promise<string[]>; until: number } | undefined;
   function freeCatalog(): Promise<string[]> {
     if (catalog && catalog.until > Date.now()) return catalog.value;
-    const value = network("https://openrouter.ai/api/v1/models", {
-      redirect: "error", signal: AbortSignal.timeout(3500),
-    }).then(async response => {
+    const value = (async () => {
+      const cached = await redis.getFreeModels(model => FREE_MODEL.test(model)).catch(() => null);
+      if (cached) return cached;
+      const response = await network("https://openrouter.ai/api/v1/models", {
+        redirect: "error", signal: AbortSignal.timeout(3500),
+      });
       if (!response.ok) throw new Error("model_catalog");
       const { data } = await response.json();
       if (!Array.isArray(data)) return [];
-      return data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
+      const models = data.filter(item => typeof item.id === "string" && FREE_MODEL.test(item.id) &&
         String(item.pricing?.prompt) === "0" && String(item.pricing?.completion) === "0" &&
         item.architecture?.output_modalities?.includes("text") && item.supported_parameters?.includes("tools"))
         .slice(0, 12).map(item => String(item.id));
-    }).catch(() => []);
+      await redis.putFreeModels(models).catch(() => {});
+      return models;
+    })().catch(() => []);
     catalog = { value, until: Date.now() + 600_000 };
     return value;
   }
@@ -260,7 +288,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (!await installIdentity(request)) throw new Failure("client_version", 400);
     const input = await body(request, 4096);
     const email = checkedEmail(input.email);
-    const sending = operation === "signup" || operation === "recover";
+    const sending = operation === "signup" || operation === "recover" || operation === "resend";
     await reserve(
       { bucket: "email:ip:" + await peer(request), seconds: 600, maximum: 30 },
       { bucket: (sending ? "email:send:" : "email:verify:") + await hash(email), seconds: 900, maximum: sending ? 4 : 10 },
@@ -272,6 +300,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           const result = await auth<{ access_token?: string }>("signup", { email, password: checkedPassword(input.password, true),
             data: { name: typeof input.name === "string" ? input.name.trim().slice(0, 100) : "" } });
           if (result.access_token) throw new Failure("account_config", 503);
+        } else if (operation === "resend") {
+          if (input.kind !== "signup" && input.kind !== "recovery") throw new Failure("invalid", 400);
+          if (input.kind === "recovery") await auth("recover", { email });
+          else await auth("resend", { email, type: "signup" });
         } else await auth("recover", { email });
       } catch (error) {
         if (!(error instanceof Failure) || error.code !== "auth_credentials") throw error;
@@ -306,6 +338,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     const previous = bearer(request);
     if (previous) await database("cortex_sessions?token_hash=eq." + await hash(previous), "DELETE");
     await claimGuest(request, account);
+    await claimEarlyBonus(account);
     return json({ state: "signed_in", token, account });
   }
 
@@ -354,6 +387,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function usage(request: Request, account: Account | null): Promise<Quota | null> {
+    if (account) await claimEarlyBonus(account);
     const id = await subject(request, account);
     return id ? await database<Quota>("rpc/cortex_ai_usage", "POST", { p_subject: id }) : null;
   }
@@ -367,7 +401,12 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   function budget(caller: Awaited<ReturnType<typeof actor>>): Promise<unknown> {
     return reserve(
       { bucket: "chat:" + caller.bucket, seconds: 60, maximum: caller.account ? 16 : 12 },
-      ...(caller.account ? [] : [{ bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 }]),
+      ...(caller.account ? [] : [
+        { bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 },
+        { bucket: "chat:guests:global:minute", seconds: 60, maximum: guestGlobalMinute },
+        { bucket: "chat:guests:global:hour", seconds: 3600, maximum: 3_000 },
+        { bucket: "chat:guests:global:day", seconds: 86_400, maximum: 15_000 },
+      ]),
     );
   }
 
@@ -376,7 +415,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (aiSettings && aiSettings.until > Date.now()) return aiSettings.value;
     const value = database<Array<{ model?: string }>>("cortex_ai_settings?select=model&singleton=eq.true&limit=1")
       .then(rows => rows[0]?.model || "");
-    aiSettings = { value, until: Date.now() + 5000 };
+    aiSettings = { value, until: Date.now() + 45_000 };
     void value.catch(() => { if (aiSettings?.value === value) aiSettings = undefined; });
     return value;
   }
@@ -465,6 +504,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     if (result.state === "forbidden") throw new Failure("account_forbidden", 403);
     if (result.state !== "signed_in" || !result.account) return json({ state: "pending" });
     await claimGuest(request, result.account);
+    await claimEarlyBonus(result.account);
     return json({ ...result, token });
   }
 
@@ -479,13 +519,20 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const [account, key] = storage
           ? await Promise.all([lookup(request), providerKey().catch(() => "")])
           : [null, ""];
-        const [quota, publicId] = storage ? await Promise.all([
+        const [quota, publicId, guestId] = storage ? await Promise.all([
           usage(request, account).catch(() => null),
           account ? database<string>("rpc/cortex_public_account", "POST", { p_subject: account.id }).catch(() => null) : null,
-        ]) : [null, null];
+          !account && guests ? installIdentity(request).then(async install => {
+            if (!install) return null;
+            const rows = await database<Array<{ number: number }>>(
+              "cortex_guest_public_ids?select=number&install_hash=eq." + install + "&limit=1").catch(() => []);
+            return rows[0]?.number ? "@g" + String(rows[0].number).padStart(6, "0") : null;
+          }) : null,
+        ]) : [null, null, null];
         return json({
           service: "CORTEX", configured: Boolean(storage && key), provider: "openrouter_free",
-          yandex, email_login: emailLogin, email_auth: emailReady, account: account ? { ...account, public_id: publicId } : null, guest: guests, support: storage, device_tools: true,
+          yandex, email_login: emailLogin, email_auth: emailReady, account: account ? { ...account, public_id: publicId } : null,
+          guest: guests, guest_id: guestId, support: storage, device_tools: true,
           device_profiles: true, device_repair: true, device_action_plan: true, visual_plan: true, model_fallback: true,
           ...(storage ? { gate: await control.gate(request, account), quota } : { fault: "storage_config" }),
         });
@@ -526,18 +573,21 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (!install) throw new Failure("client_version", 400);
         const input = await body(request, 2048);
         const account = await lookup(request);
-        await reserve({ bucket: "presence:" + install, seconds: 60, maximum: 4 });
+        await reserve({ bucket: "presence:" + install, seconds: 60, maximum: 4 },
+          { bucket: "presence:ip:" + await peer(request), seconds: 60, maximum: 60 },
+          { bucket: "presence:global", seconds: 60, maximum: 1500 });
         const version = request.headers.get("x-cortex-version-name") || "";
         const device = request.headers.get("x-cortex-device") || "";
         const stable = /^[a-f0-9]{16}$/.test(device) ? await hash("cortex-device-v1:" + device) : null;
         await control.presence(install, input, /^[A-Za-z0-9.+-]{1,24}$/.test(version) ? version : "unknown", stable, account?.id);
-        return json({ gate: await control.gate(request, account) });
+        const guestId = !account && guests ? await database<string>("rpc/cortex_public_guest", "POST", { p_install: install }) : null;
+        return json({ gate: await control.gate(request, account), guest_id: guestId });
       }
       if (method === "POST" && path === "/v1/auth/start") {
         return await begin(request, url.searchParams.get("return") === "android", url.searchParams.get("scheme"));
       }
       if (isCallback) return await callback(url.searchParams.get("state") || "", url.searchParams.get("code") || "");
-      const emailRoute = /^\/v1\/auth\/(signup|password|verify|recover|reset)$/.exec(path);
+      const emailRoute = /^\/v1\/auth\/(signup|password|verify|recover|reset|resend)$/.exec(path);
       if (method === "POST" && emailRoute) return await emailAuth(request, emailRoute[1]);
       if (method === "POST" && path === "/v1/auth/poll") return await poll(request);
       if (method === "DELETE" && path === "/v1/session") {
@@ -545,8 +595,80 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (token) await database("cortex_sessions?token_hash=eq." + await hash(token), "DELETE");
         return json({ ok: true });
       }
+      if (method === "POST" && path === "/v1/speech") {
+        // PCM is kept server-side until the upstream response is validated. Never
+        // proxy the OpenRouter credential or allow arbitrary model selection.
+        const caller = await actor(request);
+        if (!caller.account) throw new Failure("sign_in", 401);
+        const gate = await control.gate(request, caller.account);
+        if (gate.mode !== "open") throw new Failure(gate.mode, 403);
+        const input = await body(request, 2200);
+        const text = input.text;
+        if (Object.keys(input).some(field => field !== "text") || typeof text !== "string" ||
+          !text.trim() || text.length > 550 || /[\u0000-\u0008\u000b\u000e-\u001f]/u.test(text)) throw new Failure("invalid", 400);
+        await reserve(
+          { bucket: "speech:" + caller.bucket, seconds: 60, maximum: 4 },
+          { bucket: "speech:" + caller.bucket, seconds: 86_400, maximum: 30 },
+          { bucket: "speech:all", seconds: 60, maximum: 80 },
+          { bucket: "speech:all", seconds: 86_400, maximum: Math.max(50, Math.min(5000,
+            Math.floor(Number(env.CORTEX_SPEECH_GLOBAL_DAILY_LIMIT) || 500))) },
+        );
+        const key = paidKey || await providerKey().catch(() => "");
+        if (!key) throw new Failure("unconfigured", 503);
+        let upstream: Response | undefined;
+        // The Lite provider is cheaper but can be unavailable. Retry once with
+        // the more reliable Flash model, never for invalid credentials/billing.
+        for (const [index, model] of [speechModel, speechFallbackModel].entries()) {
+          try {
+            upstream = await network("https://openrouter.ai/api/v1/audio/speech", {
+              method: "POST", redirect: "error", signal: AbortSignal.timeout(index ? 12_000 : 15_000),
+              headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+              body: JSON.stringify({ model, input: text.trim(), voice: "Kore", response_format: "pcm" }),
+            });
+          } catch {
+            if (!index) continue;
+            throw new Failure("speech_unavailable", 502);
+          }
+          if (upstream.ok) break;
+          const retryable = upstream.status === 429 || upstream.status >= 500;
+          if (retryable && !index) {
+            await upstream.body?.cancel();
+            continue;
+          }
+          break;
+        }
+        if (!upstream) throw new Failure("speech_unavailable", 502);
+        if (!upstream.ok) {
+          await upstream.body?.cancel();
+          throw new Failure(upstream.status === 429 ? "provider_limit" : "speech_unavailable", 502);
+        }
+        if ((upstream.headers.get("content-type") || "").includes("json")) {
+          await upstream.body?.cancel();
+          throw new Failure("speech_unavailable", 502);
+        }
+        const parts: Uint8Array[] = [];
+        let size = 0;
+        const reader = upstream.body?.getReader();
+        if (!reader) throw new Failure("speech_unavailable", 502);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.length;
+            if (size > 2_400_000) throw new Failure("speech_unavailable", 502);
+            parts.push(value);
+          }
+        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+        if (!size || size % 2) throw new Failure("speech_unavailable", 502);
+        const pcm = new Uint8Array(size);
+        let offset = 0;
+        for (const part of parts) { pcm.set(part, offset); offset += part.length; }
+        return new Response(pcm, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+          "X-Cortex-Audio-Format": "pcm_s16le_24000_mono" } });
+      }
       if (method === "POST" && (path === "/v1/chat" || path === "/v1/check")) {
         const caller = await actor(request);
+        if (caller.account) await claimEarlyBonus(caller.account);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
           messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, profile: undefined,
@@ -556,7 +678,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const id = await subject(request, caller.account);
         if (!id) throw new Failure("sign_in", 401);
         const [key, modelOverride, access] = await Promise.all([
-          providerKey().catch(() => ""), configuredModel(), caller.account ? usage(request, caller.account) : null,
+          providerKey().catch(() => ""), configuredModel(), usage(request, caller.account),
         ]);
         const hasPaidPlan = ["start", "pro", "ultra"].includes(access?.plan || "");
         if (!key && !(paidKey && hasPaidPlan)) throw new Failure("unconfigured", 503);
@@ -568,6 +690,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const candidates = input.visual ? [...visualTools, ...visualSchemas]
           : [...new Set([modelOverride, ...preferred, ...models].filter(model => FREE_MODEL.test(model)))];
         await budget(caller);
+        await database("rpc/cortex_track_ai_request", "POST", { p_subject: id,
+          p_kind: !isChat ? "check" : input.visual ? "visual" : "chat" });
         let quota: Quota | undefined;
         const hold = (model?: string, advanced = false) => async (estimatedInput: number, output: number) => {
           const amounts = { p_subject: id, p_input: estimatedInput, p_output: output };
@@ -581,7 +705,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           quota = result.quota;
           if (result.error) {
             const reset = Math.max(1, Math.ceil((Date.parse(quota.reset_at) - Date.now()) / 1000));
-            throw new BudgetFailure(result.error, result.retry_after || (result.error === "daily_limit" ? reset : 0), quota);
+            // Existing Android versions already understand context_limit. Never
+            // claim the daily balance is zero when this request is merely too big.
+            const code = result.error === "daily_limit" && Number(quota.remaining) > 0 ? "context_limit" : result.error;
+            throw new BudgetFailure(code, result.retry_after || (code === "daily_limit" ? reset : 0), quota);
           }
           if (!result.attempt || !result.max_output) throw new Failure("storage_config", 503);
           return {
@@ -603,9 +730,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 5_200 : quick ? 5_500 : 15_000;
+        const firstTokenMs = input.visual ? 7_000 : quick ? 4_500 : 13_000;
         const signal = AbortSignal.any([request.signal, upstream.signal,
-          AbortSignal.timeout(input.visual ? 12_500 : quick ? 29_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 46_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : (input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
@@ -615,8 +742,15 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         ] : ready;
         if (!ordered.length && choices[0]) ordered.push(choices[0]);
         // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
-        const paidCandidates = [ ...(premium ? [{ model: paidDeep, advanced: true }] : []),
-          ...(basic && (!premium || paidFast !== paidDeep) ? [{ model: paidFast, advanced: false }] : []) ];
+        // Haiku 5.5 is a paid model. Reserve it against the advanced-token and
+        // $0.60/M-token liability ceiling; never silently bill free users.
+        // A rotated Vault key may serve both free and paid routes. Only accounts
+        // with an advanced-token budget can spend against Haiku's paid ceiling.
+        const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
+        const paidCandidates = [ ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
+          ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
+          ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
+            ? [{ model: paidFast, advanced: false }] : []) ];
         const routeModels = [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
         const maxAttempts = paidCandidates.length + (input.visual ? 2 : 3);
         const messages = [...input.messages];
@@ -674,8 +808,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               }
               const format = !input.visual ? undefined : visualTools.includes(model)
                 ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
-              const result = await completion(network, paid ? paidKey : key, [model], messages, isChat && !input.visual,
-                input.limit, signal, input.device, input.repair, firstTokenMs, quick, input.plan,
+              const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
+                input.limit, signal, input.device, input.repair,
+                paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
               modelCooldown.delete(scope + model);
               return result;

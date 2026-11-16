@@ -112,4 +112,23 @@ class LocalIntentTest {
         assertNull(CortexLocalCommands.parse("Как включить 90 Гц?") { null })
     }
 
+    @Test fun moreEverydayTasksWorkLocallyWithoutAnAiRequest() {
+        fun step(text: String) = requireNotNull(CortexLocalCommands.parse(text) { null }).single()
+        assertEquals(300, step("Поставь таймер на 5 минут").getInt("seconds"))
+        assertEquals(7200, step("Запусти таймер на 2 часа").getInt("seconds"))
+        assertNull(CortexLocalCommands.parse("Поставь таймер на 200 часов") { null })
+        assertEquals(7, step("Поставь будильник на 07:30").getInt("hour"))
+        assertEquals(30, step("Поставь будильник на 07:30").getInt("minute"))
+        assertEquals("CORTEX Premium", step("Скопируй текст «CORTEX Premium»").getString("text"))
+        assertEquals("Где купить билеты", step("Найди в интернете Где купить билеты").getString("query"))
+        assertEquals("Москва Сити", step("Найди на карте Москва Сити").getString("query"))
+        assertEquals("silent", step("Включи беззвучный режим").getString("mode"))
+        assertEquals("vibrate", step("Включи вибрацию").getString("mode"))
+        assertEquals("camera_video", step("Сними видео").getString("target"))
+        assertEquals("+79991234567", step("Позвони +7 (999) 123-45-67").getString("number"))
+        val sms = step("Напиши смс на номер +7 (999) 123-45-67 с текстом «CORTEX QA»")
+        assertEquals("sms", sms.getString("kind"))
+        assertEquals("CORTEX QA", sms.getString("text"))
+    }
+
 }

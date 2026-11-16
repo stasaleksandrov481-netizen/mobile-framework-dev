@@ -25,6 +25,8 @@ internal class CortexDeviceBridge(
     private val context get() = activity.applicationContext
     private val engineDelegate = lazy { CortexActionEngine(activity) }
     private val engine by engineDelegate
+    private val voiceOutputDelegate = lazy { CortexVoiceOutput(activity) }
+    private val voiceOutput by voiceOutputDelegate
     private var pendingImage = false
     private var pendingExport: String? = null
     private var scenarioExport: String? = null
@@ -41,6 +43,18 @@ internal class CortexDeviceBridge(
             "assistant-permission" -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
+            "notification-listener-permission" -> sendAction("notification-listener") {
+                open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            "notification-journal-clear" -> {
+                CortexNotificationJournal(context).clear()
+                emit(JSONObject().put("type", "notification-journal-cleared").put("ok", true))
+            }
+            "private-data-clear" -> {
+                CortexNotificationJournal(context).clear()
+                CortexPrivateMemory(context).wipeDevice()
+                emit(JSONObject().put("type", "private-data-cleared").put("ok", true))
+            }
             "schedule-exact" -> if (Build.VERSION.SDK_INT >= 31) sendAction("schedule-exact") {
                 open(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))
             }
@@ -102,15 +116,17 @@ internal class CortexDeviceBridge(
             }
             "action-start" -> {
                 val id = body.optString("id")
-                fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false) =
+                fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false,
+                          ephemeral: Boolean = false) =
                     emit(JSONObject().put("type", "action").put("id", id).put("phase", phase).put("text", text)
-                        .put("ok", ok).put("resumable", resumable).put("external", !CortexRuntime.appVisible))
+                        .put("ok", ok).put("resumable", resumable).put("ephemeral", ephemeral)
+                        .put("external", !CortexRuntime.appVisible))
                 val handled = engine.start(body.optString("text"), body.optString("profile"),
                     force = body.optBoolean("force"), allowPhone = body.optBoolean("allowPhone", true),
                     source = body.optString("source", "chat").take(100),
                     beforeScreen = { activity.moveTaskToBack(true) },
                     progress = { event("progress", it) }) { result ->
-                    event("result", result.text, result.ok, result.resumable)
+                    event("result", result.text, result.ok, result.resumable, result.ephemeral)
                 }
                 if (!handled) event("pass")
             }
@@ -136,6 +152,13 @@ internal class CortexDeviceBridge(
             }
             "voice-finish" -> speech.finish(body.optString("id"))
             "voice-cancel" -> speech.cancel(body.optString("id"))
+            "voice-speak" -> {
+                val id = body.optString("id").take(90)
+                voiceOutput.speak(body.optString("text")) { ok ->
+                    emit(JSONObject().put("type", "voice-output").put("id", id).put("ok", ok))
+                }
+            }
+            "voice-stop" -> if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
             "copy" -> {
                 val text = body.optString("text").take(200_000)
                 val ok = runCatching {
@@ -185,6 +208,7 @@ internal class CortexDeviceBridge(
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (engineDelegate.isInitialized()) engine.close()
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
     }
 
     fun scheduleEntry(id: String) = emit(JSONObject().put("type", "schedule-open").put("id", id))
@@ -235,6 +259,9 @@ internal class CortexDeviceBridge(
             .put("androidRelease", Build.VERSION.RELEASE)
             .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+            .put("notificationAccess", CortexNotificationJournal.accessGranted(context))
+            .put("deviceSnapshot", runCatching { CortexDeviceSnapshot.info(context) }.getOrNull())
+            .put("compatibility", CortexAndroidCompatibility.report(context))
             .put("screenLock", Build.VERSION.SDK_INT >= 28 && CortexScreenService.connected != null)
             .put("screenLockSupported", Build.VERSION.SDK_INT >= 28)
             .put("screenAutomation", CortexScreenService.connected != null)

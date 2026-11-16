@@ -66,6 +66,11 @@ internal object CortexPhoneResult {
                     (0 until minOf(names.length(), 18)).joinToString(", ") { names.optString(it) }
                 }.orEmpty().ifBlank { "Приложения не найдены." }
                 "copy_text" -> "Текст скопирован."
+                "ringer" -> when (command.optString("mode")) {
+                    "silent" -> "Беззвучный режим включён."
+                    "vibrate" -> "Режим вибрации включён."
+                    else -> "Звук звонка включён."
+                }
                 else -> "Android подтвердил действие."
             }
             "opened" -> when (kind) {
@@ -77,6 +82,13 @@ internal object CortexPhoneResult {
                     else "Android получил команду выйти из «" + result.optString("name") + "»."
                 "home" -> "Android получил команду перейти на рабочий стол."
                 "recents" -> "Android получил команду показать список окон."
+                "timer" -> "Открыт таймер. Проверьте длительность и запустите его в приложении часов."
+                "alarm" -> "Открыт будильник. Проверьте время и подтвердите его в приложении часов."
+                "search" -> "Поисковый запрос открыт в браузере."
+                "maps" -> "Запрос открыт в приложении карт."
+                "utility" -> "Android получил запрос открыть нужное приложение."
+                "dial" -> "Открыт набор номера. Нажмите вызов, если всё верно."
+                "sms" -> "Черновик SMS открыт. Проверьте получателя и сообщение перед отправкой."
                 "settings" -> if (command.optString("target") == "vpn") "Переключатель VPN находится в открываемых настройках Android."
                     else if (command.optBoolean("switch")) "Открываю нужный раздел Android. Переключатель доступен на его экране."
                     else "Android получил команду открыть настройки."
