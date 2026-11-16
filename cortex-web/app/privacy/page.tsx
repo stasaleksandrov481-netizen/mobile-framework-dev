@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { legalParty } from "@/lib/merchant-details";
+import { dataOperators } from "@/lib/merchant-details";
 
 export const metadata: Metadata = {
   title: "Политика обработки персональных данных — CORTEX",
@@ -8,18 +8,27 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
-  const operator = legalParty("OPERATOR");
+  const operators = dataOperators();
   return (
     <div className="shell"><main className="simple-page legal-page">
       <Link className="legal-back" href="/">← На главную</Link>
       <p className="legal-eyebrow">CORTEX / ДОКУМЕНТЫ</p>
       <h1>Политика обработки персональных данных</h1>
-      <p className="legal-lead">Действует с 16 ноября 2026 года. Настоящая политика описывает обработку данных на cortexapp.ru и в приложении CORTEX для Android.</p>
+      <p className="legal-lead">Редакция 2 от 16 ноября 2026 года. Настоящая политика описывает обработку данных на cortexapp.ru и в приложении CORTEX для Android.</p>
 
       <div className="legal-notice">
-        <strong>Оператор персональных данных</strong>
-        {operator ? <p>{operator.name}<br />{operator.registration}<br />{operator.address}</p> :
-          <p>Публичная регистрация закрыта до публикации подтверждённых сведений об операторе. Контакт для запросов: <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>.</p>}
+        <strong>Операторы персональных данных (совместная обработка)</strong>
+        {operators.length === 2 ? (
+          <ul>
+            {operators.map(operator => (
+              <li key={operator.name}>
+                <strong>{operator.name}</strong>, {operator.registration}
+                {operator.address ? <>, адрес: {operator.address}</> : null}
+              </li>
+            ))}
+          </ul>
+        ) : <p>Проверенные реквизиты операторов готовятся к публикации.</p>}
+        <p>Оба оператора совместно определяют цели и способы обработки данных CORTEX и принимают обращения по адресу <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>. Публичная регистрация остаётся закрытой до подтверждения контактных адресов и выполнения обязательных требований к обработке данных.</p>
       </div>
 
       <h2>1. Сфера действия</h2>

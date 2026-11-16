@@ -97,8 +97,8 @@ export function RegistrationForm() {
             data: {
               cortex_preregistration: true,
               cortex_notify_opt_in: notify,
-              cortex_privacy_acknowledged_version: "2026-11-16",
-              cortex_terms_accepted_version: "2026-11-16",
+              cortex_privacy_acknowledged_version: "2026-11-16.2",
+              cortex_terms_accepted_version: "2026-11-16.2",
               cortex_privacy_acknowledged_at: new Date().toISOString(),
               cortex_launch_notify_opt_in_at: notify ? new Date().toISOString() : null,
             },

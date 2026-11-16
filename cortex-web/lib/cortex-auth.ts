@@ -13,7 +13,7 @@ export const cortexAuth = createClient(cortexSupabaseUrl, cortexPublishableKey, 
 });
 
 export const EARLY_ACCESS_BONUS = 5_000;
-const REGISTRATION_LEGAL_VERSION = "2026-11-16";
+const REGISTRATION_LEGAL_VERSION = "2026-11-16.2";
 
 export async function savePreregistration(notifyOptIn: boolean) {
   const { data: { user }, error: authError } = await cortexAuth.auth.getUser();

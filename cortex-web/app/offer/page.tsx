@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { legalParty } from "@/lib/merchant-details";
+import { paymentMerchant } from "@/lib/merchant-details";
 
 export const metadata: Metadata = {
   title: "Публичная оферта на платные услуги — CORTEX",
@@ -8,18 +8,19 @@ export const metadata: Metadata = {
 };
 
 export default function OfferPage() {
-  const seller = legalParty("SELLER");
+  const seller = paymentMerchant();
   return (
     <div className="shell"><main className="simple-page legal-page">
       <Link className="legal-back" href="/">← На главную</Link>
       <p className="legal-eyebrow">CORTEX / ДОКУМЕНТЫ</p>
       <h1>Публичная оферта</h1>
-      <p className="legal-lead">Условия предоставления платного доступа к облачным функциям CORTEX. Редакция от 16 ноября 2026 года.</p>
+      <p className="legal-lead">Условия предоставления платного доступа к облачным функциям CORTEX. Редакция 2 от 16 ноября 2026 года.</p>
 
       <div className="legal-notice">
         <strong>Исполнитель</strong>
-        {seller ? <p>{seller.name}<br />{seller.registration}<br />{seller.address}</p> :
-          <p>Оплата не открыта. Оферта вступит в действие после публикации проверенных реквизитов исполнителя и включения платного оформления заказов.</p>}
+        {seller ? <p>{seller.name}<br />{seller.registration}{seller.address ? <><br />{seller.address}</> : null}</p> :
+          <p>Реквизиты исполнителя готовятся к публикации.</p>}
+        <p>Приём платежей пока закрыт. Оферта начнёт применяться к новым заказам после завершения проверки реквизитов и включения оформления платных тарифов.</p>
       </div>
 
       <h2>1. Предмет договора</h2>
