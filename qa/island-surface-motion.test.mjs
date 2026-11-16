@@ -30,6 +30,18 @@ test("window placement is observed before morphs and pending transitions are can
   assert.match(service, /if \(open\) settle\(\) else view\.postOnAnimation/);
 });
 
+test("the shrinking overlay stays centred instead of snapping to a left-gravity anchor", () => {
+  const service = native("CortexIslandService.kt");
+  assert.match(service, /gravity = Gravity\.TOP or Gravity\.CENTER_HORIZONTAL/);
+  assert.match(service, /box\.exactCenterX\(\) - geometry\.screen\.bounds\.exactCenterX\(\)/);
+  assert.doesNotMatch(service, /val x = box\.left - geometry\.screen\.bounds\.left/);
+  // For a symmetric expand/collapse, the requested overlay centre never moves
+  // even when its width changes from a full panel to the compact pill.
+  const displayCenter = 540;
+  const frames = [{ left: 280, right: 800 }, { left: 485, right: 595 }];
+  assert.deepEqual(frames.map(frame => (frame.left + frame.right) / 2 - displayCenter), [0, 0]);
+});
+
 test("island Markdown uses safe native text spans without remote HTML", () => {
   const markdown = native("IslandMarkdown.kt");
   const panel = native("IslandConversationPanel.kt");

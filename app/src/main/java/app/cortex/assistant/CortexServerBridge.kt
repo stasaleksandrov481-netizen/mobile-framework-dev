@@ -130,6 +130,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             "subscription-payment" -> call("POST", "subscription/payment", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "support-inbox" -> call("GET", "support/inbox", null, id)
+            "support-ai" -> call("POST", "support/ai", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent)
             "speech" -> speechBytes(request.optString("text"), id)
             "support" -> call("POST", "support", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)

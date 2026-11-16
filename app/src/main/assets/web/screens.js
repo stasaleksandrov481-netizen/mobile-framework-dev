@@ -5,8 +5,7 @@ const CortexUI = (() => {
   const icon = CortexIcons;
   let version = "1.0.12";
   const tabs = [
-    ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
-    ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
+    ["chats", "Чаты", "message"], ["home", "Кортекс", ""], ["profile", "Профиль", "user"]
   ];
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
@@ -45,9 +44,8 @@ const CortexUI = (() => {
     return `<div class="filters">${Object.entries(values).map(([value, label]) => pill(label, action, value, selected === value)).join("")}</div>`;
   }
   function modelLogo(item) {
-    return item.domain
-      ? `<img class="ai-provider-icon" src="https://www.google.com/s2/favicons?domain=${esc(item.domain)}&amp;sz=64" alt="" loading="lazy">`
-      : '<img class="ai-provider-icon" src="art/mark.svg" alt="">';
+    const src = item.domain ? `/favicons/${esc(item.domain)}` : "art/mark.svg";
+    return `<span class="ai-provider-badge"><img class="ai-provider-icon" src="${src}" alt="${esc(item.brand)}" loading="lazy"><span class="ai-provider-initials" hidden aria-hidden="true">${esc(item.brand.slice(0, 1))}</span></span>`;
   }
   function modelChoices(selected, compact = false) {
     return `<div class="ai-model-list ${compact ? "compact" : ""}">${M.aiModels.map(item =>
@@ -87,22 +85,26 @@ const CortexUI = (() => {
         ${iconButton("stop", "Завершить запись", "voice-turn", "", "voice-control")}
         ${iconButton("close", "Закончить голосовой режим", "voice-close", "", "voice-close")}
       </div>
-      <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
-        enterkeyhint="send"></textarea>
-      <div class="composer-actions">
+      <div class="composer-input-row">
+        <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
+          enterkeyhint="send" placeholder="Спросите CORTEX..."></textarea>
+        <div class="composer-send-actions">
+          <button class="composer-button voice-button" type="button" aria-label="Голосовой разговор" ${attributes("voice-chat")}>${icon("wave", 22)}</button>
+          <button class="composer-button send-button" type="submit" aria-label="Отправить сообщение" hidden disabled>${icon("sendUp", 23)}</button>
+          <button class="composer-button stop-button" type="button" aria-label="Остановить задачу" ${attributes("stop")} hidden>${icon("stop", 19)}</button>
+        </div>
+      </div>
+      <div class="composer-footer">
         <details class="ai-model-picker"><summary aria-label="Выбрать модель ИИ" title="Выбрать модель ИИ">
           ${modelLogo(M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0])}
+          <span class="ai-model-label">${esc((M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0]).name)}</span>
           <span class="ai-model-chevron" aria-hidden="true"></span></summary>
-          <div class="ai-model-popover"><header>Модель ИИ <small>$ за 1 млн: вход / выход</small></header>
+          <div class="ai-model-popover"><header>Выбрать модель</header>
           ${modelChoices(M.state.preferences.aiModel, true)}</div>
         </details>
-        <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("go", "models")} hidden>
+        <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("quota-detail")} hidden>
           <span class="quota-ring-art" aria-hidden="true"></span>
         </button>
-        <button class="composer-button mic-button" type="button" aria-label="Диктовать сообщение" ${attributes("dictate")}>${icon("mic", 21)}</button>
-        <button class="composer-button voice-button" type="button" aria-label="Голосовой разговор" ${attributes("voice-chat")}>${icon("wave", 22)}</button>
-        <button class="composer-button send-button" type="submit" aria-label="Отправить сообщение" hidden disabled>${icon("sendUp", 23)}</button>
-        <button class="composer-button stop-button" type="button" aria-label="Остановить задачу" ${attributes("stop")} hidden>${icon("stop", 19)}</button>
       </div>
     </form>`;
   }
@@ -154,6 +156,10 @@ const CortexUI = (() => {
         ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
+          ${iconButton("refresh", "Перегенерировать", "regenerate", index)}
+          ${iconButton("thumb-up", "Полезный ответ", "feedback-up", index, message.feedback === "up" ? "feedback-selected" : "")}
+          ${iconButton("thumb-down", "Неудачный ответ", "feedback-down", index, message.feedback === "down" ? "feedback-selected" : "")}
+          ${iconButton("note", "Уточнить ответ", "refine-answer", index)}
         </div></article>`).join("");
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
       ${replyMark}${webSourceBadges(ctx.pending.text, ctx.pending.webSearching)}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
@@ -171,7 +177,7 @@ const CortexUI = (() => {
     </header>
     <div class="scroll conversation" aria-label="Переписка">
       ${messages || pending || error ? `<div class="message-list${ctx.messageEnter ? " entering" : ""}">${messages}${pending}${error}</div>` :
-        `<section class="chat-empty"><div class="chat-empty-signal" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>${sign}<h1>На связи.</h1></section>`}
+        `<section class="chat-empty" aria-label="CORTEX">${sign}</section>`}
     </div>`;
   }
 
@@ -212,36 +218,6 @@ const CortexUI = (() => {
         ${chatItems({ search: "" })}</div>`;
   }
 
-  const tokenNumber = new Intl.NumberFormat("ru-RU");
-  const resetTime = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
-  const usageDate = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "numeric", timeZone: "UTC" });
-  function quotaPanel(connection) {
-    const quota = connection.quota;
-    const available = quota?.unit === "tokens";
-    const percent = quota?.unlimited ? 100 : quota?.limit > 0 ? Math.max(0, Math.min(100, 100 * quota.remaining / quota.limit)) : 0;
-    const reset = new Date(quota?.reset_at);
-    const history = (Array.isArray(quota?.history) ? quota.history : []).filter(item =>
-      /^\d{4}-\d{2}-\d{2}$/.test(item.day) && Number.isFinite(Date.parse(item.day)) && Number.isFinite(item.used)).slice(-7);
-    const maxUsed = Math.max(1, ...history.map(item => item.used));
-    const balanceStatus = !connection.checked && connection.status !== "offline" ? "Проверяем баланс…" :
-      connection.status === "offline" ? "Сервер сейчас не отвечает." :
-      connection.guest === false && !M.state.account ? "Войдите, чтобы увидеть баланс." : "Баланс временно недоступен.";
-    return `<section class="panel stack quota-panel"><header class="quota-heading">
-      <span class="section-symbol">${icon("spark", 20)}</span><h2>Токены ИИ</h2>
-      ${available ? `<span class="quota-reset">${connection.status === "offline" ? "Последние данные" : "Суточный лимит"}</span>` : ""}</header>
-      ${available ? `<p class="quota-balance"><strong>${quota.unlimited ? "Безлимит" : esc(tokenNumber.format(quota.remaining))}</strong>
-      ${quota.unlimited ? "" : `<small>из ${esc(tokenNumber.format(quota.limit))}</small>`}</p>
-      <div class="quota-track" role="progressbar" aria-label="Осталось токенов" aria-valuemin="0" aria-valuemax="100"
-        aria-valuenow="${Math.round(percent)}"><span style="--quota-progress:${percent}%"></span></div>
-      ${Number.isFinite(reset.getTime()) ? `<small class="muted">Обновление в ${esc(resetTime.format(reset))} по Москве</small>` : ""}
-      ${history.length ? `<details class="quota-history"><summary><span>Расход за неделю</span><span class="quota-bars" aria-hidden="true">
-        ${history.map(item => `<i style="--bar:${Math.round(14 + 86 * item.used / maxUsed)}%"></i>`).join("")}</span></summary>
-        <ul>${history.map(item => `<li><time datetime="${item.day}">${esc(usageDate.format(new Date(item.day)))}</time>
-          <span>${esc(tokenNumber.format(item.used))}</span></li>`).join("")}</ul></details>` : ""}` :
-      `<p class="muted" role="status">${balanceStatus}</p>${connection.status !== "loading" && connection.status !== "preview" ?
-        button("Обновить", "refresh", "refresh-connection", "", "quiet") : ""}`}</section>`;
-  }
-
   function profile(ctx) {
     const account = M.state.account;
     const type = { Email: "Вход по почте", Yandex: "Яндекс ID", Google: "Существующий аккаунт" }[account?.provider];
@@ -257,10 +233,9 @@ const CortexUI = (() => {
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
         </section>
-        ${quotaPanel(ctx.connection)}
-        ${group(tile("Настройки", "Интерфейс, модели и уведомления", "sliders", "go", "settings") +
-          tile("Данные и чаты", "История, экспорт и заметки", "folder", "go", "data") +
-          tile("Память и персонализация", "Факты, контекст и стиль ответа", "memory", "go", "memory"))}
+        ${group(tile("Настройки", "", "sliders", "go", "settings") +
+          tile("Данные и чаты", "", "folder", "go", "data") +
+          tile("Память и персонализация", "", "memory", "go", "memory"))}
         ${group(tile("Разрешения Android", "", "shield", "go", "permissions") +
           tile("Помощь и поддержка", "", "help", "go", "support") +
           tile("О приложении", "Версия и конфиденциальность", "info", "go", "about"))}
@@ -327,7 +302,6 @@ const CortexUI = (() => {
   }
   function settings() {
     return detail("Настройки", "", group(
-      tile("Способ вызова CORTEX", "Островок, голос или без плавающего окна", "focus", "go", "phone-tools") +
       tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
       tile("Энергопотребление", "", "bolt", "go", "energy") +
       tile("Подписка", "Тарифы, лимиты и платежи", "spark", "go", "subscription") +
@@ -425,9 +399,8 @@ const CortexUI = (() => {
       </section>` + button("Настроить CORTEX", "sliders", "go", "phone-tools", "primary"));
   }
   function models(ctx) {
-    return detail("Модели ИИ", "Для переписки с CORTEX", quotaPanel(ctx.connection) + `<section class="panel stack">
+    return detail("Модели ИИ", "", `<section class="panel stack">
       ${modelChoices(M.state.preferences.aiModel)}
-      <p class="muted">Цены в $ за 1 млн входных / выходных токенов. PRO-модели требуют подписки. Списание по фактической стоимости OpenRouter.</p>
       <h2 class="group-label">Режим авто</h2>${choices(M.models, M.state.preferences.model, "model-profile")}
     </section>`);
   }
@@ -447,25 +420,23 @@ const CortexUI = (() => {
   }
   function data() {
     const p = M.state.preferences;
-    return detail("Чаты и данные", "Переписка на этом устройстве", `<section class="panel stack">
-      ${switchRow("Помнить сохранённые чаты", "Учитывать подходящие фрагменты бесед в новых ответах", p.rememberSaved, "rememberSaved")}
+    return detail("Данные и чаты", "", `<section class="panel stack">
+      ${switchRow("Контекст прошлых чатов", "Учитывать сохранённые беседы", p.rememberSaved, "rememberSaved")}
     </section>` + group(
-      tile("Экспортировать чаты", "Скачать сохранённые диалоги в JSON", "download", "export") +
-      tile("Заметки", "Локальный блокнот", "note", "go", "notes") +
-      tile("Удалить сохранённые чаты", "Очистить историю на этом устройстве", "trash", "clear-chats", "", "danger") +
-      tile("Сбросить локальные данные", "Удалить чаты, заметки, память и настройки", "trash", "clear-local", "", "danger")
+      tile("Экспорт чатов", "JSON", "download", "export") +
+      tile("Очистить историю", "", "trash", "clear-chats", "", "danger") +
+      tile("Сбросить данные", "", "trash", "clear-local", "", "danger")
     ));
   }
   function memory() {
     const data = M.memory();
-    return detail("Память и персонализация", "Контекст, который учитывает CORTEX",
-      `<section class="panel">${switchRow("Использовать память", "Добавлять факты и уместные фрагменты бесед к запросу", data.enabled, "memory")}</section>` +
-      group(tile("Манера общения", M.styles[M.profile().style], "sliders", "go", "personality") +
-        tile("Инструкции", "Общие правила ответа CORTEX", "file", "go", "instructions")) +
-      label("ФАКТЫ") + (data.entries.length ? group(data.entries.map(entry =>
+    return detail("Память и персонализация", "",
+      `<section class="panel">${switchRow("Память", "Учитывать сохранённые факты", data.enabled, "memory")}</section>` +
+      group(tile("Стиль ответов", M.styles[M.profile().style], "sliders", "go", "personality") +
+        tile("Инструкции", "", "file", "go", "instructions")) +
+      label("Факты") + (data.entries.length ? group(data.entries.map(entry =>
         tile(entry.title, entry.value, "memory", "memory-edit", entry.id)).join("")) :
-        '<div class="empty-panel"><p>Добавьте факт, который CORTEX должен учитывать в ответах.</p></div>') +
-      button("Добавить факт", "plus", "memory-edit", "", "primary"));
+        '') + button("Добавить факт", "plus", "memory-edit", "", "outline"));
   }
   function personality() {
     const person = M.profile();
@@ -528,13 +499,11 @@ const CortexUI = (() => {
       ${button("Повторить начальную настройку", "refresh", "open-setup", "", "outline")}</div>`);
   }
   function support() {
-    return detail("Помощь и поддержка", "Связь с разработчиком", group(
-      (CortexApi.available ? tile("Мои обращения", "Переписка с поддержкой", "message", "support-inbox") : "") +
-      tile("Написать разработчику", "Вопрос о работе CORTEX", "message", "support-form", "contact") +
-      tile("Сообщить об ошибке", "Опишите, что произошло, и приложите скриншот", "alert", "support-form", "bug") +
-      tile("Предложить функцию", "Расскажите, чего не хватает", "spark", "support-form", "idea") +
-      tile("Отправить жалобу", "Опишите ситуацию для поддержки", "shield", "support-form", "complaint")
-    ) + faq());
+    return heading("Поддержка", "") + `<section class="support-chat" id="support-chat">
+      <div class="support-messages" id="support-messages" aria-live="polite"><div class="support-message support-assistant">Напишите, что случилось. Я помогу разобраться.</div></div>
+      <form class="support-compose" id="support-compose"><textarea name="message" rows="1" maxlength="3000" required placeholder="Сообщение поддержке" aria-label="Сообщение поддержке"></textarea>
+        <button type="submit" aria-label="Отправить">${icon("sendUp", 21)}</button></form>
+    </section>`;
   }
 
   const questions = [
@@ -559,14 +528,12 @@ const CortexUI = (() => {
   function about(ctx) {
     const publicId = M.state.account?.public_id || ctx.connection?.guestId || "";
     const idType = M.state.account ? "ID аккаунта" : "ID гостя";
-    return detail("О приложении", "CORTEX для Android", `<section class="panel about-card">
+    return detail("О приложении", "", `<section class="panel about-card">
       <div class="brand">${sign}<span>CORTEX</span></div><p class="muted">Версия ${version}</p>
-      <p>Персональный помощник с текстовым и голосовым вводом.</p>
-      <p class="muted">Проект разработчика stasaleksandrov481-netizen.</p>
-    </section>${publicId ? `<details class="profile-id-details"><summary>Техническая информация</summary>
+    </section>${publicId ? `<details class="profile-id-details"><summary>Данные приложения</summary>
       <p class="muted">${idType}: <code>${esc(publicId)}</code></p>
-      <p class="muted">Этот ID нужен поддержке. Он не даёт доступа к вашему аккаунту.</p></details>` : ""}` + group(tile("Конфиденциальность", "Какие данные используются", "shield", "go", "privacy") +
-      tile("Связь с разработчиком", "Через поддержку CORTEX", "help", "go", "support")));
+      <p class="muted">Идентификатор для обращения в поддержку.</p></details>` : ""}` + group(tile("Конфиденциальность", "", "shield", "go", "privacy") +
+      tile("Поддержка", "", "help", "go", "support")));
   }
   function privacy(ctx) {
     return detail("Конфиденциальность", "Данные, необходимые для работы", `<section class="panel stack prose">
