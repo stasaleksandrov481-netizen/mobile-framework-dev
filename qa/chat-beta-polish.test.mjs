@@ -27,8 +27,8 @@ test("chat composer keeps only model picker and quota below the input", () => {
   assert.match(html, /class="composer-input-row"[\s\S]*?<textarea[\s\S]*?<div class="composer-send-actions"/);
   assert.match(html, /class="composer-footer"[\s\S]*?class="ai-model-picker"[\s\S]*?class="quota-ring"/);
   assert.doesNotMatch(html, /class="composer-button mic-button"/);
-  assert.match(html, /\/favicons\/nvidia\.com/);
-  assert.doesNotMatch(html, /www\.google\.com\/s2\/favicons/);
+  assert.ok(html.includes('/favicons/nvidia.com'));
+  assert.ok(!html.includes('www.google.com/s2/favicons'));
 });
 
 test("only three primary tabs and the empty chat shows a plain mark", () => {
