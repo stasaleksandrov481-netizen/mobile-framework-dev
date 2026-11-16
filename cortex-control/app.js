@@ -163,21 +163,29 @@ async function loadTab() {
 }
 
 async function overview() {
-  const activity = data(await db.rpc("cortex_admin_metrics"));
+  const [metrics, daily] = await Promise.all([
+    db.rpc("cortex_admin_metrics"), db.rpc("cortex_admin_activity")
+  ]);
+  const activity = data(metrics);
   const labels = { online_devices: "Сейчас в CORTEX", devices: "Уникальные устройства всего",
     opened_24h: "Уникальных устройств за 24 часа", new_today: "Впервые открыли сегодня",
-    opened_today: "Устройств открыли сегодня", launches_total: "Всего запусков",
+    opened_today: "Устройств открыли сегодня", accounts_today: "Аккаунтов открыли сегодня", launches_total: "Всего запусков",
     ai_requests_today: "Запросов к ИИ сегодня (новый учёт)", ai_requests_total: "Запросов к ИИ с 16 ноября",
     ai_attempts_today: "Обращений к моделям сегодня", ai_success_today: "Успешных ответов моделей сегодня" };
   const cards = Object.entries(labels).map(([key, label]) =>
     card(label, '<strong class="count">' + dateNumber(activity[key]) + '</strong>')).join("");
   const seen = (activity.online || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
     escape(row.signed_in ? "Аккаунт" : "Гость") + ' · ' + date(row.last_seen_at) + ' МСК · ' + escape(row.version) + '</span></li>').join("");
+  const opened = (daily.data?.today || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
+    date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
+  const dailyList = daily.error ? '<p>Не удалось загрузить список.</p>' : opened ?
+    '<ul class="record-list">' + opened + '</ul>' : '<p>Сегодня пока нет открытий с аккаунтом.</p>';
   return '<div class="cards">' + cards + card("Открытые обращения", '<strong class="count">' + dateNumber(activity.support_open) + '</strong>') +
     '</div><p class="muted">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
     'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
     'старые записи не выдаются за достоверную статистику.</p>' +
-    card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>');
+    card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>') +
+    card("Кто открыл CORTEX сегодня", dailyList);
 }
 
 async function support() {
