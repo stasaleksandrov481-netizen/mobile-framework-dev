@@ -27,6 +27,12 @@ const RETRYABLE_MODEL_ERRORS = new Set(["empty", "invalid_plan", "model", "provi
 export const retryableModelError = (code: unknown) => typeof code === "string" && RETRYABLE_MODEL_ERRORS.has(code);
 
 export async function body(request: Request, limit = 770_000): Promise<Record<string, unknown>> {
+  // Reject browser-simple form and text submissions before parsing. Native
+  // clients send JSON; leaving Content-Type unset preserves older test clients.
+  const contentType = request.headers.get("content-type");
+  if (contentType && !/^application\/json(?:\s*;\s*charset\s*=\s*utf-8)?\s*$/i.test(contentType)) {
+    throw new Failure("invalid_content_type", 415);
+  }
   if (Number(request.headers.get("content-length") || 0) > limit) throw new Failure("too_large", 413);
   const reader = request.body?.getReader();
   if (!reader) throw new Failure("invalid", 400);
