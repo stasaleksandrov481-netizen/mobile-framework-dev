@@ -14,6 +14,14 @@ if (!(["127.0.0.1", "localhost", "::1"].includes(base.hostname) &&
 }
 
 const scenarios = [
+  // Public pages are safe to probe: no signups, OTP sends, or paid AI requests.
+  { path: "/", total: 300, concurrent: 30 },
+  { path: "/register", total: 300, concurrent: 30 },
+  { path: "/privacy", total: 150, concurrent: 30 },
+  { path: "/consent", total: 150, concurrent: 30 },
+  { path: "/terms", total: 150, concurrent: 30 },
+  { path: "/offer", total: 150, concurrent: 30 },
+  { path: "/pricing", total: 150, concurrent: 30 },
   { path: "/api/healthz", total: 250, concurrent: 10 },
   { path: "/api/healthz", total: 500, concurrent: 50 },
   { path: "/api/healthz", total: 1000, concurrent: 100 },

@@ -13,6 +13,7 @@ export const cortexAuth = createClient(cortexSupabaseUrl, cortexPublishableKey, 
 });
 
 export const EARLY_ACCESS_BONUS = 5_000;
+const REGISTRATION_LEGAL_VERSION = "2026-11-16";
 
 export async function savePreregistration(notifyOptIn: boolean) {
   const { data: { user }, error: authError } = await cortexAuth.auth.getUser();
@@ -27,5 +28,14 @@ export async function savePreregistration(notifyOptIn: boolean) {
     );
   if (error) {
     throw new Error("Не удалось сохранить регистрацию. Попробуйте позже.");
+  }
+  // Immutable server timestamps and document versions are recorded by an
+  // authenticated RPC. Browser-supplied timestamps are not legal audit evidence.
+  if (user.user_metadata?.cortex_privacy_acknowledged_version === REGISTRATION_LEGAL_VERSION &&
+      user.user_metadata?.cortex_terms_accepted_version === REGISTRATION_LEGAL_VERSION) {
+    const { error: auditError } = await cortexAuth.rpc("cortex_record_registration_acceptance");
+    if (auditError) {
+      throw new Error("Не удалось сохранить подтверждение условий. Попробуйте позже.");
+    }
   }
 }

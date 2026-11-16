@@ -23,6 +23,7 @@ export default function SupportPage() {
         <nav className="legal-links" aria-label="Документы CORTEX">
           <Link href="/pricing">Тарифы и цены</Link>
           <Link href="/terms">Пользовательское соглашение</Link>
+          <Link href="/offer">Публичная оферта и возвраты</Link>
           <Link href="/privacy">Политика конфиденциальности</Link>
         </nav>
       </main>
