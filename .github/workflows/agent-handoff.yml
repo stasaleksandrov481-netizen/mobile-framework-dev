@@ -1,0 +1,50 @@
+name: CORTEX AI Handoff Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  handoff:
+    name: Require documented handoff for runtime changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify cross-agent handoff and Edge sync manifest
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          changed = set(subprocess.check_output(
+              ["git", "diff", "--name-only", os.environ["BASE_SHA"], os.environ["HEAD_SHA"]],
+              text=True,
+          ).splitlines())
+          source_prefixes = ("app/", "cortex-web/", "cortex-control/", "supabase/",
+                             "qa/", "tools/", ".github/workflows/")
+          source_changes = [name for name in changed if name.startswith(source_prefixes)]
+          if source_changes and "docs/AGENT_HANDOFF.md" not in changed:
+              print("::error::Runtime changes require an entry in docs/AGENT_HANDOFF.md")
+              print("Changed paths:", ", ".join(sorted(source_changes)[:20]))
+              sys.exit(1)
+          if any(name.startswith("supabase/functions/cortex/") for name in changed):
+              if "docs/RELEASE_INVENTORY.md" not in changed:
+                  print("::error::Edge changes require an updated docs/RELEASE_INVENTORY.md "
+                        "after comparison with the running Supabase function")
+                  sys.exit(1)
+          print("CORTEX handoff documentation is consistent with the PR scope.")
+          PY
