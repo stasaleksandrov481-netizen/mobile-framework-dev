@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.webkit.*
 import android.widget.Button
@@ -40,6 +41,9 @@ class MainActivity : ComponentActivity() {
     private var rendererFailed = false
     private var nativeReady = false
     private var pendingSchedule: String? = null
+    private var pendingAuthReturn = false
+    private val webUpdates by lazy { CortexWebUpdates(applicationContext) }
+    private var webSnapshot = 0L
     private val leaveForAction: () -> Unit = { moveTaskToBack(true) }
     private val wakeCommand: (String) -> Boolean = { command ->
         val available = !rendererFailed && nativeReady && CortexRuntime.appVisible
@@ -73,7 +77,9 @@ class MainActivity : ComponentActivity() {
             WindowInsetsCompat.CONSUMED
         }
         setContentView(container)
-        createWebView(savedInstanceState)
+        runCatching { createWebView(savedInstanceState) }
+            .onFailure { showRendererError("Не удалось запустить системный WebView. Проверьте, что он включён и обновлён.") }
+        intent.data?.let(::authReturned)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (rendererFailed) {
@@ -91,8 +97,15 @@ class MainActivity : ComponentActivity() {
     private fun createWebView(savedInstanceState: Bundle? = null) {
         rendererFailed = false
         nativeReady = false
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            showRendererError("Системный WebView слишком старый для защищённого подключения CORTEX к Android. Обновите или включите WebView и попробуйте снова.")
+            return
+        }
+        webSnapshot = webUpdates.snapshot()
         val loader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/web/", webUpdates.handler(webSnapshot))
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
+        webUpdates.checkAsync()
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         webView = WebView(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -104,6 +117,7 @@ class MainActivity : ComponentActivity() {
                 allowFileAccess = false
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                cacheMode = WebSettings.LOAD_NO_CACHE
                 blockNetworkLoads = true  // All backend traffic uses the native HTTPS gateway.
                 javaScriptCanOpenWindowsAutomatically = false
                 setSupportMultipleWindows(false)
@@ -117,8 +131,21 @@ class MainActivity : ComponentActivity() {
                     return WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                 }
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    if (view === webView) webUpdates.rollback(webSnapshot)
                     if (!rendererFailed && view === webView) showRendererError()
                     return true
+                }
+                override fun onPageFinished(view: WebView, url: String) {
+                    if (webSnapshot <= 0 || view !== webView || !isAsset(Uri.parse(url))) return
+                    view.postDelayed({
+                        if (view !== webView || rendererFailed) return@postDelayed
+                        view.evaluateJavascript("Boolean(document.getElementById('app') && document.getElementById('screen')?.children.length && typeof Cortex !== 'undefined' && typeof CortexApi !== 'undefined' && window.CortexSetup)") { healthy ->
+                            if (view === webView && !rendererFailed && healthy != "true" && webUpdates.rollback(webSnapshot)) {
+                                closeWebView()
+                                createWebView()
+                            }
+                        }
+                    }, 5000L)
                 }
             }
         }
@@ -127,21 +154,23 @@ class MainActivity : ComponentActivity() {
         speech = CortexSpeech(this) { event -> deviceEvent(event) }
         device = CortexDeviceBridge(this, speech, ::openYandexLogin, ::deviceEvent)
         server = CortexServerBridge(applicationContext)
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            val origin = "https://$ASSET_HOST"
-            WebViewCompat.addWebMessageListener(webView, "CortexServer", setOf(origin)) { _, message, source, mainFrame, reply ->
+        val origin = "https://$ASSET_HOST"
+        WebViewCompat.addWebMessageListener(webView, "CortexServer", setOf(origin)) { _, message, source, mainFrame, reply ->
                 if (mainFrame && source.toString().trimEnd('/') == origin) server.handle(message.data.orEmpty(), reply)
-            }
-            WebViewCompat.addWebMessageListener(webView, "CortexDevice", setOf(origin)) { _, message, source, mainFrame, _ ->
+        }
+        WebViewCompat.addWebMessageListener(webView, "CortexDevice", setOf(origin)) { _, message, source, mainFrame, _ ->
                 if (mainFrame && source.toString().trimEnd('/') == origin) runOnUiThread {
                     val data = message.data.orEmpty()
                     if (!nativeReady && runCatching { JSONObject(data).optString("operation") }.getOrNull() == "permissions") {
                         nativeReady = true
+                        if (pendingAuthReturn) {
+                            pendingAuthReturn = false
+                            deviceEvent(JSONObject().put("type", "auth-return"))
+                        }
                     }
                     device.handle(data)
                     showPendingSchedule()
                 }
-            }
         }
         CortexRuntime.wakeCommand = wakeCommand
         CortexRuntime.leaveForAction = leaveForAction
@@ -151,7 +180,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun showRendererError() {
+    private fun showRendererError(reason: String = "Android System WebView завершился. Попробуйте снова или обновите Android System WebView.") {
         rendererFailed = true
         closeWebView()
         val density = resources.displayMetrics.density
@@ -161,7 +190,7 @@ class MainActivity : ComponentActivity() {
             gravity = android.view.Gravity.CENTER
             setPadding(padding, padding, padding, padding)
             addView(TextView(this@MainActivity).apply {
-                text = "Android System WebView завершился. Попробуйте снова или обновите Android System WebView."
+                text = reason
                 textSize = 16f
                 setTextColor(Color.WHITE)
                 gravity = android.view.Gravity.CENTER
@@ -170,10 +199,22 @@ class MainActivity : ComponentActivity() {
                 text = "Повторить"
                 isSoundEffectsEnabled = false
                 setOnClickListener {
-                    createWebView()
-                    notifyVisibility(true)
-                    island.refresh()
-                    island.ensureIsland()
+                    runCatching { createWebView() }
+                        .onFailure { showRendererError("Не удалось запустить системный WebView. Обновите его и попробуйте снова.") }
+                    if (!rendererFailed && ::island.isInitialized) {
+                        notifyVisibility(true)
+                        island.refresh()
+                        island.ensureIsland()
+                    }
+                }
+            })
+            val provider = runCatching { WebView.getCurrentWebViewPackage()?.packageName }.getOrNull()
+            if (!provider.isNullOrBlank()) addView(Button(this@MainActivity).apply {
+                text = "Настройки системного WebView"
+                isSoundEffectsEnabled = false
+                setOnClickListener {
+                    runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$provider"))) }
                 }
             })
         }
@@ -218,7 +259,8 @@ class MainActivity : ComponentActivity() {
 
     private fun authReturned(uri: Uri) {
         if (uri.scheme == BuildConfig.APPLICATION_ID && uri.host == "oauth" && uri.path == "/return" && ::webView.isInitialized) {
-            deviceEvent(JSONObject().put("type", "auth-return"))
+            if (nativeReady && !rendererFailed) deviceEvent(JSONObject().put("type", "auth-return"))
+            else pendingAuthReturn = true
         }
     }
 
@@ -279,7 +321,10 @@ class MainActivity : ComponentActivity() {
         if (::device.isInitialized) device.close()
         if (::server.isInitialized) server.close()
         if (::island.isInitialized) island.close()
-        if (::webView.isInitialized) { (webView.parent as? FrameLayout)?.removeView(webView); webView.destroy() }
+        if (::webView.isInitialized) {
+            (webView.parent as? FrameLayout)?.removeView(webView)
+            runCatching { webView.destroy() }
+        }
     }
     private companion object {
         private val cleanupStarted = AtomicBoolean()

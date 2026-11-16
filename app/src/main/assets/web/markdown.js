@@ -27,6 +27,31 @@ const CortexMarkdown = (() => {
       escape(alt) + "</a>" : escape(alt);
   };
 
+  // Icons are a tiny trusted vocabulary, not arbitrary SVG/HTML from the AI.
+  // Example: "Готово :icon[check]:". Unrecognised names remain plain text.
+  const inlineIcons = Object.freeze({
+    spark: "Подсказка", check: "Готово", info: "Информация", alert: "Внимание",
+    shield: "Безопасность", bolt: "Быстро", bell: "Уведомление", heart: "Важно",
+    star: "Рекомендация", search: "Поиск", globe: "Интернет", note: "Заметка",
+    file: "Файл", link: "Ссылка", history: "История", settings: "Настройки",
+  });
+  parser.inline.ruler.before("text", "cortex_inline_icon", (state, silent) => {
+    if (!state.src.startsWith(":icon[", state.pos)) return false;
+    const match = /^:icon\[([a-z]{2,16})\]:/.exec(state.src.slice(state.pos));
+    if (!match || !Object.hasOwn(inlineIcons, match[1])) return false;
+    if (!silent) {
+      const token = state.push("cortex_inline_icon", "", 0);
+      token.content = match[1];
+    }
+    state.pos += match[0].length;
+    return true;
+  });
+  parser.renderer.rules.cortex_inline_icon = (tokens, index) => {
+    const name = tokens[index].content;
+    return '<span class="markdown-inline-icon" role="img" aria-label="' + inlineIcons[name] + '">' +
+      CortexIcons(name, 17) + "</span>";
+  };
+
   function codeBlock(token) {
     const info = token.info.trim().split(/\s+/u)[0];
     const language = /^[a-z0-9_.+-]{1,24}$/i.test(info) ? info : "Код";
@@ -64,12 +89,15 @@ const CortexMarkdown = (() => {
       const [quote, paragraph, inline] = state.tokens.slice(index, index + 3);
       if (quote.type !== "blockquote_open" || paragraph.type !== "paragraph_open" || inline.type !== "inline") continue;
       const first = inline.children?.[0];
-      const mark = first?.type === "text" && /^\[!(NOTE|TIP|IMPORTANT)\]\s*$/u.exec(first.content);
+      const mark = first?.type === "text" && /^\[!(NOTE|TIP|IMPORTANT)\](?:\s+|$)/u.exec(first.content);
       if (!mark) continue;
       quote.meta = { callout: mark[1] };
       quote.attrJoin("class", "cortex-callout");
-      inline.children.shift();
-      if (["softbreak", "hardbreak"].includes(inline.children[0]?.type)) inline.children.shift();
+      first.content = first.content.slice(mark[0].length);
+      if (!first.content) {
+        inline.children.shift();
+        if (["softbreak", "hardbreak"].includes(inline.children[0]?.type)) inline.children.shift();
+      }
     }
   });
   parser.renderer.rules.blockquote_open = (tokens, index, options, env, renderer) => {

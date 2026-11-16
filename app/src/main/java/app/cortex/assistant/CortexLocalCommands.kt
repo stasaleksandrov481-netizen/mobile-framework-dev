@@ -7,7 +7,8 @@ import java.util.Locale
 internal object CortexLocalCommands {
     private val verbs = "включи(?:ть)?|выключи(?:ть)?|отключи(?:ть)?|погаси(?:ть)?|открой|открыть|закрой|закрыть|" +
         "запусти(?:ть)?|сверни|свернуть|заблокируй|заблокировать|сфоткай|сфоткайся|сфотографируй|сфотографировать|" +
-        "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи"
+        "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи|" +
+        "найди|поищи|заведи|скопируй|сними"
     private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)\b))\s*""", RegexOption.IGNORE_CASE)
     private val unpunctuated = Regex("""\s+(?=(?:$verbs)\b)""", RegexOption.IGNORE_CASE)
     private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|бро|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
@@ -26,6 +27,13 @@ internal object CortexLocalCommands {
     private val dim = Regex("""(?:прибавь|увеличь|подними|повысь|убавь|уменьши|снизь|понизь) яркость(?: экрана)?(?: на (\d{1,3}) ?(?:%|процент(?:а|ов)?))?""")
     private val brightnessLevel = Regex("""(?:установи|поставь|сделай|измени) яркость(?: экрана)? (?:на )?(\d{1,3}) ?(?:%|процент(?:а|ов)?)?""")
     private val close = Regex("""(?:закрой|сверни|выйди из) (?:приложение |приложения )?(.{2,65})""")
+    private val timer = Regex("""(?:поставь|запусти|установи|создай) таймер(?: на)? (\d{1,3}) (секунд\p{L}*|минут\p{L}*|час\p{L}*)""")
+    private val alarm = Regex("""(?:поставь|заведи|установи) будильник(?: на)? ([01]?\d|2[0-3]):([0-5]\d)""")
+    private val webSearch = Regex("""(?:найди|поищи|погугли) (?:в интернете|в сети|в браузере) (.{2,140})""", RegexOption.IGNORE_CASE)
+    private val mapSearch = Regex("""(?:найди|покажи|поищи) (?:на карте|на картах) (.{2,140})""", RegexOption.IGNORE_CASE)
+    private val clipboard = Regex("""(?:скопируй|скопировать) (?:текст )?[«\"](.{1,800})[»\"]""", RegexOption.IGNORE_CASE)
+    private val dialer = Regex("""(?:позвони|набери номер|открой набор номера) (\+?[\d ()-]{5,22})""", RegexOption.IGNORE_CASE)
+    private val message = Regex("""(?:напиши|создай) смс(?: на номер)? (\+?[\d ()-]{5,22}) (?:с текстом )?[«\"](.{1,1000})[»\"]""", RegexOption.IGNORE_CASE)
     private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|подскажи как)\s""")
     private val cameraNames = setOf("камера", "камеру", "фотокамеру", "camera")
     private val spaces = Regex("""\s+""")
@@ -35,6 +43,17 @@ internal object CortexLocalCommands {
             .replace(Regex("""^пожалуйста,?\s+|,?\s+пожалуйста$""", RegexOption.IGNORE_CASE), "")
         val request = normalized(original)
         if (request.isBlank() || instruction.containsMatchIn(request)) return null
+        clipboard.matchEntire(original)?.let { return listOf(command("copy_text", "text" to it.groupValues[1])) }
+        message.matchEntire(original)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            if (number.count(Char::isDigit) in 5..15) return listOf(command("sms", "number" to number, "text" to match.groupValues[2]))
+        }
+        dialer.matchEntire(original)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            if (number.count(Char::isDigit) in 5..15) return listOf(command("dial", "number" to number))
+        }
+        webSearch.matchEntire(original)?.let { return listOf(command("search", "query" to it.groupValues[1])) }
+        mapSearch.matchEntire(original)?.let { return listOf(command("maps", "query" to it.groupValues[1])) }
         website.matchEntire(original)?.groupValues?.get(1)?.let { address ->
             val url = if ("://" in address) address else "https://$address"
             val parsed = runCatching { URI(url) }.getOrNull()
@@ -69,6 +88,21 @@ internal object CortexLocalCommands {
         val first = words.substringBefore(' ')
         val plain = (infinitives[first] ?: first) + words.substring(first.length)
         CortexSystemRequests.parse(plain)?.let { return it }
+        timer.matchEntire(plain)?.let { match ->
+            val amount = match.groupValues[1].toInt()
+            val unit = match.groupValues[2]
+            val seconds = amount * when {
+                unit.startsWith("час") -> 3600
+                unit.startsWith("минут") -> 60
+                else -> 1
+            }
+            if (seconds in 1..86_400) return command("timer", "seconds" to seconds)
+        }
+        alarm.matchEntire(plain)?.let { match ->
+            return command("alarm", "hour" to match.groupValues[1].toInt(), "minute" to match.groupValues[2].toInt())
+        }
+        webSearch.matchEntire(plain)?.let { return command("search", "query" to it.groupValues[1]) }
+        mapSearch.matchEntire(plain)?.let { return command("maps", "query" to it.groupValues[1]) }
         appInfo.matchEntire(plain)?.groupValues?.get(1)?.trim('«', '»', '"')?.let { name ->
             return resolveApp(name)?.let { command("app_info", "target" to it) }
         }
@@ -98,6 +132,11 @@ internal object CortexLocalCommands {
             "сфоткай", "сфотографируй", "сделай фото", "сделай фотографию", "сделай снимок",
             "сфоткай на камеру", "сфотографируй на камеру" -> command("capture_photo")
             "сфоткайся", "сделай селфи" -> command("capture_photo", "lens" to "front")
+            "сними видео", "открой видеокамеру", "запусти видеокамеру" -> command("utility", "target" to "camera_video")
+            "включи беззвучный режим", "поставь беззвучный режим", "отключи звонок" ->
+                command("ringer", "mode" to "silent")
+            "включи вибрацию", "поставь режим вибрации" -> command("ringer", "mode" to "vibrate")
+            "включи звук звонка", "выключи беззвучный режим" -> command("ringer", "mode" to "normal")
             "открой настройки vpn", "включи vpn", "выключи vpn" -> command("settings", "target" to "vpn")
             "открой настройки wi-fi", "включи wi-fi", "выключи wi-fi", "включи вай фай", "выключи вай-фай" ->
                 command("panel", "target" to "wifi")

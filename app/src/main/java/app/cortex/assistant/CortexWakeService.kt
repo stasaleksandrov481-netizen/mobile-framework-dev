@@ -52,8 +52,7 @@ class CortexWakeService : Service() {
     private val turn = CortexWakeTurn(
         listening = { CortexIslandService.send(this, CortexIslandService.ACTION_WAKE) },
         finished = { command ->
-            if (CortexIslandService.handleControl(this, command) == null &&
-                CortexRuntime.wakeCommand?.invoke(command) != true) {
+            if (CortexRuntime.wakeCommand?.invoke(command) != true) {
                 CortexIslandService.send(this, CortexIslandService.ACTION_SUBMIT) {
                     putExtra(CortexIslandService.EXTRA_MESSAGE, command)
                 }
@@ -65,14 +64,21 @@ class CortexWakeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val notifications = getSystemService(NotificationManager::class.java)
-        notifications.createNotificationChannel(NotificationChannel(CHANNEL, "CORTEX · голосовая активация", NotificationManager.IMPORTANCE_LOW))
-        val pending = PendingIntent.getActivity(this, 99, Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val notification = Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("CORTEX · голосовая активация")
-            .setContentText("Микрофон слушает слово «Кортекс» на устройстве")
-            .setContentIntent(pending).setOngoing(true).build()
+        val notification = runCatching {
+            val notifications = getSystemService(NotificationManager::class.java)
+            notifications.createNotificationChannel(NotificationChannel(CHANNEL, "CORTEX · голосовая активация", NotificationManager.IMPORTANCE_LOW))
+            val pending = PendingIntent.getActivity(this, 99, Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("CORTEX · голосовая активация")
+                .setContentText("Микрофон слушает слово «Кортекс» на устройстве")
+                .setContentIntent(pending).setOngoing(true).build()
+        }.getOrNull()
+        if (notification == null) {
+            CortexRuntime.reportWake("Android не разрешил уведомление фонового микрофона.")
+            stopSelf()
+            return
+        }
         val started = runCatching {
             if (Build.VERSION.SDK_INT >= 34) startForeground(2811, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             else startForeground(2811, notification)
@@ -81,7 +87,7 @@ class CortexWakeService : Service() {
             stopSelf()
             return
         }
-        if (!started || Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(this) ||
+        if (!started || !CortexAndroidCompatibility.offlineWakeAvailable(this) ||
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             CortexRuntime.reportWake("Android не запустил офлайн-распознавание. Проверьте доступ к микрофону.")
             stopSelf()

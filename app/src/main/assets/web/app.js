@@ -19,15 +19,18 @@
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
   const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
   const filters = { search: "" };
-  const connection = { yandex: false, email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
+  const connection = { email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
     status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
   let phoneInfo = {};
-  const permissions = { microphone: false, notifications: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  let deviceSnapshot = null;
+  let androidCompatibility = null;
+  const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "", rule = "goal";
   let accountMode = "password", accountEmail = "";
-  let pending, login, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
-  let connectionLoad, loginCleanup, subscriptionLoad;
+  let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
+  let connectionLoad, subscriptionLoad;
+  let emailResendUntil = 0, emailResendTimer = 0;
   let subscriptionEpoch = 0;
   let keyboardBaseline = 0, keyboardObserved = false, historySearchTimer = 0;
   let statusEpoch = 0, splashFrame = 0, splashTimer = 0, splashPrevious = null;
@@ -61,7 +64,7 @@
   function sendDevice(operation, data = {}) {
     const control = window.CortexIslandControl;
     const extended = new Set(["overlay-permission", "microphone-permission",
-      "overlay-config", "wake-config", "island-options"]);
+      "overlay-config", "wake-config", "island-options", "island-style-ack"]);
     if (operation === "permissions" && control) {
       try { control.postMessage(JSON.stringify({ operation })); } catch {}
     }
@@ -75,9 +78,32 @@
   }
 
   function syncIslandOptions() {
-    sendDevice("island-options", { profile: S.preferences.model, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
+    return sendDevice("island-options", { profile: S.preferences.model, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
       reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
       addressName: S.preferences.addressName, appearance: Planner.style() });
+  }
+
+  function islandCommand(text) {
+    const control = window.CortexIslandCommands?.parse(text, Planner.style(), S.preferences.overlayMode);
+    if (!control) return null;
+    if (!window.CortexIslandControl) return "Управлять островком можно только в Android-приложении CORTEX.";
+    const previous = S.islandStyle, previousMode = S.preferences.overlayMode;
+    S.islandStyle = control.style;
+    if (control.mode) S.preferences.overlayMode = control.mode;
+    if (!syncIslandOptions()) {
+      S.islandStyle = previous;
+      S.preferences.overlayMode = previousMode;
+      return "Не удалось передать настройку островка в Android.";
+    }
+    if (control.mode) {
+      if (control.mode === "off") {
+        S.preferences.hotwordEnabled = false;
+        sendDevice("wake-config", { enabled: false });
+      }
+      sendDevice("overlay-config", { mode: control.mode, hideLandscape: S.preferences.hideLandscape, resume: true });
+    }
+    saved();
+    return control.reply;
   }
 
   function applyEnergy(mode) {
@@ -94,6 +120,11 @@
     if (mode === "maximum" && !p.hotwordEnabled) flash("В разделе «Вызов» выдайте доступы к островку и микрофону, затем включите обращение «Кортекс».");
     render();
   }
+
+  // First-run choices must configure the native island as well as the WebView.
+  // Changing local preferences alone left the selected background mode disabled.
+  app.addEventListener("cortex-onboarding-energy", event => applyEnergy(event.detail?.mode));
+  app.addEventListener("cortex-onboarding-style", syncIslandOptions);
 
   function haptic() {
     if (S.preferences.haptics) sendDevice("tap");
@@ -191,11 +222,14 @@
     screen.dataset.chat = route === "chat" ? chatId : "";
     screen.className = "screen " + route + "-screen";
     screen.innerHTML = Planner.routes.has(route) ? Planner.page(route) : U.page(route, {
-      connection, permissions, wakeState, islandCamera, native: Boolean(device), login, chat: current(), messageEnter,
+      connection, permissions, compatibility: androidCompatibility, wakeState, islandCamera,
+      native: Boolean(device), chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
-      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail
+      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail,
+      resendWait: Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000))
     });
+    updateCodeCells();
     renderNav();
     nav.hidden = route === "account";
     composition.hidden = route !== "home" && route !== "chat";
@@ -244,7 +278,6 @@
     const previousId = chatId;
     if (next === "chat") id = id && M.chat(id) ? id : current()?.id || M.createChat().id;
     if (previous === next && (next !== "chat" || id === chatId)) return;
-    if (login && next !== "account") stopLogin();
     closeVoice();
     closeSheet();
     closeHistory(true);
@@ -297,7 +330,6 @@
     const [name, id] = location.hash.slice(1).split("/");
     const resolved = { appearance: "motion", connection: "settings", voice: "phone-tools" }[name] || name;
     route = routes.has(resolved) ? resolved : "home";
-    if (login && route !== "account") stopLogin();
     if (route !== "chat" && document.activeElement === input) input.blur();
     if (route !== "chat") app.classList.remove("composer-active");
     if (route === "chat") {
@@ -533,12 +565,13 @@
       if (data.fault) throw Api.failure(data.fault);
       connection.checked = true;
       connection.status = "ready";
-      connection.yandex = data.yandex === true;
       connection.emailRegistration = data.email_auth === true;
       connection.email = data.email_login === true || connection.emailRegistration;
       connection.guest = data.guest === true;
+      connection.guestId = S.account ? "" : typeof data.guest_id === "string" && /^@g\d{6,17}$/.test(data.guest_id)
+        ? data.guest_id : connection.guestId || "";
       connection.profiles = data.device_profiles === true;
-      if (!login) setAccount(data.account);
+      setAccount(data.account);
       connection.quota = data.quota || null;
     } catch {
       if (epoch !== statusEpoch) return;
@@ -551,8 +584,6 @@
         status.textContent = U.accountAvailability(connection, accountMode);
         status.hidden = !status.textContent;
       }
-      const yandexStatus = screen.querySelector("[data-yandex-status]");
-      if (yandexStatus) yandexStatus.hidden = !connection.checked || connection.yandex;
     }
   }
 
@@ -607,122 +638,77 @@
     connection.quota = quota;
     if (["profile", "models", "subscription"].includes(route)) render();
   });
-
-  function updateLogin(message) {
-    const text = screen.querySelector("[data-login-status]");
-    if (text) text.textContent = message;
-  }
-
-  function stopLogin() {
-    if (!login) return;
-    clearTimeout(login.timer);
-    login = null;
-    loginCleanup = Api.request("auth-cancel").catch(() => {});
-  }
-
-  function showLogin(attempt) {
-    attempt.browser = true;
-    if (route === "account") render();
-    else navigate("account");
-    attempt.timer = setTimeout(pollLogin, 1500);
-  }
-
-  async function restoreLogin() {
-    if (!Api.available || !device || login) return;
-    try {
-      const result = await Api.request("auth-resume");
-      if (login || !(result.expires_at > Date.now())) return;
-      const attempt = { busy: false, expires: result.expires_at, timer: 0 };
-      login = attempt;
-      showLogin(attempt);
-      pollLogin();
-    } catch {}
-  }
-
-  async function pollLogin() {
-    const attempt = login;
-    if (!attempt || attempt.busy || !appVisible()) return;
-    if (Date.now() >= attempt.expires) {
-      stopLogin();
-      render();
-      flash(Api.failure("auth_expired").message);
-      return;
-    }
-    clearTimeout(attempt.timer);
-    attempt.busy = true;
-    try {
-      const result = await Api.request("auth-poll");
-      if (login !== attempt) return;
-      if (result.state === "signed_in" && M.account(result.account)) {
-        login = null;
-        ++statusEpoch;
-        setAccount(result.account);
-        window.CortexControl?.refresh();
-        navigate("profile", { replace: true });
-        refreshConnection();
-        flash("Вход выполнен");
-        return;
-      }
-      updateLogin("После подтверждения в браузере вернитесь в CORTEX.");
-    } catch (error) {
-      if (login !== attempt) return;
-      if (["auth_expired", "auth_denied", "account_forbidden"].includes(error.code)) {
-        stopLogin();
-        render();
-        flash(error.message);
-        return;
-      }
-      updateLogin(error.message);
-    } finally {
-      attempt.busy = false;
-      if (login === attempt) attempt.timer = setTimeout(pollLogin, 2600);
-    }
-  }
-
-  async function startLogin() {
-    if (login) return;
-    if (!Api.available || !device) { flash(Api.failure(Api.android ? "webview" : "preview").message); return; }
-    if (!connection.yandex || connection.status === "offline") await refreshConnection();
-    if (route !== "account" || login) return;
-    if (!connection.yandex) { flash("Вход через Яндекс ID пока не настроен."); return; }
-    const attempt = { busy: true, expires: Infinity, timer: 0 };
-    login = attempt;
-    render();
-    try {
-      await loginCleanup;
-      const result = await Api.request("auth-start");
-      if (login !== attempt) return;
-      attempt.expires = Date.now() + 1000 * (result.expires_in || 300);
-      attempt.busy = false;
-      showLogin(attempt);
-      if (!sendDevice("open-login", { url: result.url })) loginBrowserFailed();
-    } catch (error) {
-      if (login === attempt) {
-        login = null;
-        if (route === "account") render();
-        flash(error.message);
-      }
-    }
-  }
-
-  function loginBrowserFailed() {
-    if (!login) return;
-    stopLogin();
-    if (route === "account") render();
-    flash("Не удалось открыть браузер Android.");
-  }
+  addEventListener("cortex-guest-id", event => {
+    if (S.account || typeof event.detail !== "string" || !/^@g\d{6,17}$/.test(event.detail)) return;
+    connection.guestId = event.detail;
+    if (route === "about") render();
+  });
 
   function accountOptions() {
     emailForm("password");
   }
 
+  function updateCodeCells() {
+    const field = screen.querySelector("[data-account-code]");
+    const input = field?.querySelector(".account-code-input");
+    if (!input) return;
+    const digits = input.value.replace(/\D/g, "").slice(0, 6);
+    if (input.value !== digits) input.value = digits;
+    const active = Math.min(digits.length, 5);
+    field.dataset.complete = String(digits.length === 6);
+    field.querySelectorAll("[data-code-cell]").forEach((cell, index) => {
+      cell.textContent = digits[index] || "";
+      cell.dataset.active = String(index === active && digits.length < 6);
+    });
+  }
+
+  function updateResendButton() {
+    const button = screen.querySelector("[data-resend-button]");
+    const seconds = Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000));
+    if (button) {
+      button.disabled = seconds > 0;
+      button.textContent = seconds ? `Повторить через ${seconds} с` : "Отправить код ещё раз";
+    }
+    if (!seconds && emailResendTimer) { clearInterval(emailResendTimer); emailResendTimer = 0; }
+  }
+
+  function emailResendCooldown() {
+    emailResendUntil = Date.now() + 60_000;
+    if (emailResendTimer) clearInterval(emailResendTimer);
+    emailResendTimer = setInterval(updateResendButton, 1000);
+    updateResendButton();
+  }
+
+  async function resendCode() {
+    if (!["verify", "reset"].includes(accountMode) || Date.now() < emailResendUntil) return;
+    const field = screen.querySelector("#account-form");
+    const email = field?.querySelector('[name="email"]')?.value?.trim() || "";
+    const button = field?.querySelector("[data-resend-button]");
+    if (!button || !email) { flash("Укажите электронную почту."); return; }
+    button.disabled = true;
+    try {
+      await Api.request("auth-resend", { payload: { email, kind: accountMode === "reset" ? "recovery" : "signup" } });
+      if (!field.isConnected) return;
+      field.querySelector('[name="code"]').value = "";
+      updateCodeCells();
+      emailResendCooldown();
+      flash("Новый код отправлен, проверьте почту.");
+    } catch (error) {
+      flash(error.message);
+      updateResendButton();
+    }
+  }
+
   function emailForm(mode, email = "") {
     if (!Object.hasOwn(U.accountModes, mode)) return;
     if (route === "account" && screen.querySelector("#account-form")?.getAttribute("aria-busy") === "true") return;
-    if (route === "account" && accountMode === mode && !login) return;
-    if (login) stopLogin();
+    if (route === "account" && accountMode === mode) return;
     accountMode = mode;
     accountEmail = email;
+    if (mode !== "verify" && mode !== "reset") {
+      emailResendUntil = 0;
+      if (emailResendTimer) { clearInterval(emailResendTimer); emailResendTimer = 0; }
+    }
     if (route === "account") render();
     else navigate("account");
     if (!connection.checked && connection.status !== "loading") refreshConnection();
@@ -732,7 +718,7 @@
     const mode = form.dataset.mode;
     const error = form.querySelector(".form-error");
     const submit = form.querySelector("[type=submit]");
-    if (submit.disabled || login) return;
+    if (submit.disabled) return;
     error.hidden = true;
     submit.disabled = true;
     form.setAttribute("aria-busy", "true");
@@ -762,6 +748,7 @@
         window.CortexControl?.refresh();
         flash("Вход выполнен");
       } else if (result.state === "check_email" && form.isConnected) {
+        emailResendCooldown();
         emailForm(mode === "signup" ? "verify" : "reset", values.email);
       } else if (result.state === "password_changed" && form.isConnected) {
         setAccount(null);
@@ -830,7 +817,7 @@
       const timer = setTimeout(() => {
         sendDevice("action-stop");
         done({ text: "Время задачи истекло. Проверьте последний шаг на экране.", local: true, external: !appVisible(), resumable: true });
-      }, 240000);
+      }, 740000);
       actionReplies.set(id, value => {
         if (value.phase === "progress") {
           if (pending !== job) return;
@@ -838,7 +825,8 @@
           if (voice && job.voice === voice) voiceStatus("opening", value.text);
           if (activeChat(job) && appVisible()) render({ bottom: true });
         } else if (value.phase === "result") {
-          done({ text: value.text, local: true, external: value.external === true || !appVisible(), resumable: value.resumable === true });
+          done({ text: value.text, local: true, external: value.external === true || !appVisible(),
+            resumable: value.resumable === true, ephemeral: value.ephemeral === true });
         } else done(null);
       });
       job.controller.signal.addEventListener("abort", cancel, { once: true });
@@ -859,7 +847,9 @@
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
       screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
-      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay)
+      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
+      ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
+        deviceSnapshot ? { state: deviceSnapshot } : {})
     };
     const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
       "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
@@ -908,17 +898,21 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const outcome = await respond(chat, job);
+      const localReply = retry ? null : islandCommand(text) ?? M.memoryCommand(text);
+      const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
-      chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }), ...(outcome.resumable && { resumable: true }) });
+      if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
+      chat.messages.push({ role: "assistant", text: outcome.text, ...(outcome.local && { local: true }),
+        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
       M.touch(chat);
-      if (chat.saved) saved();
+      const memorized = localReply === null && !outcome.local && M.learnFromUser(text);
+      if (chat.saved || localReply !== null || memorized) saved();
       if (voiceTurn && voice === voiceTurn) {
         if (outcome.external) closeVoice();
-        else voiceReplyReady(voiceTurn);
+        else voiceReplyReady(voiceTurn, outcome.text);
       }
     } catch (error) {
       if (pending !== job) return;
@@ -1055,7 +1049,8 @@
   }
 
   function exportChats() {
-    const chats = S.chats.filter(chat => chat.saved && chat.messages.length);
+    const chats = S.chats.filter(chat => chat.saved && chat.messages.some(message => !message.ephemeral))
+      .map(chat => ({ ...chat, messages: chat.messages.filter(message => !message.ephemeral) }));
     if (!chats.length) { flash("Сохранённых чатов пока нет."); return; }
     const text = JSON.stringify({ cortex: U.version, exported: new Date().toISOString(), chats }, null, 2);
     if (device) {
@@ -1137,7 +1132,7 @@
     Wave.state(waveMode());
     voicePanel.querySelector("[data-voice-status]").textContent = text;
     const labels = { starting: "Включаю микрофон", listening: "Завершить запись", hearing: "Завершить запись",
-      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить",
+      recognizing: "Распознаю речь", thinking: "Перебить", opening: "Выполняю действие", preparing: "Перебить", speaking: "Перебить",
       waiting: "Говорить", error: "Повторить" };
     voiceControl.innerHTML = icon(["waiting", "error", "starting"].includes(phase) ? "mic" : "stop", 17);
     voiceControl.setAttribute("aria-label", labels[phase]);
@@ -1153,6 +1148,7 @@
     voice = null;
     clearTimeout(job.timer);
     if (job.recognition) sendDevice("voice-cancel", { id: job.recognition });
+    if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
     voicePanel.hidden = true;
     delete voicePanel.dataset.voicePhase;
     Wave.state(waveMode());
@@ -1203,18 +1199,33 @@
     if (["listening", "hearing"].includes(job.phase)) {
       recognizing(job);
       sendDevice("voice-finish", { id: job.recognition });
-    } else if (["thinking", "opening"].includes(job.phase)) {
+    } else if (["thinking", "opening", "speaking"].includes(job.phase)) {
       if (pending?.voice === job) stopAnswer();
+      if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
       clearTimeout(job.timer);
       voiceStatus("waiting", "Готовлю микрофон…");
       job.timer = setTimeout(() => listen(job), 300);
     } else if (job.phase === "waiting" || job.phase === "error") listen(job);
   }
 
-  function voiceReplyReady(job) {
+  function voiceReplyReady(job, answer) {
     clearTimeout(job.timer);
-    voiceStatus("waiting", "Ответ в чате");
-    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 340);
+    job.speechId = M.id("speech");
+    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
+      voiceStatus("speaking", "Озвучиваю ответ…");
+      job.timer = setTimeout(() => {
+        if (voice !== job || job.phase !== "speaking") return;
+        sendDevice("voice-stop", { id: job.speechId });
+        voiceSpoken(job, false);
+      }, 44000);
+    } else voiceSpoken(job, false);
+  }
+
+  function voiceSpoken(job, ok) {
+    clearTimeout(job.timer);
+    job.speechId = null;
+    voiceStatus("waiting", ok ? "Готов слушать" : "Ответ в чате");
+    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 420);
   }
 
   function finishDictation(job, text) {
@@ -1276,6 +1287,9 @@
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
+    if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
+      voiceSpoken(voice, message.ok === true);
+    }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";
       if (text && !pending && !app.classList.contains("in-onboarding")) {
@@ -1290,18 +1304,35 @@
         entries.map(entry => '<li><time>' + esc(new Date(entry.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })) +
         '</time><span>' + esc(entry.message) + '</span></li>').join("") + '</ol>' : '<p class="muted">Действий пока нет.</p>');
     }
+    if (message.type === "notification-journal-cleared") {
+      if (message.ok) flash("Журнал уведомлений очищен.");
+    }
     if (message.type === "visual-privacy") {
       connection.visualPrivacy = message.enabled === true;
       if (route === "privacy") render();
     }
     if (message.type === "background") closeVoice();
     if (message.type === "screen-context") acceptScreen(message.context);
+    if (message.type === "island-style-sync" && message.appearance && typeof message.appearance === "object" &&
+        !Array.isArray(message.appearance)) {
+      S.islandStyle = message.appearance;
+      S.islandStyle = Planner.style();
+      saved();
+      sendDevice("island-style-ack");
+      if (route === "phone-tools") render();
+    }
     if (message.type === "permissions") {
       if (typeof message.versionName === "string") U.setVersion(message.versionName);
       if (Number.isInteger(message.versionCode)) androidVersionCode = message.versionCode;
       if (device && typeof message.phoneModel === "string") phoneInfo = {
         manufacturer: message.manufacturer, model: message.phoneModel, android_version: message.androidRelease
       };
+      if (message.deviceSnapshot && typeof message.deviceSnapshot === "object" && !Array.isArray(message.deviceSnapshot)) {
+        deviceSnapshot = message.deviceSnapshot;
+      }
+      if (message.compatibility && typeof message.compatibility === "object" && !Array.isArray(message.compatibility)) {
+        androidCompatibility = message.compatibility;
+      }
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
       for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
       window.CortexSetup?.updatePermissions(permissions);
@@ -1332,12 +1363,6 @@
     if (message.type === "overlay-mode" && !message.ok) {
       flash(message.message || "Разрешите отображение поверх приложений.");
     }
-    if (message.type === "browser" && !message.ok) loginBrowserFailed();
-    if (message.type === "auth-tab-closed" && login) {
-      updateLogin("Окно входа закрыто. Проверяю, завершился ли вход…");
-      pollLogin();
-    }
-    if (message.type === "auth-return") { if (login) pollLogin(); else restoreLogin(); }
     if (message.type === "copy") flash(message.ok ? "Скопировано" : "Не удалось скопировать");
     if (message.type === "link" && !message.ok) flash("Не удалось открыть ссылку.");
     if (message.type === "settings" && !message.ok) flash("Не удалось открыть настройки Android.");
@@ -1426,8 +1451,9 @@
     },
     "delete-chat": id => confirm("Удалить чат?", "Переписка будет удалена с устройства.", () => deleteChats(chat => chat.id === id, "Чат удалён")),
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
-    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память и настройки будут удалены с устройства.", () => {
+    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
+      sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
       drafts.clear(); errors.clear(); ruleDrafts.clear();
       chatId = ""; rule = "goal";
@@ -1463,6 +1489,10 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "notification-listener-permission": () => sendDevice("notification-listener-permission"),
+    "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
+      if (!sendDevice("notification-journal-clear")) flash("Очистка доступна только в приложении Android.");
+    }),
     "overlay-permission": () => {
       if (!window.CortexIslandControl) flash("Островок доступен только в Android-приложении CORTEX.");
       else if (!sendDevice("overlay-permission")) flash("Не удалось открыть разрешение Android.");
@@ -1478,10 +1508,9 @@
         flash("Не удалось применить режим. Проверьте разрешения Android.");
     },
     "model-profile"(value) { if (Object.hasOwn(M.models, value)) preference("model", value); },
-    login: startLogin,
-    "cancel-login": () => { stopLogin(); render(); },
     "account-options": accountOptions,
     "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),
+    "resend-code": resendCode,
     "refresh-connection": refreshConnection,
     "password-visibility": (_, control) => {
       const field = control.parentElement.querySelector("input");
@@ -1603,6 +1632,7 @@
 
   app.addEventListener("input", event => {
     const input = event.target;
+    if (input.classList?.contains("account-code-input")) updateCodeCells();
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
     if (input.id === "faq-search") filterFaq();
     if (input.id === "history-search") {
@@ -1673,7 +1703,8 @@
     const hidden = document.hidden || window.cortexAppVisible === false;
     document.documentElement.classList.toggle("app-background", hidden);
     if (!hidden) {
-      pollLogin();
+      // Pick up voice-only island changes made while the WebView was backgrounded.
+      syncIslandOptions();
       if (["profile", "models", "account"].includes(route)) refreshConnection();
       if (route === "schedule") Planner.enter(route);
     }
@@ -1703,5 +1734,4 @@
   }
   sendDevice("screen-context");
   connectionLoad = refreshConnection();
-  restoreLogin();
 })();

@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.speech.SpeechRecognizer
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebViewCompat
@@ -51,7 +50,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                         }.apply()
                         if (mode == "off") {
                             configureWake(false)
-                            activity.stopService(Intent(activity, CortexIslandService::class.java))
+                            CortexIslandService.shutdownFromApp(activity)
                         } else if (prefs.getBoolean(CortexIslandService.WAKE_PAUSED, false)) {
                             refresh()
                         } else if (Settings.canDrawOverlays(activity)) {
@@ -70,10 +69,12 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                     "island-options" -> {
                         val profile = objectValue.optString("profile").takeIf { it in setOf("auto", "fast", "deep") } ?: "auto"
                         val energy = objectValue.optString("energy").takeIf { it in setOf("economy", "balanced", "maximum") } ?: "balanced"
+                        val nativeStyle = prefs.getString("island-style", "{}").orEmpty()
+                        val voiceStylePending = prefs.getBoolean("island-command-sync", false)
                         prefs.edit().putString("profile", profile)
                             .putString("energy", energy)
                             .putString("addressName", objectValue.optString("addressName").take(60))
-                            .putString("island-style", objectValue.optJSONObject("appearance")?.toString() ?: "{}")
+                            .putString("island-style", if (voiceStylePending) nativeStyle else objectValue.optJSONObject("appearance")?.toString() ?: "{}")
                             .putBoolean("phoneActions", objectValue.optBoolean("phoneActions", true))
                             .putBoolean("visualLaunch", objectValue.optBoolean("visualLaunch"))
                             .putBoolean("reduceMotion", objectValue.optBoolean("reduceMotion"))
@@ -83,7 +84,11 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                             prefs.getString("mode", "off") != "off" && Settings.canDrawOverlays(activity)) {
                             CortexIslandService.send(activity, CortexIslandService.ACTION_ENSURE)
                         }
+                        if (voiceStylePending) runCatching { reply?.postMessage(JSONObject()
+                            .put("type", "island-style-sync")
+                            .put("appearance", JSONObject(nativeStyle)).toString()) }
                     }
+                    "island-style-ack" -> prefs.edit().putBoolean("island-command-sync", false).apply()
                     "wake-config" -> configureWake(objectValue.optBoolean("enabled"), objectValue.optBoolean("restore"))
                 }
             }
@@ -105,7 +110,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
             !Settings.canDrawOverlays(activity) -> "Разрешите показ островка поверх приложений."
             prefs.getString("mode", "off") == "off" -> "Включите режим островка."
             activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> "Разрешите доступ к микрофону."
-            Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(activity) ->
+            !CortexAndroidCompatibility.offlineWakeAvailable(activity) ->
                 "На устройстве нет офлайн-распознавания Android."
             else -> null
         }
@@ -140,7 +145,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
             activity.startForegroundService(Intent(activity, CortexIslandService::class.java).apply {
                 action = CortexIslandService.ACTION_ENSURE
             })
-        }
+        }.onFailure { status("overlay-mode", false, "Android ограничил запуск островка. Откройте CORTEX и проверьте разрешение поверх других окон.") }
     }
     @Suppress("DEPRECATION")
     private fun previewCamera(): String {

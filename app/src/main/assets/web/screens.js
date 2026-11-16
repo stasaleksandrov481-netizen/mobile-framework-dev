@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.11";
+  let version = "1.0.12";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "bolt"], ["home", "Кортекс", ""],
     ["notes", "Заметки", "note"], ["profile", "Профиль", "user"]
@@ -12,7 +12,7 @@ const CortexUI = (() => {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
     support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
-    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", "island-editor": "phone-tools", energy: "settings",
+    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", energy: "settings",
     account: "profile"
   };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
@@ -217,7 +217,6 @@ const CortexUI = (() => {
             <p>${esc(account?.email || "Данные хранятся на устройстве")}</p>
             ${type ? `<small class="muted">${esc(type)}</small>` : ""}
           </div>
-          ${account?.public_id ? `<p class="muted">ID аккаунта · <strong>${esc(account.public_id)}</strong></p>` : ""}
           ${!account && ctx.native ? `<div class="profile-signin actions">
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
@@ -234,7 +233,7 @@ const CortexUI = (() => {
   }
 
   const accountModes = {
-    password: ["Войдите в CORTEX", "Войдите по почте или через Яндекс ID.", "Войти"],
+    password: ["Войдите в CORTEX", "Продолжите с электронной почтой.", "Войти"],
     signup: ["Создайте аккаунт", "Код подтверждения придёт на почту.", "Получить код"],
     verify: ["Подтвердите почту", "Введите код из письма CORTEX.", "Подтвердить и войти"],
     recover: ["Восстановите доступ", "Получите код для смены пароля.", "Получить код"],
@@ -250,7 +249,7 @@ const CortexUI = (() => {
   }
 
   function account(ctx) {
-    const { connection, login, email, accountMode } = ctx;
+    const { connection, email, accountMode, resendWait = 0 } = ctx;
     const [title, description, submit] = accountModes[accountMode];
     const newPassword = accountMode === "signup" || accountMode === "reset";
     const code = accountMode === "verify" || accountMode === "reset";
@@ -262,16 +261,23 @@ const CortexUI = (() => {
       <div class="scroll account-scroll"><div class="account-page">
         <div class="account-hero"><div class="account-art glass-card" aria-hidden="true">${sign}<i></i><i></i></div>
           <section class="account-heading"><h1>${title}</h1><p>${description}</p></section></div>
-        ${login ? `<section class="account-fields glass-card" aria-label="Яндекс ID"><span class="section-symbol">${icon("globe", 23)}</span>
-          <h2>Вход через Яндекс ID</h2><p class="muted" role="status" data-login-status>${esc(login.browser ? "Подтвердите вход в браузере и вернитесь в CORTEX." : "Открываем Яндекс ID…")}</p>
-          ${button("Отмена", "close", "cancel-login", "", "outline")}</section>` : `
         ${["password", "signup"].includes(accountMode) ? `<div class="account-tabs" aria-label="Способ входа">
           ${pill("Вход", "email-auth", "password", accountMode === "password")}${pill("Регистрация", "email-auth", "signup", accountMode === "signup")}</div>` : ""}
         <form id="account-form" class="account-fields" data-mode="${accountMode}">
           ${accountMode === "signup" ? '<label class="field"><span>Имя</span><input name="name" type="text" autocomplete="name" maxlength="100" placeholder="По желанию"></label>' : ""}
           <label class="field"><span>Электронная почта</span><input name="email" type="email" maxlength="254" required autocomplete="email"
             placeholder="name@example.com" value="${esc(email)}" autocapitalize="none" spellcheck="false"></label>
-          ${code ? '<label class="field"><span>Код из письма</span><input name="code" type="text" inputmode="numeric" required autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10"></label>' : ""}
+          ${code ? `<label class="field account-code-field"><span>Шестизначный код из письма</span>
+            <span class="account-code" data-account-code>
+              <input name="code" class="account-code-input" type="text" inputmode="numeric" required
+                aria-label="Шестизначный код подтверждения" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+              ${Array.from({ length: 6 }, (_, index) => `<span class="account-code-cell" aria-hidden="true" data-code-cell="${index}"></span>`).join("")}
+            </span></label>
+            <div class="account-resend">
+              <span class="muted">Не пришло письмо? Проверьте папку «Спам».</span>
+              <button type="button" class="action quiet" data-action="resend-code" ${resendWait > 0 ? "disabled" : ""}
+                data-resend-button>${resendWait > 0 ? `Повторить через ${resendWait} с` : "Отправить код ещё раз"}</button>
+            </div>` : ""}
           ${accountMode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : ""}
           ${newPassword ? password("confirmation", "Повторите пароль") + '<small class="muted">Минимум 10 символов.</small>' : ""}
           <p class="account-availability" data-auth-status role="status" ${accountAvailability(connection, accountMode) ? "" : "hidden"}>${accountAvailability(connection, accountMode)}</p>
@@ -280,10 +286,7 @@ const CortexUI = (() => {
           ${accountMode === "password" ? `<div class="account-links">${button("Забыли пароль?", "", "email-auth", "recover", "quiet")}
             ${button("Подтвердить почту", "", "email-auth", "verify", "quiet")}</div>` : ""}
         </form>
-        ${accountMode === "password" ? `<div class="account-provider" data-yandex-area>
-          ${button("Войти через Яндекс ID", "globe", "login", "", "outline")}
-          <small class="muted" data-yandex-status ${connection.checked && !connection.yandex ? "" : "hidden"}>Яндекс ID пока не подключён.</small></div>` : ""}
-        ${!["password", "signup"].includes(accountMode) ? button("Вернуться ко входу", "back", "email-auth", "password", "quiet") : ""}`}
+        ${!["password", "signup"].includes(accountMode) ? button("Вернуться ко входу", "back", "email-auth", "password", "quiet") : ""}
       </div></div>`;
   }
   function settings() {
@@ -331,8 +334,8 @@ const CortexUI = (() => {
         <div class="capability-note"><span class="capability-signal" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(status)}</span></div>
         ${fix}
         ${group(tile("Расписание", "Напоминания и отложенные действия", "bell", "go", "schedule") +
-          tile("Сценарии", "Создавайте цепочки действий", "bolt", "go", "scenarios") +
-          tile("Оформление островка", "Размер, положение и виджеты", "sliders", "go", "island-editor"))}
+          tile("Сценарии", "Создавайте цепочки действий", "bolt", "go", "scenarios"))}
+        <p class="quiet-copy">Размер и вид островка можно менять прямо в чате или голосом: «Уменьши островок», «Сдвинь островок вправо», «Убери рамку островка».</p>
         <div class="island-demo" data-camera="${esc(ctx.islandCamera || "drop")}" aria-hidden="true">
           <div class="demo-pill"><span class="demo-rim"></span>
             <div class="demo-body">
@@ -405,7 +408,10 @@ const CortexUI = (() => {
     return detail("Уведомления", "Ответы в фоновом режиме", `<section class="panel stack">
       ${switchRow("Ответы поддержки", "Уведомлять о новых сообщениях в обращениях", M.state.preferences.notifyReplies, "notifyReplies")}
       <p class="muted">${ctx.native && ctx.permissions.notifications ? "Android разрешает уведомления." : "Для оповещений нужен доступ в настройках Android."}</p>
-    </section>`);
+    </section>` + group(tile("Сводка событий телефона",
+      ctx.permissions.notificationAccess ? "CORTEX считает новые уведомления. Тексты не сохраняются." : "Разрешите доступ, чтобы спрашивать «Что нового?»",
+      "bell", "notification-listener-permission") +
+      (ctx.permissions.notificationAccess ? tile("Очистить журнал уведомлений", "Удалить сохранённые сведения о событиях", "trash", "notification-journal-clear") : "")));
   }
   function data() {
     const p = M.state.preferences;
@@ -458,6 +464,20 @@ const CortexUI = (() => {
   }
   function permissions(ctx) {
     const a = ctx.permissions;
+    const compatibility = ctx.compatibility;
+    const support = compatibility ? [
+      ["Голосовой ввод", compatibility.speech],
+      ["Фоновый вызов по имени", compatibility.offlineWake],
+      ["Камера", compatibility.camera], ["Фонарик", compatibility.flashlight],
+      ["Wi-Fi", compatibility.wifi], ["Bluetooth", compatibility.bluetooth],
+      ["NFC", compatibility.nfc], ["Мобильная связь", compatibility.telephony]
+    ] : [];
+    const compatibilityPanel = compatibility ? `<details class="panel stack"><summary>Совместимость с этим телефоном</summary>
+      <p class="muted">${esc(compatibility.manufacturer || "Android")} ${esc(compatibility.model || "")} · Android API ${esc(String(compatibility.sdk || "?"))}</p>
+      <div class="access-list">${support.map(([name, available]) => `<div class="access-row"><div class="tile-copy"><strong>${esc(name)}</strong>
+        <small>${available ? "Доступно на устройстве" : "Нет системной поддержки или компонента"}</small></div></div>`).join("")}</div>
+      <p class="quiet-copy">Без локального распознавания можно использовать текстовый чат и доступный голосовой ввод в приложении.
+      Некоторые оболочки дополнительно ограничивают фоновые службы. Для них может потребоваться настройка энергосбережения вручную.</p></details>` : "";
     const item = (glyph, title, desc, enabled, action, required = false) =>
       `<div class="access-row"><span class="access-symbol">${icon(glyph, 21)}</span><div class="tile-copy"><strong>${esc(title)}</strong>
         <small>${esc(desc)}</small><span class="access-state">${enabled ? "Разрешено" : required ? "Требуется разрешение" : "Необязательно"}</span></div>
@@ -466,9 +486,11 @@ const CortexUI = (() => {
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
       ${item("focus", "Поверх приложений", "Показывать островок поверх других окон. Не даёт доступа к содержимому экрана.", a.overlay, "overlay-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
+      ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
       ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Разрешает системный вызов помощника и передачу текста экрана после вашего действия.", a.assistant, "assistant-permission") : ""}
       </section>
+      ${compatibilityPanel}
       <p class="quiet-copy">Некоторые разрешения Android показывает в отдельных системных меню. Нажатие «Настроить» не означает, что доступ уже выдан.</p>
       <div class="actions">${button("Журнал действий", "history", "action-history", "", "outline")}
       ${button("Повторить начальную настройку", "refresh", "open-setup", "", "outline")}</div>`);
@@ -502,17 +524,21 @@ const CortexUI = (() => {
         <summary>${esc(question)}${icon("chevron", 15)}</summary><p>${esc(answer)}</p></details>`).join("")}
       <p class="muted" data-faq-empty hidden>Совпадений нет.</p></section>`;
   }
-  function about() {
+  function about(ctx) {
+    const publicId = M.state.account?.public_id || ctx.connection?.guestId || "";
+    const idType = M.state.account ? "ID аккаунта" : "ID гостя";
     return detail("О приложении", "CORTEX для Android", `<section class="panel about-card">
       <div class="brand">${sign}<span>CORTEX</span></div><p class="muted">Версия ${version}</p>
       <p>Персональный помощник с текстовым и голосовым вводом.</p>
       <p class="muted">Проект разработчика stasaleksandrov481-netizen.</p>
-    </section>` + group(tile("Конфиденциальность", "Какие данные используются", "shield", "go", "privacy") +
+    </section>${publicId ? `<details class="profile-id-details"><summary>Техническая информация</summary>
+      <p class="muted">${idType}: <code>${esc(publicId)}</code></p>
+      <p class="muted">Этот ID нужен поддержке. Он не даёт доступа к вашему аккаунту.</p></details>` : ""}` + group(tile("Конфиденциальность", "Какие данные используются", "shield", "go", "privacy") +
       tile("Связь с разработчиком", "Через поддержку CORTEX", "help", "go", "support")));
   }
   function privacy(ctx) {
     return detail("Конфиденциальность", "Данные, необходимые для работы", `<section class="panel stack prose">
-      <h2>Профиль</h2><p>CORTEX получает имя и адрес почты при входе. При входе через Яндекс ID профиль привязывается к идентификатору Яндекса. Пароли обрабатывает Supabase Auth.</p>
+      <h2>Профиль</h2><p>CORTEX получает имя и адрес почты при входе. Пароли и одноразовые коды обрабатывает Supabase Auth. История чатов и заметки остаются на вашем устройстве.</p>
       <h2>Сообщения</h2><p>Сохранённые чаты и заметки остаются на устройстве. Команды, которые выполняет локальный движок, остаются на телефоне. Для разговорных ответов и сложных задач CORTEX передаёт серверу запрос и нужный контекст. Сервер обращается к OpenRouter.</p>
       <h2>Голос и команды</h2><p>Речь распознаёт служба Android. Распознанная команда проходит ту же обработку, что и текстовая. CORTEX читает элементы и распознаёт текст на телефоне. При вашем согласии для сложной задачи сервер и OpenRouter могут получить краткое описание экрана. Снимки экрана остаются на телефоне.</p>
       ${window.CortexDevice ? button(ctx.connection.visualPrivacy ? "Отключить передачу текста экрана ИИ" : "Разрешить передачу текста экрана ИИ", "shield", "visual-privacy", "", "outline") : ""}

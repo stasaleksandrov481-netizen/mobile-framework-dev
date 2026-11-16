@@ -86,16 +86,20 @@ internal object CortexSchedule {
             if (it.status == "scheduled") it.at else -it.at
         }).map(Task::json))
 
-    fun screenReady(context: Context) = context.getSystemService(PowerManager::class.java).isInteractive &&
-        !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+    fun screenReady(context: Context) = runCatching {
+        context.getSystemService(PowerManager::class.java).isInteractive &&
+            !context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+    }.getOrDefault(false)
 
-    fun exactAllowed(context: Context) = Build.VERSION.SDK_INT < 31 ||
+    fun exactAllowed(context: Context) = Build.VERSION.SDK_INT < 31 || runCatching {
         context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
+    }.getOrDefault(false)
 
-    fun notificationsAllowed(context: Context) =
+    fun notificationsAllowed(context: Context) = runCatching {
         context.getSystemService(NotificationManager::class.java).let {
             it.areNotificationsEnabled() && it.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
         }
+    }.getOrDefault(false)
 
     fun clearDraft(source: String) { drafts.remove(source) }
 
@@ -181,7 +185,16 @@ internal object CortexSchedule {
         val task = Task(old?.id ?: UUID.randomUUID().toString(), if (draft.reminder) "reminder" else "action",
             draft.text, time.epoch, time.local?.toString().orEmpty(), repeat, message = draft.message)
         if (!replace(context, task)) return failure("Android не сохранил поручение.")
-        alarm(context, task)
+        if (!alarm(context, task)) {
+            // Do not promise a reminder if Android rejected its alarm. Preserve
+            // the previous schedule when editing an existing task.
+            if (old == null) write(context, all(context).filterNot { it.id == task.id })
+            else {
+                replace(context, old)
+                alarm(context, old)
+            }
+            return failure("Android не разрешил запланировать поручение. Проверьте ограничения фоновой работы и попробуйте снова.")
+        }
         val kind = if (draft.reminder) "Напомню" else "Запланировал действие"
         val timeLabel = format.format(Instant.ofEpochMilli(task.at).atZone(ZoneId.systemDefault()))
         val delivery = when {
@@ -212,21 +225,22 @@ internal object CortexSchedule {
         if (tasks != revised && !write(context, revised)) return
         revised.filter { it.status == "scheduled" }.forEach {
             if (it.at <= now) deliver(context, it.id, it.at, recovered = restarting || rebase)
-            else alarm(context, it)
+            else if (!alarm(context, it)) block(context, it,
+                "Android не восстановил расписание. Откройте CORTEX и проверьте ограничения фоновой работы.")
         }
     }
 
-    private fun alarm(context: Context, task: Task) {
-        val manager = context.getSystemService(AlarmManager::class.java)
-        val target = pending(context, task, ALARM)
+    private fun alarm(context: Context, task: Task): Boolean {
+        val manager = runCatching { context.getSystemService(AlarmManager::class.java) }.getOrNull() ?: return false
+        val target = runCatching { pending(context, task, ALARM) }.getOrNull() ?: return false
         val due = task.at.coerceAtLeast(System.currentTimeMillis())
-        if (exactAllowed(context)) {
-            try {
-                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target)
-                return
-            } catch (_: SecurityException) { /* Access can change between checking and scheduling. */ }
+        if (runCatching { exactAllowed(context) }.getOrDefault(false)) {
+            val exact = runCatching { manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target) }.isSuccess
+            if (exact) return true
         }
-        manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target)
+        // Alarm permissions can change after canScheduleExactAlarms(). OEMs may
+        // reject both paths; treat that as a failure instead of crashing.
+        return runCatching { manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, target) }.isSuccess
     }
 
     private fun next(task: Task): Task? {
@@ -244,11 +258,16 @@ internal object CortexSchedule {
 
     fun deliver(context: Context, id: String, at: Long, recovered: Boolean = false) {
         val task = all(context).firstOrNull { it.id == id && it.at == at && it.status == "scheduled" } ?: return
-        if (task.at > System.currentTimeMillis()) { alarm(context, task); return }
+        if (task.at > System.currentTimeMillis()) {
+            if (!alarm(context, task)) block(context, task,
+                "Android не разрешил повторно установить будильник. Проверьте ограничения фоновой работы.")
+            return
+        }
         val next = next(task)
         val state = task.copy(status = if (task.kind == "reminder") "due" else "blocked", repeat = "none")
         if (!replace(context, state, next)) return
-        next?.let { alarm(context, it) }
+        next?.let { if (!alarm(context, it)) block(context, it,
+            "Android не запланировал следующее повторение. Проверьте разрешения.") }
         if (task.kind == "reminder") {
             if (!screenReady(context) || CortexRuntime.reminder?.invoke(task.id, task.text) != true) notify(context, state)
         } else if (recovered || System.currentTimeMillis() - task.at > 15 * 60_000L) {
@@ -267,8 +286,11 @@ internal object CortexSchedule {
             else -> null
         } ?: return failure("Действие уже недоступно для этого поручения.")
         if (!replace(context, updated)) return failure("Не удалось сохранить состояние поручения.")
+        if (updated.status == "scheduled" && !alarm(context, updated)) {
+            replace(context, task)
+            return failure("Android не разрешил отложить напоминание. Попробуйте снова после проверки разрешений.")
+        }
         context.getSystemService(NotificationManager::class.java).cancel(id, NOTIFICATION)
-        if (updated.status == "scheduled") alarm(context, updated)
         else context.getSystemService(AlarmManager::class.java).cancel(pending(context, task, ALARM))
         return CortexActionEngine.Result(when (action) {
             "snooze" -> "Отложено на 5 минут."
@@ -348,26 +370,28 @@ internal object CortexSchedule {
 
     private fun notify(context: Context, task: Task) {
         if (!notificationsAllowed(context)) return
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Напоминания и поручения CORTEX", NotificationManager.IMPORTANCE_HIGH))
-        val open = PendingIntent.getActivity(context, 0, openIntent(context, task.id),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val text = if (task.status == "due") task.text else task.detail
-        val builder = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_cortex)
-            .setContentTitle(when (task.status) {
-                "due" -> "Напоминание CORTEX"
-                "failed" -> "Поручение завершилось с ошибкой"
-                else -> "Поручение ожидает продолжения"
-            })
-            .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open)
-            .setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE)
-        if (task.status == "due") {
-            builder.addAction(Notification.Action.Builder(null, "Готово", pending(context, task, COMPLETE)).build())
-                .addAction(Notification.Action.Builder(null, "Отложить на 5 мин", pending(context, task, SNOOZE)).build())
-        } else if (task.status == "blocked") {
-            builder.addAction(Notification.Action.Builder(null, "Продолжить", open).build())
+        runCatching {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel(CHANNEL, "Напоминания и поручения CORTEX", NotificationManager.IMPORTANCE_HIGH))
+            val open = PendingIntent.getActivity(context, 0, openIntent(context, task.id),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val text = if (task.status == "due") task.text else task.detail
+            val builder = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_cortex)
+                .setContentTitle(when (task.status) {
+                    "due" -> "Напоминание CORTEX"
+                    "failed" -> "Поручение завершилось с ошибкой"
+                    else -> "Поручение ожидает продолжения"
+                })
+                .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text)).setContentIntent(open)
+                .setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE)
+            if (task.status == "due") {
+                builder.addAction(Notification.Action.Builder(null, "Готово", pending(context, task, COMPLETE)).build())
+                    .addAction(Notification.Action.Builder(null, "Отложить на 5 мин", pending(context, task, SNOOZE)).build())
+            } else if (task.status == "blocked") {
+                builder.addAction(Notification.Action.Builder(null, "Продолжить", open).build())
+            }
+            manager.notify(task.id, NOTIFICATION, builder.build())
         }
-        runCatching { manager.notify(task.id, NOTIFICATION, builder.build()) }
     }
 
     fun receive(context: Context, intent: Intent) {

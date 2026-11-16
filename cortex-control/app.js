@@ -163,20 +163,21 @@ async function loadTab() {
 }
 
 async function overview() {
-  const [summary, activity] = (await Promise.all([
-    db.rpc("cortex_admin_overview"), db.rpc("cortex_admin_activity")
-  ])).map(data);
-  const labels = { devices: "Уникальные устройства", new_today: "Впервые открыли сегодня",
-    opened_today: "Устройств открыли сегодня", accounts_today: "Аккаунтов открыли сегодня", launches_today: "Сеансов сегодня" };
+  const activity = data(await db.rpc("cortex_admin_metrics"));
+  const labels = { online_devices: "Сейчас в CORTEX", devices: "Уникальные устройства всего",
+    opened_24h: "Уникальных устройств за 24 часа", new_today: "Впервые открыли сегодня",
+    opened_today: "Устройств открыли сегодня", launches_total: "Всего запусков",
+    ai_requests_today: "Запросов к ИИ сегодня (новый учёт)", ai_requests_total: "Запросов к ИИ с 16 ноября",
+    ai_attempts_today: "Обращений к моделям сегодня", ai_success_today: "Успешных ответов моделей сегодня" };
   const cards = Object.entries(labels).map(([key, label]) =>
     card(label, '<strong class="count">' + dateNumber(activity[key]) + '</strong>')).join("");
-  const other = [["ai_today", "Запросы к ИИ сегодня"], ["support_open", "Открытые обращения"]]
-    .filter(([key]) => Object.hasOwn(summary || {}, key))
-    .map(([key, label]) => card(label, '<strong class="count">' + dateNumber(summary[key]) + '</strong>')).join("");
-  const seen = activity.today.map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
-    date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
-  return '<div class="cards">' + cards + other + '</div><p class="muted">Сегодня по Москве. Устройства считаются по постоянному идентификатору.</p>' +
-    card("Кто открыл CORTEX сегодня", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Сегодня пока нет входов с аккаунтом.</p>');
+  const seen = (activity.online || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
+    escape(row.signed_in ? "Аккаунт" : "Гость") + ' · ' + date(row.last_seen_at) + ' МСК · ' + escape(row.version) + '</span></li>').join("");
+  return '<div class="cards">' + cards + card("Открытые обращения", '<strong class="count">' + dateNumber(activity.support_open) + '</strong>') +
+    '</div><p class="muted">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
+    'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
+    'старые записи не выдаются за достоверную статистику.</p>' +
+    card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>');
 }
 
 async function support() {
@@ -298,6 +299,7 @@ async function updateQuota(operation, limit) {
 }
 
 async function resolveAccount(id) {
+  if (/^@g\d{6,17}$/i.test(id)) return data(await db.rpc("cortex_admin_resolve_guest", { p_public: id }));
   return id.startsWith("@") ? data(await db.rpc("cortex_admin_activity", { p_action: "account", p_id: id }))?.subject : id;
 }
 

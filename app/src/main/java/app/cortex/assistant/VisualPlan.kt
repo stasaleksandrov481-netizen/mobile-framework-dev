@@ -5,7 +5,7 @@ import org.json.JSONObject
 import java.util.Locale
 
 internal enum class VisualAction {
-    HOME, BACK, QUICK_SETTINGS, OPEN, TAP, SET, TYPE, SUBMIT, SCROLL, SWIPE, READ, EXPECT, LOCK
+    HOME, BACK, QUICK_SETTINGS, OPEN, TAP, LONG_PRESS, SET, TYPE, SUBMIT, SCROLL, SWIPE, READ, EXPECT, LOCK
 }
 
 internal data class VisualStep(
@@ -43,7 +43,7 @@ internal data class VisualPlan(val steps: List<VisualStep>, val question: String
             val expect = json.text("expect", 180)
             val confirm = if (json.has("confirm")) json.getBoolean("confirm") else false
             when (action) {
-                VisualAction.OPEN, VisualAction.TAP, VisualAction.EXPECT -> require(target.isNotBlank() && value.isEmpty())
+                VisualAction.OPEN, VisualAction.TAP, VisualAction.LONG_PRESS, VisualAction.EXPECT -> require(target.isNotBlank() && value.isEmpty())
                 VisualAction.SET -> require(target.isNotBlank() && value in setOf("on", "off"))
                 VisualAction.TYPE -> require(value.isNotBlank())
                 VisualAction.SCROLL, VisualAction.SWIPE -> require(value in setOf("up", "down", "left", "right"))
@@ -99,9 +99,9 @@ internal object VisualLabels {
 }
 
 internal object VisualRequest {
-    private val action = Regex("""(?<![\p{L}\p{N}_])(?:открой|запусти|зайди|перейди|найди|отыщи|покажи|нажми|нажать|пролистай|прокрути|свайпни|введи|вставь|заполни|набери|напиши|отправь|создай|удали|перемести|скачай|установи|измени|поменяй|поставь|выбери|настрой|включи|выключи|отключи|закрой|выйди|заблокируй|разблокируй|исправь|почини|перезапусти|сделай|выполни|прочитай|пройди|запиши|реши|выполнить|открыть|включить|выключить|open|launch|tap|scroll|swipe|type|send|create|delete|install|close|enable|disable|turn|navigate|select|read|fill|find)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
+    private val action = Regex("""(?<![\p{L}\p{N}_])(?:открой|запусти|зайди|перейди|найди|отыщи|поищи|покажи|посмотри|нажми|нажать|тапни|кликни|зажми|удерживай|отметь|пролистай|прокрути|свайпни|введи|вставь|заполни|набери|позвони|напиши|ответь|отправь|скинь|создай|удали|переименуй|перемести|скачай|установи|измени|поменяй|переключи|поставь|выбери|настрой|включи|выключи|отключи|закрой|выйди|заблокируй|разблокируй|исправь|почини|перезапусти|сделай|выполни|прочитай|пройди|запиши|реши|выполнить|открыть|включить|выключить|open|launch|tap|long.press|scroll|swipe|type|send|create|delete|install|close|enable|disable|turn|navigate|select|read|fill|find)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
     private val explain = Regex("""^(?:как|зачем|почему|можно ли|что (?:такое|будет|умеешь)|объясни|расскажи|подскажи,? как|how|why|explain)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
-    private val device = Regex("""(?:(?<![\p{L}\p{N}_])(?:телефон|экран|android|приложени|браузер|настройк|вкладк|фонарик|проводник|кнопк|ярлык|папк|камер|файл|фото|частот[ау]|герцовк|шторк|рабочий стол|тест на|сайт|переписк|личк|контакт|сообщени|памят[ьи]|аккумулятор|заряд|батаре|хранилищ|яркост|громкост|bluetooth|desktop|settings|app|browser|screen|folder|flashlight|http|https)|\w+\.(?:ru|com|org)(?![\p{L}\p{N}_]))""", RegexOption.IGNORE_CASE)
+    private val device = Regex("""(?:(?<![\p{L}\p{N}_])(?:телефон|экран|android|приложени|браузер|настройк|вкладк|фонарик|проводник|кнопк|ярлык|папк|камер|файл|фото|скриншот|частот[ау]|герцовк|шторк|рабочий стол|тест на|сайт|переписк|личк|контакт|сообщени|памят[ьи]|аккумулятор|заряд|батаре|хранилищ|яркост|громкост|bluetooth|desktop|settings|app|browser|screen|folder|flashlight|http|https)|\w+\.(?:ru|com|org)(?![\p{L}\p{N}_]))""", RegexOption.IGNORE_CASE)
     private val generic = Regex("""^(?:напиши|сделай|найди|покажи|прочитай|реши|запиши|исправь|выполни|настрой|напиши мне|write|show|read|find)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
     private val writeInChat = Regex("""^(?:напиши|придумай|сочини|составь)\s+(?:мне\s+)?(?:текст|пост|историю|сценарий|письмо|описание|план)\s+(?:про|о|об|по теме|на тему)\s""", RegexOption.IGNORE_CASE)
     private val screenQuestion = Regex("""^(?:что (?:сейчас )?на (?:мо[её]м )?экране|что ты видишь на экране|what(?:'s| is) on (?:my|the) screen)$""", RegexOption.IGNORE_CASE)
@@ -117,6 +117,7 @@ internal object VisualRequest {
     private val separators = Regex("""\s*(?:[,;\n]+\s*(?:затем\s+|потом\s+|then\s+)?|\s+(?:(?:и |а )?(?:затем|потом|после этого|после чего)|and then|then)\s+|\s+и\s+(?=(?:открой|открыть|закрой|закрыть|выключи(?:ть)?|включи(?:ть)?|заблокируй|нажми|выбери|введи|вставь|прокрути|пролистай|свайпни|вернись)(?![\p{L}\p{N}_])))""", RegexOption.IGNORE_CASE)
     private val separatedVoice = Regex("""\s+(?:и\s+)?(?=(?:открой|открыть|закрой|закрыть|сверни|выключи(?:ть)?|включи(?:ть)?|заблокируй|погаси)(?![\p{L}\p{N}_]))""", RegexOption.IGNORE_CASE)
     private val tap = Regex("""^(?:нажми(?:те)?(?:\s+на)?|выбери(?:те)?|tap|select)\s+(.+)$""", RegexOption.IGNORE_CASE)
+    private val longPress = Regex("""^(?:зажми|удерживай|нажми и удерживай|long.press|press and hold)(?:\s+на)?\s+(.+)$""", RegexOption.IGNORE_CASE)
     private val input = Regex("""^(?:введи|вставь|набери|type|enter)\s+(?:текст\s+)?["«]([\s\S]+?)["»](?:\s+(?:в|in)\s+(.+))?$""", RegexOption.IGNORE_CASE)
     private val scroll = Regex("""^(?:пролистай|прокрути|scroll)\s+(?:экран\s+)?(вверх|вниз|влево|вправо|up|down|left|right)$""", RegexOption.IGNORE_CASE)
     private val swipe = Regex("""^(?:свайпни|свайп|swipe)\s+(?:экран\s+)?(вверх|вниз|влево|вправо|up|down|left|right)$""", RegexOption.IGNORE_CASE)
@@ -139,6 +140,16 @@ internal object VisualRequest {
     fun readsScreen(text: String): Boolean = screenQuestion.matches(cleanCommand(text)) || Regex(
         """(?:прочитай|что на экране|проанализируй|реши|учи[. ]?ру|read screen|on screen)""", RegexOption.IGNORE_CASE
     ).containsMatchIn(text)
+
+    private val visibleScreenAction = Regex(
+        """(?<![\p{L}\p{N}_])(?:нажми|нажать|зажми|удерживай|выбери|отметь|введи|вставь|заполни|""" +
+            """прокрути|пролистай|свайпни|тапни|кликни|переключи|поставь галочку|""" +
+            """tap|select|type|enter|fill|scroll|swipe|click)(?![\p{L}\p{N}_])""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun needsVisibleScreen(text: String): Boolean = readsScreen(text) ||
+        isAction(text) && visibleScreenAction.containsMatchIn(cleanCommand(text))
 
     private fun cleanCommand(raw: String): String {
         val goal = goal(raw)
@@ -206,6 +217,11 @@ internal object VisualRequest {
                     val label = tap.matchEntire(clean)!!.groupValues[1].trim().trim('"', '«', '»')
                     if (label.length !in 1..100) return null
                     listOf(VisualStep(VisualAction.TAP, label))
+                }
+                longPress.matches(clean) -> {
+                    val label = longPress.matchEntire(clean)!!.groupValues[1].trim().trim('"', '«', '»')
+                    if (label.length !in 1..100) return null
+                    listOf(VisualStep(VisualAction.LONG_PRESS, label))
                 }
                 input.matches(clean) -> {
                     val (_, value, field) = input.matchEntire(clean)!!.groupValues

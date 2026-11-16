@@ -32,7 +32,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
 
-    data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false)
+    data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false)
 
     fun start(
         raw: String,
@@ -48,6 +48,16 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         finished: (Result) -> Unit
     ): Boolean {
         val text = raw.trim().take(2400)
+        if (!scheduled && !force && explicitScenario == null) {
+            CortexNotificationJournal(context).answer(text)?.let {
+                finished(Result(it.text, true, ephemeral = it.ephemeral))
+                return true
+            }
+            CortexDeviceSnapshot.answer(context, text)?.let {
+                finished(Result(it, true))
+                return true
+            }
+        }
         if (!scheduled && !force && explicitScenario == null) {
             val screen = CortexScreenService.connected
             CortexDeviceContext.capabilities(text, allowPhone, screen != null && !screen.locked())?.let {
@@ -90,7 +100,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val state = if (resumeText || reply != null) saved?.takeIf { paused ->
             paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null
         } else null
-        val task = state?.copy(plans = 0, failures = linkedSetOf())
+        val task = state?.copy(plans = 0, failures = linkedSetOf(), progress = CortexPlanTracker())
             ?: Task(command, profile, source, conversation = explicitConversation, scheduled = scheduled)
         if (reply != null) {
             task.conversation = task.conversation?.withAnswer(text)
@@ -119,7 +129,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 progress(message)
             }
             try {
-                result = withTimeout(232_000L) {
+                result = withTimeout(TASK_TIMEOUT_MS) {
                     when {
                         scheduled && !CortexSchedule.screenReady(context) ->
                             Result("Разблокируйте телефон, чтобы начать поручение.", false, true)
@@ -277,8 +287,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         return CortexLocalCommands.parse(command) { name -> phone.resolveApp(name)?.pkg }?.takeIf { steps ->
             steps.all { step ->
                 when (step.optString("kind")) {
-                    "read_device", "volume", "brightness", "rotate", "recents", "play_store",
-                    "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info" -> true
+                    "read_device", "volume", "brightness", "rotate", "ringer", "copy_text", "recents", "play_store",
+                    "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info",
+                    "timer", "alarm", "search", "maps", "utility", "dial", "sms" -> true
                     "torch", "app" -> !visualAvailable
                     else -> false
                 }
@@ -344,13 +355,13 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         report("Проверяю текущий экран…")
         var feedback = task.lastIssue
         var runSteps = 0
-        while (runSteps < 40) {
+        while (runSteps < MAX_SCREEN_STEPS) {
             if (task.scheduled && !CortexSchedule.screenReady(context)) {
                 return Result("Экран выключился или заблокирован. Продолжите после разблокировки.", false, true)
             }
             if (task.queue.isEmpty()) {
                 if (task.completed > 0 && feedback.isBlank()) {
-                    if (!task.modelUsed || task.planDone) return Result(task.answer.ifBlank { "Задача выполнена." }, true)
+                    if (!task.modelUsed) return Result(task.answer.ifBlank { "Задача выполнена." }, true)
                     feedback = VERIFIED_STAGE
                     task.lastIssue = feedback
                 }
@@ -360,7 +371,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     ?: navigation.await(550L) { it.pkg != context.packageName }
                 if (frame?.secure == true || frame?.hasPrivateFields == true || service.locked()) return manual()
                 val explicitReading = VisualRequest.readsScreen(task.request)
-                val needsScreen = explicitReading || feedback == READ_SCREEN || task.plans > 0 && feedback.isNotBlank()
+                // Ground the very first AI step in the actual visible UI for
+                // commands such as "нажми", "введи" and "выбери".
+                val needsScreen = VisualRequest.needsVisibleScreen(task.request) ||
+                    feedback == READ_SCREEN || task.plans > 0 && feedback.isNotBlank()
                 val useFrame = needsScreen && frame != null && frame.pkg != context.packageName &&
                     frame.pkg !in navigation.home && !frame.hasPrivateFields
                 if (useFrame && !screenConsent(report)) {
@@ -390,8 +404,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                         task.question = plan.question
                         return Result(plan.question, false, true)
                     }
-                    if (plan.done && task.completed > 0 && (feedback == VERIFIED_STAGE || feedback == READ_SCREEN)) {
+                    if (plan.done && task.completed > 0 && (feedback == VERIFIED_STAGE || feedback == READ_SCREEN) && screen != null) {
                         return Result(plan.answer.ifBlank { "Задача выполнена." }, true)
+                    }
+                    if (plan.done && task.completed > 0 && screen == null) {
+                        return Result("Не вижу итоговый экран, поэтому не могу подтвердить завершение. Откройте результат и продолжите.", false, true)
                     }
                     return Result(plan.answer.ifBlank { "Нужен следующий шаг на экране." }, false,
                         task.completed > 0 && feedback != READ_SCREEN)
@@ -404,11 +421,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     task.lastIssue = feedback
                     continue
                 }
+                val signature = "${screen?.pkg}:${screen?.window}:${screen?.structure()}:" +
+                    plan.steps.joinToString("|") { "${it.action}:${it.target}:${it.value}:${it.expect}" }
+                if (!task.progress.accept(signature)) {
+                    return Result("ИИ повторил тот же план на неизменившемся экране. Задача приостановлена, чтобы не нажимать элементы по кругу.", false, true)
+                }
                 task.boundScreen = screen?.takeIf { first.action in SCREEN_STEPS }
                 task.queue.addAll(plan.steps)
                 task.answer = plan.answer
                 task.question = plan.question
-                task.planDone = plan.done
                 task.lastIssue = ""
                 feedback = ""
             }
@@ -545,7 +566,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 result(navigation.await { it.has(step.target) } != null || augment(task, before, service).has(step.target),
                     "На экране нет ожидаемого элемента «${step.target}».")
             }
-            VisualAction.TAP, VisualAction.SET -> activate(task, service, navigation, before, step, report)
+            VisualAction.TAP, VisualAction.LONG_PRESS, VisualAction.SET -> activate(task, service, navigation, before, step, report)
             VisualAction.TYPE, VisualAction.SUBMIT -> edit(task, service, navigation, before, step, report)
             VisualAction.SCROLL, VisualAction.SWIPE -> move(service, navigation, before, step, report)
             else -> result(false)
@@ -577,7 +598,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 }
             }
         }
-        if (node == null && step.action == VisualAction.TAP) {
+        if (node == null && step.action in setOf(VisualAction.TAP, VisualAction.LONG_PRESS)) {
             before = augment(task, before, service)
             if (before.secure || before.hasPrivateFields) return StepOutcome(false, manual().text, manual = true)
             if (before.pkg != frame.pkg || before.window != frame.window) {
@@ -611,8 +632,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             it.resource == target.resource && Rect.intersects(it.bounds, target.bounds) } ?: return StepOutcome(false,
             "Элемент «$label» изменился до нажатия.")
         if (requested != null && checkState(before, current) == requested) return StepOutcome(true)
-        report(if (requested == null) "Нажимаю «$label»…" else (if (requested) "Включаю" else "Выключаю") + " «$label»…")
-        if (!(service.click(before, current) || service.tap(before, current))) return StepOutcome(false, "Android отклонил нажатие «$label».")
+        report(when {
+            step.action == VisualAction.LONG_PRESS -> "Удерживаю «$label»…"
+            requested == null -> "Нажимаю «$label»…"
+            else -> (if (requested) "Включаю" else "Выключаю") + " «$label»…"
+        })
+        val accepted = if (step.action == VisualAction.LONG_PRESS) {
+            service.longClick(before, current) || service.longPress(before, current)
+        } else service.click(before, current) || service.tap(before, current)
+        if (!accepted) return StepOutcome(false, "Android отклонил действие с элементом «$label».")
         report("Проверяю результат…")
         val verified = when {
             requested != null -> navigation.await { fresh ->
@@ -692,7 +720,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private fun findTarget(frame: VisualFrame, label: String): VisualNode? {
         val aliases = CONTROL_ALIASES[VisualLabels.normalize(label)].orEmpty()
         val control = sequenceOf(label).plus(aliases.asSequence()).firstNotNullOfOrNull { name ->
-            frame.target(name) { it.clickable || it.ocr || it.checkable() }
+            frame.target(name) { it.clickable || it.longClickable || it.ocr || it.checkable() }
         }
         if (control != null) return control
         val named = sequenceOf(label).plus(aliases.asSequence()).firstNotNullOfOrNull { name ->
@@ -780,8 +808,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", CortexDeviceContext.IDENTITY + "\n" + PLANNER))
             .put(JSONObject().put("role", "user").put("content", user.toString()))
         val payload = JSONObject().put("messages", messages).put("style", "brief")
-            .put("profile", "fast").put("visual_plan", true)
-        val result = withTimeoutOrNull<JSONObject>(14_600L) {
+            .put("profile", if (task.profile == "deep") "deep" else "fast").put("visual_plan", true)
+        val result = withTimeoutOrNull<JSONObject>(48_000L) {
             var id: String? = null
             try {
                 suspendCancellableCoroutine { pending ->
@@ -842,7 +870,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var question: String = "",
         var answer: String = "",
         var modelUsed: Boolean = false,
-        var planDone: Boolean = false,
+        var progress: CortexPlanTracker = CortexPlanTracker(),
         var deferred: List<VisualStep> = emptyList(),
         var boundScreen: VisualFrame? = null,
         var recognized: VisualFrame? = null,
@@ -860,14 +888,17 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun clearPaused() { saved = null }
         fun clearPaused(source: String) { if (saved?.source == source) saved = null }
         fun canResume(source: String) = saved?.source == source
-        private const val MAX_PLANS = 2
+        private const val MAX_PLANS = 12
+        private const val MAX_SCREEN_STEPS = 80
+        private const val TASK_TIMEOUT_MS = 720_000L
         private val READ_ONLY = setOf("read_device")
-        private val SYSTEM_NAVIGATION = setOf("app", "close_app", "home", "recents", "settings", "panel", "play_store", "display_refresh", "open_web", "app_info")
+        private val SYSTEM_NAVIGATION = setOf("app", "close_app", "home", "recents", "settings", "panel", "play_store", "display_refresh", "open_web", "app_info",
+            "timer", "alarm", "search", "maps", "utility", "dial", "sms")
         private val REPEATABLE = setOf(VisualAction.HOME, VisualAction.OPEN, VisualAction.SET, VisualAction.EXPECT,
             VisualAction.QUICK_SETTINGS)
         const val READ_SCREEN = "Прочитай текущий экран. Используй видимые условия и элементы для следующего шага."
         const val VERIFIED_STAGE = "Предыдущие шаги подтверждены Android. Сверь цель и продолжи или укажи done:true."
-        val SCREEN_STEPS = setOf(VisualAction.BACK, VisualAction.TAP, VisualAction.SET, VisualAction.TYPE,
+        val SCREEN_STEPS = setOf(VisualAction.BACK, VisualAction.TAP, VisualAction.LONG_PRESS, VisualAction.SET, VisualAction.TYPE,
             VisualAction.SUBMIT, VisualAction.SCROLL, VisualAction.SWIPE, VisualAction.READ, VisualAction.EXPECT)
         val CONTROL_ALIASES = listOf(setOf("фонарик", "фонарь", "flashlight", "torch"),
             setOf("яркость", "brightness"), setOf("звук", "sound"), setOf("поворот экрана", "auto rotate", "автоповорот"),
@@ -879,7 +910,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun isSchoolSite(text: String) = SCHOOL_SITE.containsMatchIn(text)
         val PLANNER = """
             Составь план действий CORTEX на Android. Выход только JSON по схеме. Обычный предел 5 шагов.
-            open: название приложения. tap/expect: видимая подпись, либо #id в первом шаге. set: подпись и on/off.
+            open: название приложения. tap/long_press/expect: видимая подпись, либо #id в первом шаге. set: подпись и on/off.
             type вводит value в поле target или активное поле. submit отправляет ввод активного поля через клавиатуру.
             scroll/swipe: up/down/left/right в value. expect — проверка видимого результата.
             Для URL открой браузер, набери адрес и отправь ввод. Если шаг зависит от неизвестного экрана, запроси read.

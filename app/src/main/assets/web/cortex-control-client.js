@@ -42,7 +42,7 @@ window.CortexControl = (() => {
     if (!visible()) return;
     if (checking) { again = true; return; }
     checking = true;
-    try { const status = await api.request("status"); applyGate(status.gate, status.yandex === true || status.email_login === true || status.email_auth === true); }
+    try { const status = await api.request("status"); applyGate(status.gate, status.email_login === true || status.email_auth === true); }
     catch { /* Keep the last verified state until the connection returns. */ }
     finally {
       checking = false;
@@ -62,7 +62,13 @@ window.CortexControl = (() => {
   async function heartbeat() {
     if (!visible() || Date.now() - lastHeartbeat < 42_000) return;
     lastHeartbeat = Date.now();
-    try { await api.request("presence", { payload: { session_id: session, screen: document.querySelector("#screen")?.dataset.route || "home" } }); }
+    try {
+      const result = await api.request("presence", { payload: { session_id: session,
+        screen: document.querySelector("#screen")?.dataset.route || "home" } });
+      if (typeof result.guest_id === "string" && /^@g\d{6,17}$/.test(result.guest_id)) {
+        window.dispatchEvent(new CustomEvent("cortex-guest-id", { detail: result.guest_id }));
+      }
+    }
     catch { /* Presence is retried on the next interval. */ }
   }
 
@@ -208,7 +214,7 @@ window.CortexControl = (() => {
     if (inbox.open) inbox.close();
     host.textContent = "";
     lastInboxCheck = 0;
-    // A different account needs its own presence row even on the same device.
+    // Separate presence sessions when switching between guest and account.
     session = crypto.randomUUID();
     lastHeartbeat = 0;
     refresh();
