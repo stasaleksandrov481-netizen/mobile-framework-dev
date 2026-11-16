@@ -291,7 +291,11 @@ internal object CortexSchedule {
             return failure("Android не разрешил отложить напоминание. Попробуйте снова после проверки разрешений.")
         }
         context.getSystemService(NotificationManager::class.java).cancel(id, NOTIFICATION)
-        else context.getSystemService(AlarmManager::class.java).cancel(pending(context, task, ALARM))
+        // Snooze has already installed its replacement alarm. Cancelling the
+        // same PendingIntent here would silently cancel the new reminder.
+        if (updated.status != "scheduled") {
+            context.getSystemService(AlarmManager::class.java).cancel(pending(context, task, ALARM))
+        }
         return CortexActionEngine.Result(when (action) {
             "snooze" -> "Отложено на 5 минут."
             "cancel" -> "Поручение отменено."
