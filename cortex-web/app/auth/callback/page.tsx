@@ -13,9 +13,11 @@ export default function AuthCallback() {
       try {
         const url = new URL(window.location.href);
         const error = url.searchParams.get("error");
-        if (error) throw new Error("Подтверждение не удалось.");
         const code = url.searchParams.get("code");
         const tokenHash = url.searchParams.get("token_hash");
+        // One-time credentials must not remain in history, screenshots or copied URLs.
+        if (url.search) window.history.replaceState(window.history.state, "", url.pathname);
+        if (error) throw new Error("Подтверждение не удалось.");
         if (code) {
           const { error: exchangeError } = await cortexAuth.auth.exchangeCodeForSession(code);
           if (exchangeError) throw exchangeError;

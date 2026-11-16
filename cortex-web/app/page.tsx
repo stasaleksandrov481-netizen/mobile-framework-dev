@@ -1,7 +1,8 @@
 import { DownloadCTA, Registration } from "@/components/Registration";
 import UiIcon from "@/components/UiIcon";
+import { safeHttpsDownloadUrl } from "@/lib/safe-url";
 
-const downloadUrl = process.env.NEXT_PUBLIC_CORTEX_ANDROID_DOWNLOAD_URL;
+const downloadUrl = safeHttpsDownloadUrl(process.env.NEXT_PUBLIC_CORTEX_ANDROID_DOWNLOAD_URL);
 
 export default function Home() {
   return (

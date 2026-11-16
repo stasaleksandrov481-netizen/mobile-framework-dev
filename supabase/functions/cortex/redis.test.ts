@@ -26,3 +26,39 @@ test("Redis outage or unexpected model is ignored", async () => {
   }, async () => Response.json({ result: '["example/paid"]' }));
   assert.equal(await poisoned.getFreeModels(name => name.endsWith(":free")), null);
 });
+
+test("Redis outage opens a circuit breaker; local validated catalog stays available", async () => {
+  let calls = 0;
+  let broken = false;
+  const cache = createRedisCache({
+    UPSTASH_REDIS_REST_URL: "https://cortex-demo.upstash.io",
+    UPSTASH_REDIS_REST_TOKEN: "C".repeat(24),
+  }, async (_url, init) => {
+    calls++;
+    if (broken) return new Response(null, { status: 429 });
+    const operation = JSON.parse(String(init?.body)) as unknown[];
+    return Response.json({ result: operation[0] === "GET" ? '["example/working:free"]' : "OK" });
+  });
+  assert.deepEqual(await cache.getFreeModels(model => model.endsWith(":free")), ["example/working:free"]);
+  broken = true;
+  assert.deepEqual(await cache.getFreeModels(model => model.endsWith(":free")), ["example/working:free"]);
+  assert.equal(calls, 2);
+  // While the circuit is open, even parallel callers do not hit the depleted cache.
+  const results = await Promise.all(Array.from({ length: 20 }, () => cache.getFreeModels(model => model.endsWith(":free"))));
+  assert.equal(calls, 2);
+  assert.ok(results.every(result => result?.[0] === "example/working:free"));
+  assert.equal(await cache.getFreeModels(model => model === "not-allowed"), null);
+});
+
+test("Redis hung network is bounded and subsequent attempts skip the circuit", async () => {
+  let calls = 0;
+  const cache = createRedisCache({
+    UPSTASH_REDIS_REST_URL: "https://cortex-demo.upstash.io",
+    UPSTASH_REDIS_REST_TOKEN: "D".repeat(24),
+  }, async () => { calls++; return await new Promise<Response>(() => {}); });
+  const started = Date.now();
+  assert.equal(await cache.getFreeModels(() => true), null);
+  assert.ok(Date.now() - started < 2000, "A failed cache must not hang indefinitely");
+  assert.equal(await cache.getFreeModels(() => true), null);
+  assert.equal(calls, 1);
+});

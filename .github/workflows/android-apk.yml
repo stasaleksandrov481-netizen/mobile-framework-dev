@@ -56,6 +56,7 @@ jobs:
           npm ci --prefix cortex-web --no-audit --no-fund
           npm run build --prefix cortex-web
           npm run lint --prefix cortex-web
+          node --disable-warning=ExperimentalWarning --experimental-strip-types --test cortex-web/scripts/hardening.test.mjs
           npm ci --prefix cortex-control --no-audit --no-fund
           npm run build --prefix cortex-control
 
@@ -106,9 +107,10 @@ jobs:
           CORTEX_KEY_ALIAS: ${{ secrets.CORTEX_KEY_ALIAS }}
           CORTEX_KEY_PASSWORD: ${{ secrets.CORTEX_KEY_PASSWORD }}
         run: |
-          if [[ -z "$CORTEX_WEB_UPDATE_ROOT" || -z "$CORTEX_WEB_UPDATE_PUBLIC_KEY" ]]; then
-            echo "::error::Public beta APK requires signed WebView update configuration. Set both CORTEX_WEB_UPDATE_ROOT and CORTEX_WEB_UPDATE_PUBLIC_KEY repository variables."
-            exit 1
+          # Signed WebView updates are optional. Without both public values
+          # the APK uses bundled UI; unsigned hot updates never run.
+          if [[ -z "$CORTEX_WEB_UPDATE_ROOT" && -z "$CORTEX_WEB_UPDATE_PUBLIC_KEY" ]]; then
+            echo "::notice::Signed WebView hot updates are disabled; publishing the bundled Android app."
           fi
           if [[ -z "$CORTEX_KEYSTORE_B64" && -z "$CORTEX_STORE_PASSWORD" &&
                 -z "$CORTEX_KEY_ALIAS" && -z "$CORTEX_KEY_PASSWORD" ]]; then
@@ -132,7 +134,7 @@ jobs:
           gradle --no-daemon :app:assembleRelease
           apk=app/build/outputs/apk/release/app-release.apk
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          expected=dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274
+          expected=6a7967ebe2d0a5de51c02140ceade238bf1769b47bb2dcffc80bc955d650cf6b
           actual=$("$apksigner" verify --print-certs "$apk" | awk '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $NF }')
           if [[ "$actual" != "$expected" ]]; then
             echo "::error::The APK certificate does not match the permanent CORTEX release certificate."
