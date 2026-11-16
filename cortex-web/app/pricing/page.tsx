@@ -72,6 +72,7 @@ export default async function PricingPage() {
         ) : <p role="status">Цены и лимиты временно не загрузились. Обновите страницу через несколько минут.</p>}
         <p>Лимиты обновляются ежедневно в 03:00 по московскому времени. Продление подписки оформляется вручную на следующий месяц. Оплата на этапе согласования с Platega пока закрыта.</p>
         <nav className="legal-links" aria-label="Документы CORTEX">
+          <Link href="/questions">Частые вопросы</Link>
           <Link href="/terms">Пользовательское соглашение</Link>
           <Link href="/privacy">Политика конфиденциальности</Link>
           <Link href="/support">Поддержка</Link>

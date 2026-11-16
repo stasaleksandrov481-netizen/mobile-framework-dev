@@ -400,6 +400,15 @@ svg { display: block; flex-shrink: 0; }
 .legal-notice > strong { font-size: 13px; }
 .legal-notice p { margin-top: 7px; font-size: 12px; line-height: 1.8; }
 .legal-links { display: flex; flex-wrap: wrap; gap: 18px 24px; margin-top: 58px; padding-top: 25px; border-top: 1px solid #292929; font-size: 12px; }
+.pricing-list { margin: 34px 0 28px; border-top: 1px solid var(--line); }
+.pricing-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; align-items: center; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.pricing-row dt, .pricing-row dd { display: flex; flex-direction: column; min-width: 0; gap: 7px; margin: 0; }
+.pricing-row dd { text-align: right; }
+.pricing-row strong { color: #f1f1f1; font-size: 15px; font-weight: 660; }
+.pricing-row span { color: #999; font-size: 12px; line-height: 1.55; }
+.questions-page h2 { margin-top: 34px; }
+.questions-page .legal-lead { margin-bottom: 30px !important; }
+
 
 @media (max-width: 900px) {
   .auth-page {
@@ -439,6 +448,8 @@ svg { display: block; flex-shrink: 0; }
   .auth-submit { margin-top: 17px; }
   .auth-footer { flex-wrap: wrap; gap: 15px; }
   .auth-footer-links { gap: 13px; }
+  .pricing-row { grid-template-columns: minmax(0, 1fr); gap: 11px; padding: 18px 0; }
+  .pricing-row dd { text-align: left; }
   .legal-page { padding: 35px 23px 75px; }
   .legal-back { margin-bottom: 52px; }
   .legal-lead { margin-bottom: 28px !important; }
