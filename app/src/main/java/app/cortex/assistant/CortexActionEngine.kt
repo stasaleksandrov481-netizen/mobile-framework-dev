@@ -1,6 +1,7 @@
 package app.cortex.assistant
 
 import android.accessibilityservice.AccessibilityService
+import android.app.KeyguardManager
 import android.content.Context
 import android.graphics.Rect
 import android.os.Build
@@ -32,7 +33,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
 
-    data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false)
+    data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false, val waiting: Boolean = false, val localOnly: Boolean = false)
 
     fun start(
         raw: String,
@@ -50,34 +51,35 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val text = raw.trim().take(2400)
         if (!scheduled && !force && explicitScenario == null) {
             CortexNotificationJournal(context).answer(text)?.let {
-                finished(Result(it.text, true, ephemeral = it.ephemeral))
+                finished(Result(it.text, true, ephemeral = it.ephemeral, localOnly = true))
                 return true
             }
             CortexDeviceSnapshot.answer(context, text)?.let {
-                finished(Result(it, true))
+                finished(Result(it, true, localOnly = true))
                 return true
             }
         }
         if (!scheduled && !force && explicitScenario == null) {
-            val screen = CortexScreenService.connected
+            val screen = CortexScreenService.connected.takeIf { preferences.getBoolean("visualBeta", false) }
             CortexDeviceContext.capabilities(text, allowPhone, screen != null && !screen.locked())?.let {
-                finished(Result(it, true))
+                finished(Result(it, true, localOnly = true))
                 return true
             }
         }
         if (!scheduled) {
             CortexIslandService.handleControl(context, text)?.let {
-                finished(Result(it, true))
+                finished(Result(it, true, localOnly = true))
                 return true
             }
             CortexSchedule.command(context, text, source)?.let {
-                finished(it)
+                finished(it.copy(localOnly = true))
                 return true
             }
         }
         val resumeText = VisualRequest.isResume(text)
-        val network = NetworkRequest.parse(text)
         val command = VisualRequest.goal(text)
+        val localPlan = if (!resumeText) parseSystem(command) else null
+        val network = NetworkRequest.parse(text).takeUnless { (localPlan?.size ?: 0) > 1 }
         val action = VisualRequest.isAction(text)
         val scenario = explicitScenario ?: CortexScenarios.find(context, text)
         if (!allowPhone) {
@@ -85,7 +87,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             finished(Result("Управление телефоном выключено. Его можно включить в разделе «Вызов».", false))
             return true
         }
-        val direct = if (!resumeText && network == null) parseSystem(command) else null
+        val direct = localPlan.takeIf { network == null }
         val reply = saved?.takeIf { !resumeText && it.source == source && it.question.isNotBlank() &&
             SystemClock.uptimeMillis() - it.pausedAt < 180_000L && text.length <= 2_000 &&
             (text.startsWith('«') || text.startsWith('"') || (!action && network == null && !text.endsWith('?'))) }
@@ -96,7 +98,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             return true
         }
 
-        val service = CortexScreenService.connected
+        val visualEnabled = preferences.getBoolean("visualBeta", false)
+        val service = CortexScreenService.connected.takeIf { visualEnabled }
         val state = if (resumeText || reply != null) saved?.takeIf { paused ->
             paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null
         } else null
@@ -129,7 +132,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 progress(message)
             }
             try {
-                result = withTimeout(TASK_TIMEOUT_MS) {
+                val timeout = if (direct != null && reply == null && scenario == null) SYSTEM_TIMEOUT_MS else TASK_TIMEOUT_MS
+                result = withTimeout(timeout) {
                     when {
                         scheduled && !CortexSchedule.screenReady(context) ->
                             Result("Разблокируйте телефон, чтобы начать поручение.", false, true)
@@ -140,20 +144,24 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                             task.scenario = true
                             executeScenario(scenario, task, service, ::report)
                         }
+                        scenario != null && !visualEnabled -> visualOff()
                         scenario != null ->
                             Result("Сценарию нужен доступ CORTEX в специальных возможностях Android.", false)
                         network != null && reply == null ->
                             PhoneNetwork(context).run(network, service, beforeScreen, ::report)
-                        service?.locked() == true && direct?.all { it.optString("kind") in READ_ONLY } != true ->
+                        (service?.locked() == true || context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) &&
+                            direct?.all { it.optString("kind") in READ_ONLY || it.optString("mode") == "status" } != true ->
                             Result("Разблокируйте телефон, чтобы начать задачу.", false, state != null)
                         direct != null && reply == null ->
                             executeSystem(direct, beforeScreen, ::report)
+                        !visualEnabled -> visualOff()
                         service == null -> Result(
                             "Включите «CORTEX — управление экраном» в специальных возможностях Android и повторите запрос.",
                             false, state != null)
                         else -> execute(task, service, beforeScreen, ::report)
                     }
                 }
+                if (scenario == null && reply == null && (direct != null || network != null)) result = result.copy(localOnly = true)
                 preserve = result.resumable
             } catch (_: TimeoutCancellationException) {
                 preserve = task.queue.isNotEmpty() || task.plans > 0
@@ -184,6 +192,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 }
                 job = null
                 val phase = when {
+                    result.waiting -> "waiting"
                     result.ok -> "done"
                     result.text.startsWith("Задача остановлена") -> "stopped"
                     else -> "error"
@@ -281,20 +290,23 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         else Result(failure, false)
     }
 
+    private fun visualOff() = Result(
+        "Для этой задачи нужно управление экраном. Его можно включить в «Настройки» → «Способ вызова CORTEX» → «Визуальное управление».", false, localOnly = true)
+
     private fun parseSystem(command: String): List<JSONObject>? {
-        val visual = preferences.getBoolean("visualLaunch", false)
-        val visualAvailable = visual && CortexScreenService.connected != null
-        return CortexLocalCommands.parse(command) { name -> phone.resolveApp(name)?.pkg }?.takeIf { steps ->
-            steps.all { step ->
-                when (step.optString("kind")) {
-                    "read_device", "volume", "brightness", "rotate", "ringer", "copy_text", "recents", "play_store",
-                    "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info",
-                    "timer", "alarm", "search", "maps", "utility", "dial", "sms" -> true
-                    // Opening an installed app is an Android operation; don't depend on LLM quota.
-                    "app" -> true
-                    "torch" -> !visualAvailable
-                    else -> false
-                }
+        val visual = preferences.getBoolean("visualBeta", false)
+        val packages = mutableMapOf<String, String?>()
+        return CortexLocalCommands.parse(command) { name ->
+            if (!packages.containsKey(name)) packages[name] = phone.resolveApp(name)?.pkg
+            packages[name]
+        }?.map { step ->
+            when (step.optString("kind")) {
+                "read_device", "volume", "brightness", "rotate", "ringer", "copy_text", "recents", "play_store",
+                "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info",
+                "timer", "alarm", "search", "maps", "utility", "dial", "sms", "torch", "app_list",
+                "screen_timeout", "file_create", "contact_insert", "app_notifications", "app" -> step
+                "capture_photo" -> if (visual) return null else JSONObject().put("kind", "utility").put("target", "camera_photo")
+                else -> return null
             }
         }
     }
@@ -305,25 +317,28 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val taskScope = this
         suspendCancellableCoroutine { pending ->
             if (steps.any { it.optString("kind") in SYSTEM_NAVIGATION }) beforeScreen()
-            CortexActionSequence(steps, { pending.isActive }, { step, _, _, done ->
+            CortexActionSequence(steps, { pending.isActive }, { step, index, total, done ->
                 val kind = step.optString("kind")
                 if (kind == "display_refresh") {
                     taskScope.launch {
-                        val outcome = CortexDisplaySettings.set(context, step.optInt("level"), report)
-                        done(JSONObject().put("status", if (outcome.ok) "done" else "requested").put("message", outcome.text))
+                        val outcome = CortexDisplaySettings.set(context, step.optInt("level"), preferences.getBoolean("visualBeta", false), report)
+                        done(JSONObject().put("status", if (outcome.ok) "done" else if (outcome.waiting) "panel" else "requested")
+                            .put("message", outcome.text))
                     }
                 } else {
-                    report(when (kind) {
+                    val status = when (kind) {
                         "read_device" -> "Проверяю состояние телефона…"
                         "torch" -> "Проверяю фонарик…"
                         "volume" -> "Меняю громкость…"
                         "brightness" -> "Проверяю яркость экрана…"
+                        "screen_timeout" -> "Настраиваю время до выключения экрана…"
                         else -> "Выполняю команду Android…"
-                    })
+                    }
+                    report(if (total > 1) "Шаг $index из $total. $status" else status)
                     phone.executeChecked(step, { pending.isActive }, done)
                 }
             }) { result ->
-                if (pending.isActive) pending.resume(Result(result.text, result.ok))
+                if (pending.isActive) pending.resume(Result(result.text, result.ok, waiting = result.blocked && result.external))
             }.start()
         }
     }
@@ -898,9 +913,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         private const val MAX_PLANS = 12
         private const val MAX_SCREEN_STEPS = 80
         private const val TASK_TIMEOUT_MS = 720_000L
+        private const val SYSTEM_TIMEOUT_MS = 45_000L
         private val READ_ONLY = setOf("read_device")
         private val SYSTEM_NAVIGATION = setOf("app", "close_app", "home", "recents", "settings", "panel", "play_store", "display_refresh", "open_web", "app_info",
-            "timer", "alarm", "search", "maps", "utility", "dial", "sms")
+            "timer", "alarm", "search", "maps", "utility", "dial", "sms", "file_create", "contact_insert", "app_notifications")
         private val REPEATABLE = setOf(VisualAction.HOME, VisualAction.OPEN, VisualAction.SET, VisualAction.EXPECT,
             VisualAction.QUICK_SETTINGS)
         const val READ_SCREEN = "Прочитай текущий экран. Используй видимые условия и элементы для следующего шага."

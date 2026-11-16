@@ -310,7 +310,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         message = text
         if (!busy) {
             val delay = when (state) {
-                "done", "error", "stopped" -> if (reply.isNotBlank()) 12_000L else RESULT_MS
+                "done", "error", "stopped", "waiting" -> if (reply.isNotBlank()) 12_000L else RESULT_MS
                 "listening" -> 0L
                 "understood" -> 12_000L
                 "executing" -> 0L
@@ -338,6 +338,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             "executing" -> progressText.ifBlank { message.ifBlank { "Выполняю…" } }
             "reminder" -> "Напоминание"
             "done" -> "Готово"
+            "waiting" -> "Нужен ваш шаг"
             "error" -> "Проверьте результат"
             "stopped" -> "Остановлено"
             "understood" -> message
@@ -452,7 +453,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         updateStatus("thinking", "Думаю…")
         setExpanded(true)
         val streamed = StringBuilder()
-        assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
+        assistant.send(text,
             beforeScreen = { setExpanded(false) },
             toolsAllowed = { preferences.getBoolean("phoneActions", true) && Settings.canDrawOverlays(this) },
             progress = { updateStatus("executing", it) },
@@ -467,12 +468,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                     }
                 }
             },
-            finished = { answer, ok ->
+            finished = { outcome ->
                 busy = false
-                reply = answer.trim()
-                updateStatus(if (ok) "done" else "error", "")
+                reply = outcome.text.trim()
+                val phase = if (outcome.waiting) "waiting" else if (outcome.ok) "done" else "error"
+                val usage = outcome.tokens?.let { "Готово · $it ток." }.orEmpty()
+                updateStatus(phase, usage)
                 if (!hiddenByVoice && !poweringOff) setExpanded(true)
-                if (fromVoice && !poweringOff && reply.isNotBlank()) voiceOutput.speak(reply) { /* Speech is optional. */ }
+                if (fromVoice && !poweringOff && reply.isNotBlank()) voiceOutput.speak(reply, offlineOnly = outcome.tokens == 0) { /* Speech is optional. */ }
             })
     }
 

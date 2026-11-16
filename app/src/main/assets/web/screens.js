@@ -11,7 +11,7 @@ const CortexUI = (() => {
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
-    support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
+    support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "settings",
     chat: "home", schedule: "phone-tools", scenarios: "phone-tools", energy: "settings",
     account: "profile"
   };
@@ -34,8 +34,9 @@ const CortexUI = (() => {
     </button>`;
   }
   function switchRow(label, description, on, value) {
-    return `<button type="button" class="switch-row" role="switch" aria-checked="${on}" aria-label="${esc(label)}" ${attributes("toggle", value)}>
-      <span class="tile-copy"><strong>${esc(label)}</strong><small>${esc(description)}</small></span>
+    const beta = value === "visualBeta";
+    return `<button type="button" class="switch-row${beta ? " visual-beta-row" : ""}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" ${attributes("toggle", value)}>
+      <span class="tile-copy"><strong>${beta ? icon("alert", 17) : ""}${esc(label)}${beta ? '<span class="visual-beta-badge">БЕТА</span>' : ""}</strong><small>${esc(description)}</small></span>
       <span class="switch-track" aria-hidden="true"><i></i></span></button>`;
   }
   function pill(label, action, value, on, name = "") {
@@ -97,13 +98,13 @@ const CortexUI = (() => {
 
   function thinking() {
     return `<div class="thinking cortex-processing" role="status" aria-label="CORTEX обрабатывает запрос">
-      <span class="thinking-core" aria-hidden="true">${sign}</span>
-      <span class="thinking-label">CORTEX <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></span>
+      <span class="thinking-core" aria-hidden="true">${CortexEmotion.render("think", true)}</span>
+      <span class="thinking-label">Думаю <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></span>
       </div>`;
   }
 
   function actionProgress(job) {
-    return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.waiting ? "history" : "bolt", 18)}</span>
+    return `<div class="action-progress" role="status"><span class="action-pulse">${CortexEmotion.render(job.waiting ? "wait" : "work", true)}</span>
       <span><strong>${job.waiting ? "План на паузе" : "Выполняю…"}</strong>
         <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action)}</small></span></div>`;
   }
@@ -118,11 +119,12 @@ const CortexUI = (() => {
         ${replyMark}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
+        ${message.usage ? '<span class="message-usage" title="Вход: ' + tokenNumber.format(message.usage.input) + ' · Ответ: ' + tokenNumber.format(message.usage.output) + '">' + tokenNumber.format(message.usage.total) + ' ток.</span>' : ""}
         </div></article>`).join("");
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
       ${replyMark}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
-    const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
+    const error = ctx.error ? `<div class="notice error" role="alert">${CortexEmotion.render("error", true)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">
         ${ctx.error.code === "sign_in" && ctx.native ? button("Войти", "user", "go", "profile", "primary") : ""}
         ${button("Повторить", "refresh", "retry")}
@@ -295,7 +297,7 @@ const CortexUI = (() => {
       tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
       tile("Энергопотребление", "", "bolt", "go", "energy") +
       tile("Подписка", "Тарифы, лимиты и платежи", "spark", "go", "subscription") +
-      tile("Модели ИИ", "Профили моделей", "spark", "go", "models") +
+      tile("Ответы CORTEX", "Характер, манера общения и длина", "sliders", "go", "personality") +
       tile("Язык", "Язык ответа и распознавания", "globe", "go", "language") +
       tile("Анимации и отклик", "Движение интерфейса и вибрация", "wave", "go", "motion") +
       tile("Уведомления", "Оповещения о готовом ответе", "bell", "go", "notifications")
@@ -360,8 +362,10 @@ const CortexUI = (() => {
         </button>`).join("")}
         </section>
         ${group(switchRow("Не показывать в горизонтальных приложениях", "Например, во время игр и просмотра видео", p.hideLandscape, "hideLandscape") +
-          switchRow("Визуальное управление", "Запускать задачи Android из чата и островка", p.phoneActions, "phoneActions") +
-          switchRow("Показывать запуск на экране", "Открывать приложения через рабочий стол и быстрые настройки", p.visualLaunch, "visualLaunch") +
+          switchRow("Управление телефоном", "Локальные команды и системные настройки Android", p.phoneActions, "phoneActions") +
+          (native ? switchRow("Визуальное управление", "Действия на экране при необходимости. Возможны ошибки.", p.visualBeta, "visualBeta") : "") +
+          (native && p.visualBeta && !perm.screenAutomation ? tile("Разрешить управление экраном", "Специальные возможности Android", "shield", "verification-permission") : "") +
+          (native && p.visualBeta ? switchRow("Показывать запуск на экране", "Открывать приложения через рабочий стол", p.visualLaunch, "visualLaunch") : "") +
           voiceRow +
           switchRow("Продолжать голосовой ввод", "Открывать микрофон для следующей команды после ответа", p.voiceContinue, "voiceContinue"))}
         <dl class="voice-commands">
@@ -388,17 +392,7 @@ const CortexUI = (() => {
       <div>${icon("shield", 22)}<strong>Контролируйте доступ</strong><p>Разрешения выдаются для отдельных функций и всегда управляются через Android.</p></div>
       </section>` + button("Настроить CORTEX", "sliders", "go", "phone-tools", "primary"));
   }
-  function models(ctx) {
-    const model = M.state.preferences.model;
-    return detail("Модели ИИ", "Бесплатные варианты OpenRouter", quotaPanel(ctx.connection) + `<section class="panel stack">
-      ${choices(M.models, model, "model-profile")}
-      <p class="muted">${({
-        auto: "Автоматический выбор подходящей бесплатной модели.",
-        fast: "Приоритет скорости ответа, если модель доступна.",
-        deep: "Приоритет качества для сложных задач."
-      })[model]} При перегрузке модели сервер пробует резерв. У бесплатных моделей общая дневная квота OpenRouter.</p>
-      ${ctx.connection.profiles ? "" : '<p class="muted">Выбор применяется на сервере CORTEX с поддержкой профилей.</p>'}</section>`);
-  }
+  const models = personality;
   function language() {
     return detail("Язык", "Ответы и распознавание речи", `<section class="panel stack"><h2>Язык CORTEX</h2>
       ${choices(M.languages, M.state.preferences.language, "language")}
@@ -428,8 +422,7 @@ const CortexUI = (() => {
     const data = M.memory();
     return detail("Память и персонализация", "Контекст, который учитывает CORTEX",
       `<section class="panel">${switchRow("Использовать память", "Добавлять факты и уместные фрагменты бесед к запросу", data.enabled, "memory")}</section>` +
-      group(tile("Манера общения", M.styles[M.profile().style], "sliders", "go", "personality") +
-        tile("Инструкции", "Общие правила ответа CORTEX", "file", "go", "instructions")) +
+      group(tile("Ответы CORTEX", M.styles[M.profile().style], "sliders", "go", "personality")) +
       label("ФАКТЫ") + (data.entries.length ? group(data.entries.map(entry =>
         tile(entry.title, entry.value, "memory", "memory-edit", entry.id)).join("")) :
         '<div class="empty-panel"><p>Добавьте факт, который CORTEX должен учитывать в ответах.</p></div>') +
@@ -437,22 +430,12 @@ const CortexUI = (() => {
   }
   function personality() {
     const person = M.profile();
-    return detail("Манера общения", "Как CORTEX отвечает", `<section class="panel stack">
+    return detail("Ответы CORTEX", "Настройки действуют в чате и на островке", `<section class="panel stack">
       <h2>Длина ответа</h2>${choices(M.styles, person.style, "reply-style")}
-      <div class="readout"><strong>Тон</strong><p>${esc(person.tone)}</p></div>
-      <div class="readout"><strong>Роль</strong><p>${esc(person.description)}</p></div>
+      <div class="readout"><strong>Манера общения</strong><p>${esc(person.tone)}</p></div>
+      <div class="readout"><strong>Характер</strong><p>${esc(person.description)}</p></div>
       ${button("Изменить", "note", "personality-edit")}
     </section>`);
-  }
-  function instructions(ctx) {
-    const field = M.instructionFields.find(item => item.id === ctx.rule) || M.instructionFields[0];
-    const value = ctx.ruleDraft ?? M.state.instructions.cortex?.[field.id] ?? field.value;
-    return detail("Инструкции", "Правила ответов CORTEX", `<div class="filters">${M.instructionFields.map(item =>
-      pill(item.label, "rule", item.id, item.id === field.id)).join("")}</div>
-      <form class="panel stack" id="rule-form">
-        <label class="field"><span>${esc(field.label)}</span><textarea name="rule" rows="6" maxlength="750">${esc(value)}</textarea></label>
-        <button type="submit" class="action primary">${icon("check", 17)}Сохранить</button>
-      </form>`);
   }
   function notes() {
     return `<header class="profile-header notes-header"><h1>Заметки</h1>
@@ -487,6 +470,7 @@ const CortexUI = (() => {
       ${item("focus", "Поверх приложений", "Показывать островок поверх других окон. Не даёт доступа к содержимому экрана.", a.overlay, "overlay-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
+      ${item("sun", "Изменение системных настроек", "Нужно для яркости, автоповорота и времени до выключения экрана.", a.brightness, "write-settings-permission")}
       ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Разрешает системный вызов помощника и передачу текста экрана после вашего действия.", a.assistant, "assistant-permission") : ""}
       </section>
@@ -548,7 +532,7 @@ const CortexUI = (() => {
 
   function page(route, ctx) {
     const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
-      data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
+      data, memory, personality, instructions: personality, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
   function navigation() {

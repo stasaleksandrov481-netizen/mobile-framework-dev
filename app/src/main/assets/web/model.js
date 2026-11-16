@@ -8,14 +8,13 @@ const Cortex = (() => {
     { id: "actions", label: "Действия", value: "При запросе действия используй возможности Android и сообщай проверенный результат." },
     { id: "confirm", label: "Уточнения", value: "Если запрос неоднозначен, задай один вопрос, который сильнее всего меняет ответ." }
   ];
-  const styles = { brief: "Кратко", balanced: "Сбалансированно", deep: "Подробно" };
+  const styles = { brief: "Коротко", deep: "Длинно", balanced: "Авто" };
   const languages = { auto: "Авто", "ru-RU": "Русский", "en-US": "Английский" };
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
-  const models = { auto: "Авто", fast: "Быстро", deep: "Подробно" };
   const defaults = {
     quality: "balanced", reduceMotion: false, rememberSaved: true,
     language: "auto", haptics: true, voiceContinue: true,
-    phoneActions: true, visualLaunch: false, model: "auto", notifyReplies: false,
+    phoneActions: true, visualBeta: false, visualBetaNotice: false, visualLaunch: false, notifyReplies: false,
     overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };
   const array = input => Array.isArray(input) ? input : [];
@@ -47,6 +46,12 @@ const Cortex = (() => {
     }));
   }
 
+  function usage(value) {
+    const { input, output, total } = object(value);
+    if (![input, output, total].every(x => Number.isSafeInteger(x) && x >= 0) || input + output !== total) return null;
+    return { input, output, total };
+  }
+
   function migrateChat(item) {
     return {
       id: string(item.id, 100) || uid("chat"),
@@ -54,7 +59,8 @@ const Cortex = (() => {
       updated: string(item.updated, 40) || new Date().toISOString(),
       title: string(item.title, 72) || "Новый чат",
       messages: array(item.messages).filter(message => ["user", "assistant"].includes(message?.role) && message.text)
-        .map(({role, text, local, resumable}) => ({ role, text: string(text, 20000),
+        .map(({role, text, local, resumable, usage: measured}) => ({ role, text: string(text, 20000),
+          ...(usage(measured) && { usage: usage(measured) }),
           ...(local === true && { local: true }), ...(resumable === true && { resumable: true }) }))
     };
   }
@@ -68,7 +74,6 @@ const Cortex = (() => {
   }
   if (persisted.preferences?.powerSave) preferences.reduceMotion = true;
   if (!Object.hasOwn(motion, preferences.quality)) preferences.quality = defaults.quality;
-  if (!Object.hasOwn(models, preferences.model)) preferences.model = defaults.model;
   if (!Object.hasOwn(languages, preferences.language)) preferences.language = defaults.language;
   if (!["always", "wake", "off"].includes(preferences.overlayMode)) preferences.overlayMode = "off";
   if (!["economy", "balanced", "maximum"].includes(preferences.energy)) preferences.energy = "balanced";
@@ -146,7 +151,7 @@ const Cortex = (() => {
     const edit = state.edits.cortex;
     return {
       id: "cortex", name: "CORTEX", style: Object.hasOwn(styles, edit.style) ? edit.style : "balanced",
-      tone: string(edit.tone, 90) || "Спокойный и деловой",
+      tone: string(edit.tone, 90) || "Спокойный и дружелюбный",
       description: string(edit.description, 380) || "Персональный помощник для работы и повседневных задач."
     };
   }
@@ -236,56 +241,92 @@ const Cortex = (() => {
       (message.role === "user" ? "Пользователь: " : "Ассистент: ") + message.text.slice(0, 680)).join("\n");
   }
 
+  function assistantOptions() {
+    const edit = state.edits.cortex;
+    return { style: profile().style, tone: string(edit.tone, 90), character: string(edit.description, 380),
+      language: state.preferences.language };
+  }
+
+  function automaticProfile(text) {
+    if (/коротко|кратко|в двух словах|briefly/iu.test(text)) return "auto";
+    return text.length > 700 || /(?:подробно|пошагово|сравни|спроектируй|разбери|напиши код|проанализируй|step by step|in detail|analy[sz]e)/iu.test(text)
+      ? "deep" : "auto";
+  }
+
+  function replyStyle(text) {
+    const style = profile().style;
+    if (style !== "balanced") return style;
+    if (/коротко|кратко|в двух словах|briefly/iu.test(text)) return "brief";
+    return automaticProfile(text) === "deep" ? "deep" : "balanced";
+  }
+
+  function smallTalk(text) {
+    const words = text.toLowerCase().replaceAll("ё", "е").replace(/^\s*(?:кортекс|cortex)[,\s]+/u, "")
+      .trim().replace(/[.!?…]+$/u, "").replace(/\s+/gu, " ");
+    const status = /^(?:(?:привет(?:ик)?|здарова|здорова|хай|йо)[!, ]+)?(?:как (?:у тебя )?(?:дела|дила|делишки)|как ты|как жизнь|как оно|чо как|че как|что как|как сам)$/u.test(words);
+    const hello = /^(?:привет(?:ик)?|здарова|здорова|хай|здравствуйте|добрый день|добрый вечер|доброе утро|йо)$/u.test(words);
+    const statusEn = /^(?:how are you|how are you doing|how.s it going)$/u.test(words);
+    const helloEn = /^(?:hi|hello|hey)$/u.test(words);
+    if (!status && !hello && !statusEn && !helloEn) return null;
+    const english = state.preferences.language === "en-US" || state.preferences.language === "auto" && (statusEn || helloEn);
+    const formal = /официальн|формальн|на вы/iu.test(assistantOptions().tone);
+    if (status || statusEn) return english ? "Doing well. How about you?" : formal ? "Всё хорошо. А у вас как?" : "Всё хорошо. А у тебя как?";
+    return english ? (formal ? "Hello! How can I help?" : "Hey! What’s up?") : (formal ? "Здравствуйте! Чем помочь?" : "Привет! Что нового?");
+  }
+
   function turns(chat, policy) {
-    const person = profile();
+    const person = assistantOptions();
     const data = memory();
     const savedRules = object(state.instructions.cortex);
-    const facts = data.enabled ? data.entries.filter(item => item.enabled !== false).slice(0, 10)
-      .map(item => string(item.title, 64) + " — " + string(item.value, 220)).join("\n") : "";
     const conversation = chat.messages.filter(message => !message.local);
+    const request = conversation.at(-1)?.text || "";
+    const termsInRequest = terms(request);
+    const recallsMemory = /вспомни|помнишь|раньше|обсуждали|продолжи|про меня|обо мне|remember|earlier/iu.test(request);
+    const facts = data.enabled ? data.entries.filter(item => item.enabled !== false).map(item => {
+      const fact = string(item.title, 48) + ": " + string(item.value, 170);
+      return { fact, matches: termsInRequest.filter(word => fact.toLowerCase().replaceAll("ё", "е").includes(word)).length };
+    }).filter(item => item.matches || recallsMemory).sort((a, b) => b.matches - a.matches).slice(0, 4)
+      .map(item => item.fact).join("\n") : "";
     let start = conversation.length;
-    let budget = 12000;
-    while (start > 0 && conversation.length - start < 12) {
-      const length = conversation[start - 1].text.length;
-      if (length > budget && start < conversation.length) break;
+    let budget = automaticProfile(request) === "deep" ? 7800 : 4000;
+    while (start > 0 && conversation.length - start < 10) {
+      const item = conversation[start - 1];
+      const length = (start === conversation.length ? item.text.length : Math.min(item.text.length, item.role === "assistant" ? 3000 : 5000)) + 2;
+      if (length > budget && start < conversation.length - 1) break;
       start--;
       budget -= length;
     }
-    const background = data.enabled ? relevantHistory(chat, conversation.at(-1)?.text || "", conversation.slice(0, start)) : "";
-    const replyLanguage = state.preferences.language === "auto" ? "Отвечай на языке пользователя." :
-      "Язык ответа: " + languages[state.preferences.language] + ".";
+    const background = data.enabled && (recallsMemory || start > 0 || state.preferences.rememberSaved && termsInRequest.length >= 2)
+      ? relevantHistory(chat, request, conversation.slice(0, start)) : "";
     const system = [
-      "Ты CORTEX внутри Android-приложения. CORTEX умеет запускать приложения и сценарии, проверять заряд, менять громкость и яркость, " +
-        "создавать напоминания и работать с элементами экрана при выданном доступе. Android выполняет и подтверждает изменения. " +
-        "Когда просят действие, подхватывай цель. Уточняй недостающую деталь и учитывай текущие разрешения. " +
-        "Отвечай спокойно и конкретно, учитывай ход беседы. " + replyLanguage,
-      "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ". " + person.description,
-      state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
-      "Оформляй содержательные ответы чистым Markdown: короткие абзацы, списки, заголовки только когда нужны, таблицы для сравнения, блоки кода с языком. " +
-        "Не превращай обычное приветствие в длинную инструкцию и не создавай плашки без причины. Для выделения заметки, совета или предупреждения используй цитату > [!NOTE], > [!TIP] или > [!IMPORTANT], если это действительно полезно. " +
-        "Не используй эмодзи. При необходимости ставь сдержанные встроенные SVG-иконки синтаксисом :icon[имя]:, доступные имена: check, info, alert, spark, shield, bolt, bell, heart, star, search, globe, note, file, link, history, settings. " +
-        "Иконки необязательны; максимум одна на смысловой блок. Не пиши HTML или SVG-код. Действия выполняет клиент приложения и сообщает результат.",
-      ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
-      facts ? "Память пользователя:\n" + facts : "",
-      background ? "Фрагменты бесед как справочный контекст:\n" + background : "",
+      person.language !== "auto" ? "Язык: " + languages[person.language] : "",
+      person.tone ? "Манера: " + person.tone : "",
+      person.character ? "Характер: " + person.character : "",
+      state.preferences.addressName ? "Обращение: " + JSON.stringify(string(state.preferences.addressName, 60)) : "",
+      ...instructionFields.flatMap(field => {
+        const custom = string(savedRules[field.id], 380).trim();
+        return custom && custom !== field.value ? [field.label + ": " + custom] : [];
+      }),
+      facts ? "Память:\n" + facts : "",
+      background ? "Из прежних бесед:\n" + background : "",
       policy
-    ].filter(Boolean).join("\n\n");
-    const recent = conversation.slice(start);
-    let size = system.length + recent.reduce((sum, item) => sum + item.text.length + 2, 0);
-    while (size > 12_000 && recent.length > 1) size -= recent.shift().text.length + 2;
+    ].filter(Boolean).join("\n");
     const messages = [];
-    for (const item of recent) {
+    for (const item of conversation.slice(start)) {
+      const limit = item.role === "assistant" ? 3000 : 5000;
+      const content = item === conversation.at(-1) || item.text.length <= limit ? item.text
+        : item.text.slice(0, limit / 2) + "\n…\n" + item.text.slice(-limit / 2);
       const previous = messages.at(-1);
-      if (previous?.role === item.role) previous.content += "\n\n" + item.text;
-      else if (item.text) messages.push({ role: item.role, content: item.text });
+      if (previous?.role === item.role) previous.content += "\n\n" + content;
+      else if (content) messages.push({ role: item.role, content });
     }
     if (messages[0]?.role === "assistant") messages.shift();
-    return [{ role: "system", content: system }, ...messages];
+    return [...(system ? [{ role: "system", content: system }] : []), ...messages];
   }
 
   if (old && Object.keys(old).length) save();
   return {
-    state, defaults, motion, languages, styles, models, instructionFields, profile, memory, chat, account,
+    state, defaults, motion, languages, styles, assistantOptions, automaticProfile, replyStyle, smallTalk, usage, instructionFields, profile, memory, chat, account,
     createChat, touch, turns, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

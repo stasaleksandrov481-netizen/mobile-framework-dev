@@ -10,11 +10,17 @@ internal object CortexPhoneResult {
         result.optString("message").takeIf { it.isNotBlank() }?.let { return it }
         return when (result.optString("status")) {
             "done" -> when (kind) {
-                "volume" -> "Громкость мультимедиа — " + result.optInt("level") + "%."
+                "volume" -> "Громкость " + when (command.optString("stream")) {
+                    "ring" -> "звонка"; "alarm" -> "будильника"; "notification" -> "уведомлений"; "call" -> "разговора"; else -> "мультимедиа"
+                } + " — " + result.optInt("level") + "%."
+                "screen_timeout" -> timeout(result)
                 "torch" -> if (result.optBoolean("enabled")) "Фонарик включён." else "Фонарик выключен."
                 "lock_screen" -> "Android подтвердил блокировку экрана."
                 "read_device" -> when (command.optString("target")) {
+                    "screen_timeout" -> timeout(result)
+                    "ringtone" -> result.optString("value").let { if (it.endsWith(".")) it else "Мелодия звонка: $it." }
                     "time" -> "Сейчас " + ZonedDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm")) + "."
+                    "date" -> "Сегодня " + ZonedDateTime.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy, EEEE", java.util.Locale.forLanguageTag("ru"))) + "."
                     "battery" -> result.optInt("level", -1).takeIf { it in 0..100 }?.let {
                         "Заряд — $it%." + if (result.optBoolean("charging")) " Телефон заряжается." else ""
                     } ?: "Android не сообщил уровень заряда."
@@ -86,11 +92,21 @@ internal object CortexPhoneResult {
                 "alarm" -> "Открыт будильник. Проверьте время и подтвердите его в приложении часов."
                 "search" -> "Поисковый запрос открыт в браузере."
                 "maps" -> "Запрос открыт в приложении карт."
-                "utility" -> "Android получил запрос открыть нужное приложение."
+                "utility" -> when (command.optString("target")) {
+                    "files" -> "Открываю системный выбор файлов."
+                    "downloads" -> "Открываю загрузки."
+                    "contacts" -> "Открываю список контактов."
+                    "camera_photo" -> "Открываю камеру. Нажмите кнопку съёмки, чтобы сделать фото."
+                    else -> "Android получил запрос открыть нужное приложение."
+                }
+                "contact_insert" -> "Открываю карточку нового контакта. Проверьте данные и нажмите «Сохранить»."
+                "file_create" -> "Выберите папку и нажмите «Сохранить», чтобы создать пустой файл."
+                "app_notifications" -> "Открываю настройки уведомлений приложения."
                 "dial" -> "Открыт набор номера. Нажмите вызов, если всё верно."
                 "sms" -> "Черновик SMS открыт. Проверьте получателя и сообщение перед отправкой."
                 "settings" -> if (command.optString("target") == "vpn") "Переключатель VPN находится в открываемых настройках Android."
-                    else if (command.optBoolean("switch")) "Открываю нужный раздел Android. Переключатель доступен на его экране."
+                    else if (command.optString("target") == "ringtone") "Открываю настройки звука. Выберите мелодию звонка на этом экране."
+                    else if (command.optBoolean("switch")) "Android оставляет этот переключатель пользователю. Открываю нужный раздел."
                     else "Android получил команду открыть настройки."
                 else -> "Android получил команду открытия."
             }
@@ -99,13 +115,19 @@ internal object CortexPhoneResult {
             "requested" -> "Android получил команду. Подтверждения результата пока нет."
             "cancelled" -> "Задача остановлена."
             "already_background" -> "«" + result.optString("name") + "» уже не на переднем плане."
-            "needs_brightness" -> "Разрешите CORTEX изменять системные настройки в разделе «Вызов»."
+            "needs_brightness" -> "Разрешите CORTEX изменять системные настройки в разделе «Вызов» → «Разрешения и доступы»."
             "needs_screen" -> "Включите службу управления экраном CORTEX в настройках Android."
             "needs_lock" -> "Разрешите блокировку экрана или включите управление экраном в настройках CORTEX."
             "not_installed" -> "Приложение не найдено на телефоне."
             "unsupported" -> "Действие недоступно с текущими возможностями Android."
             else -> "Android не подтвердил выполнение команды."
         }
+    }
+
+    private fun timeout(result: JSONObject): String {
+        val seconds = result.optInt("seconds", -1)
+        return if (seconds <= 0) "Android не сообщил тайм-аут экрана."
+            else "Время до выключения экрана — $seconds сек."
     }
 
     private fun toggle(name: String, result: JSONObject) = "$name " + if (result.optBoolean("enabled")) "включён." else "выключен."

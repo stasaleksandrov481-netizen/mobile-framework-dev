@@ -346,6 +346,7 @@ internal class LiquidIslandView(
                     val caption = when (phase) {
                         "reminder" -> "Напоминание"
                         "error" -> "Ошибка"
+                        "waiting" -> "Ваш шаг"
                         "stopped" -> "Остановлено"
                         else -> statusText.take(10)
                     }
@@ -403,7 +404,8 @@ internal class LiquidIslandView(
         ink.style = Paint.Style.FILL
         ink.color = style.faceColor
         ink.alpha = (230 * alpha).roundToInt()
-        canvas.drawCircle(x, y, 8.4f * unit, ink)
+        canvas.drawRoundRect(x - 8.8f * unit, y - 6.9f * unit, x + 8.8f * unit,
+            y + 6.9f * unit, 5.8f * unit, 5.8f * unit, ink)
         ink.color = style.background
         ink.alpha = (255 * alpha).roundToInt()
         val left = x - 2.8f * unit + glance
@@ -417,7 +419,7 @@ internal class LiquidIslandView(
         when (phase) {
             "listening", "thinking" -> canvas.drawOval(x - 1.3f * unit, y + .6f * unit, x + 1.3f * unit, y + 3.5f * unit, ink)
             "error" -> canvas.drawArc(x - 3f * unit, y + 1.2f * unit, x + 3f * unit, y + 6f * unit, 207f, 126f, false, ink)
-            "executing", "stopped" -> canvas.drawLine(x - 2.2f * unit, y + 2.5f * unit, x + 2.2f * unit, y + 2.5f * unit, ink)
+            "executing", "stopped", "waiting" -> canvas.drawLine(x - 2.2f * unit, y + 2.5f * unit, x + 2.2f * unit, y + 2.5f * unit, ink)
             else -> {
                 val smile = (3.2f + curiosity * .8f + if (phase == "done") .8f else 0f) * unit
                 canvas.drawArc(x - smile, y - unit, x + smile, y + 4.6f * unit, 20f, 140f, false, ink)

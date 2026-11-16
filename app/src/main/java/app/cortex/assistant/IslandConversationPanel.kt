@@ -264,6 +264,7 @@ internal class IslandConversationPanel(
                 setSpan(RelativeSizeSpan(1.11f), lineStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
+        CortexFaces.applyTo(this)
     }
 
     private fun decorateReply() {

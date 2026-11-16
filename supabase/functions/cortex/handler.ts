@@ -800,6 +800,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           if (messages[0]?.role === "system") messages[0] = { role: "system", content: visualGuide + "\n" + messages[0].content };
           else messages.unshift({ role: "system", content: visualGuide });
         }
+        let measuredInput = 0, measuredOutput = 0, measuredAttempts = 0, unverifiedUsage = false;
+        const recordUsage = (usage: MeasuredUsage | null, accepted: boolean) => {
+          if (usage) { measuredInput += usage.input; measuredOutput += usage.output; measuredAttempts++; }
+          else if (accepted) unverifiedUsage = true;
+        };
+        const usageSummary = () => measuredAttempts && !unverifiedUsage
+          ? { input: measuredInput, output: measuredOutput, total: measuredInput + measuredOutput } : null;
         let catalogChecked = false;
         const restModel = (model: string, failure: Failure) => {
           if (!["timeout", "provider_limit", "invalid_plan", "provider_quota", "provider_quota_daily", "provider", "empty", "model", "provider_key", "provider_access"].includes(failure.code)) return;
@@ -845,7 +852,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
               const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
                 input.limit, signal, input.device, input.repair,
                 paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
-                hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined);
+                hold(paid ? model : undefined, advanced), format, paid ? (advanced ? 0.60 : 0.20) : undefined, recordUsage);
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {
@@ -885,7 +892,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           }
           throw new Failure("model", 502);
         }
-        return new Response(relay(response, getResponse, input.device, input.repair, next > 1, () => upstream.abort(), input.plan), {
+        return new Response(relay(response, getResponse, input.device, input.repair, next > 1, () => upstream.abort(), input.plan, usageSummary), {
           headers: { ...JSON_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no",
             "X-Cortex-Quota": JSON.stringify(quota || {}) },
         });

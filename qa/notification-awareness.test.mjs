@@ -32,7 +32,8 @@ test("unverified hotword voice cannot disclose or edit private memory on the loc
   assert.match(island, /if \(unlocked\) memory\.listFacts\(\) else emptyList\(\)/);
   assert.match(island, /if \(unlocked\) memory\.recent\(\)/);
   assert.match(island, /if \(ok && unlocked\) memory\.remember\(text, answer\)/);
-  assert.match(island, /if \(!unlocked \|\| address\.isBlank\(\)\)/);
+  assert.match(island, /if \(unlocked && address\.isNotBlank\(\)\)/);
+  assert.match(island, /if \(unlocked\) memory\.takeCommand\(text\)/);
   assert.match(memory, /memoryRequest && context\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceLocked/);
 });
 
@@ -51,7 +52,7 @@ test("private notification content stays ephemeral through the Android/WebView b
   const engine = source("app/src/main/java/app/cortex/assistant/CortexActionEngine.kt");
   const bridge = source("app/src/main/java/app/cortex/assistant/CortexDeviceBridge.kt");
   const app = source("app/src/main/assets/web/app.js");
-  assert.match(engine, /Result\(it\.text, true, ephemeral = it\.ephemeral\)/);
+  assert.match(engine, /Result\(it\.text, true, ephemeral = it\.ephemeral, localOnly = true\)/);
   assert.match(bridge, /\.put\("ephemeral", ephemeral\)/);
   assert.match(app, /chat\.messages\.at\(-1\)\.ephemeral = true/);
   assert.match(app, /messages: chat\.messages\.filter\(message => !message\.ephemeral\)/);

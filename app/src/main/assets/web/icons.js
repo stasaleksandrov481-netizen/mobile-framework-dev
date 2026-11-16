@@ -63,3 +63,43 @@ const CortexIcons = (() => {
       (paths[name] || paths.info) + "</svg>";
   };
 })();
+
+const CortexEmotion = (() => {
+  const paths = Object.freeze({
+    joy: '<path d="m6 11 2-2 2 2m4 0 2-2 2 2M8.5 14q3.5 4 7 0"/>',
+    wait: '<path d="M7 11h2m6 0h2M9.5 15h5"/>',
+    think: '<path d="M7 10h2m6 2h2M10 16h3"/>',
+    error: '<path d="m6.5 9 3 3m0-3-3 3m8-3 3 3m0-3-3 3M10 16h4"/>',
+    surprise: '<path d="M8 9v3m8-3v3"/><circle cx="12" cy="15.5" r="1.5"/>',
+    work: '<path d="m13 7-3 5h4l-3 5M6.5 12h.1m11 0h.1"/>',
+    done: '<path d="m7.5 12.2 3 3 6-6"/>',
+    listen: '<path d="M7 12v1m3-3v5m4-7v9m3-6v3"/>',
+    neutral: '<path d="M8 10v2m8-2v2m-6 3h4"/>'
+  });
+  const names = {
+    joy: "Радость", wait: "Ожидание", think: "Размышление", error: "Ошибка",
+    surprise: "Удивление", work: "Выполнение", done: "Готово", listen: "Слушаю", neutral: "Реакция"
+  };
+
+  function render(kind, decorative = false) {
+    if (!Object.hasOwn(paths, kind)) kind = "neutral";
+    const access = decorative ? 'aria-hidden="true"' : 'role="img" aria-label="' + names[kind] + '"';
+    return '<span class="cortex-emotion" data-emotion="' + kind + '" ' + access + '>' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<rect x="2.75" y="4.75" width="18.5" height="14.5" rx="6"/><path d="M10.5 3h3"/>' + paths[kind] + '</svg></span>';
+  }
+
+  function fromEmoji(value) {
+    if (/^[😀-😄😆😊☺🙂😁😉😂🤣😃🥳😍❤♥👍🎉✨]/u.test(value)) return "joy";
+    if (/^[✅☑✔👌]/u.test(value)) return "done";
+    if (/^[❌❎☹😞😢😭⚠⛔]/u.test(value)) return "error";
+    if (/^[😮😯😲😳🤯❗]/u.test(value)) return "surprise";
+    if (/^[💭🤔💡]/u.test(value)) return "think";
+    if (/^[⌛⏳🕐]/u.test(value)) return "wait";
+    if (/^[⚡🔥⚙🛠🚀💪]/u.test(value)) return "work";
+    if (/^[🎙🎤👂]/u.test(value)) return "listen";
+    return "neutral";
+  }
+
+  return { render, fromEmoji, accepts: kind => Object.hasOwn(paths, kind) };
+})();

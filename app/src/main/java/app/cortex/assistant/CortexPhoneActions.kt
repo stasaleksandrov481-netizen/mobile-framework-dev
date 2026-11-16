@@ -8,6 +8,9 @@ import android.content.*
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.RingtoneManager
+import android.app.NotificationManager
+import android.provider.ContactsContract
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.*
@@ -19,6 +22,7 @@ import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import kotlin.math.roundToInt
 
 internal class CortexPhoneActions(private val context: Context) {
     private val audio by lazy { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -96,9 +100,12 @@ internal class CortexPhoneActions(private val context: Context) {
                     "airplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS
                     "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
                     "nfc", "nfc_payment" -> Settings.ACTION_NFC_SETTINGS
-                    "sound" -> Settings.ACTION_SOUND_SETTINGS
+                    "sound", "ringtone" -> Settings.ACTION_SOUND_SETTINGS
+                    "cast" -> Settings.ACTION_CAST_SETTINGS
+                    "dnd" -> "android.settings.ZEN_MODE_SETTINGS"
+                    "night_light" -> "android.settings.NIGHT_DISPLAY_SETTINGS"
                     "apps", "default_apps" -> Settings.ACTION_APPLICATION_SETTINGS
-                    "display", "rotate", "night_light" -> Settings.ACTION_DISPLAY_SETTINGS
+                    "display", "rotate" -> Settings.ACTION_DISPLAY_SETTINGS
                     "language", "region", "regional" -> Settings.ACTION_LOCALE_SETTINGS
                     "date" -> Settings.ACTION_DATE_SETTINGS
                     "accessibility" -> Settings.ACTION_ACCESSIBILITY_SETTINGS
@@ -106,7 +113,6 @@ internal class CortexPhoneActions(private val context: Context) {
                     "security", "privacy" -> Settings.ACTION_SECURITY_SETTINGS
                     "about" -> Settings.ACTION_DEVICE_INFO_SETTINGS
                     "battery", "battery_saver" -> Settings.ACTION_BATTERY_SAVER_SETTINGS
-                    "dnd" -> Settings.ACTION_SOUND_SETTINGS
                     "vpn" -> Settings.ACTION_VPN_SETTINGS
                     "keyboard" -> Settings.ACTION_INPUT_METHOD_SETTINGS
                     "accounts" -> Settings.ACTION_ADD_ACCOUNT
@@ -116,7 +122,11 @@ internal class CortexPhoneActions(private val context: Context) {
                 return if (target in setOf("wifi", "wifi_ip", "bluetooth", "mobile", "network_operator", "apn", "data_usage",
                         "airplane", "location", "nfc", "nfc_payment", "vpn")) {
                     openSettings(false, action, Settings.ACTION_WIRELESS_SETTINGS)
-                } else openSettings(false, action)
+                } else when (target) {
+                    "dnd" -> openSettings(false, action, Settings.ACTION_SOUND_SETTINGS)
+                    "night_light" -> openSettings(false, action, Settings.ACTION_DISPLAY_SETTINGS)
+                    else -> openSettings(false, action)
+                }
             }
             "connectivity", "panel" -> {
                 val action = when (target) {
@@ -142,8 +152,37 @@ internal class CortexPhoneActions(private val context: Context) {
                 "camera_photo" -> started(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
                 "camera_video" -> started(Intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA))
                 "downloads" -> started(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+                "files" -> started(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"))
+                "contacts" -> started(Intent(Intent.ACTION_VIEW, ContactsContract.Contacts.CONTENT_URI))
                 "keyboard" -> { (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker(); status("opened") }
                 else -> status("invalid")
+            }
+            "file_create" -> {
+                val name = command.optString("title")
+                if (name.isBlank()) return status("invalid").put("message", "Укажите имя файла без косых черт и двоеточий.")
+                return started(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("text/plain").putExtra(Intent.EXTRA_TITLE, name))
+            }
+            "contact_insert" -> {
+                if (command.optBoolean("invalid")) return status("invalid").put("message", "Проверьте имя и номер контакта.")
+                val draft = Intent(Intent.ACTION_INSERT, ContactsContract.Contacts.CONTENT_URI)
+                command.optString("name").takeIf { it.isNotBlank() }?.let { draft.putExtra(ContactsContract.Intents.Insert.NAME, it) }
+                command.optString("number").takeIf { it.isNotBlank() }?.let { draft.putExtra(ContactsContract.Intents.Insert.PHONE, it) }
+                return started(draft)
+            }
+            "app_notifications" -> {
+                if (target.isBlank()) return status("not_installed")
+                return started(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, target))
+            }
+            "screen_timeout" -> {
+                val seconds = command.optInt("seconds")
+                if (seconds !in 5..1800) return status("invalid").put("message", "Допустимое время до выключения экрана — от 5 секунд до 30 минут.")
+                if (!Settings.System.canWrite(context)) return status("needs_brightness")
+                val resolver = context.contentResolver
+                val key = Settings.System.SCREEN_OFF_TIMEOUT
+                val saved = Settings.System.putInt(resolver, key, seconds * 1000)
+                val actual = Settings.System.getInt(resolver, key, -1)
+                return status(if (saved && actual == seconds * 1000) "done" else "requested").put("seconds", actual / 1000)
             }
             "battery" -> return readDevice("battery")
             "read_device" -> return readDevice(target)
@@ -156,13 +195,42 @@ internal class CortexPhoneActions(private val context: Context) {
                     else -> AudioManager.STREAM_MUSIC
                 }
                 val maximum = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+                val minimum = if (Build.VERSION.SDK_INT >= 28) audio.getStreamMinVolume(stream).coerceIn(0, maximum) else 0
                 val current = audio.getStreamVolume(stream)
                 val change = command.optInt("level", 10)
-                val currentPercent = current * 100 / maximum
-                val percent = when (mode) { "set" -> change; "up" -> currentPercent + change; "down" -> currentPercent - change
-                    "mute" -> 0; "unmute" -> 50; else -> currentPercent }.coerceIn(0, 100)
-                if (mode != "status") audio.setStreamVolume(stream, percent * maximum / 100, 0)
-                return status("done").put("level", audio.getStreamVolume(stream) * 100 / maximum)
+                if (mode in setOf("set", "up", "down") && change !in 0..100) {
+                    return status("invalid").put("message", "Укажите громкость от 0 до 100%.")
+                }
+                if (mode != "status" && audio.isVolumeFixed) {
+                    return status("unsupported").put("message", "На этом аудиовыходе Android сообщает фиксированную громкость.")
+                }
+                val delta = (change * maximum / 100.0).roundToInt().coerceAtLeast(if (change > 0) 1 else 0)
+                val wanted = when (mode) {
+                    "set" -> (change * maximum / 100.0).roundToInt()
+                    "up" -> current + delta
+                    "down" -> current - delta
+                    else -> current
+                }.coerceIn(minimum, maximum)
+                val mute = mode == "mute" || mode == "set" && change == 0 && minimum == 0
+                try {
+                    when {
+                        mute -> audio.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                        mode == "unmute" -> audio.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                        mode in setOf("set", "up", "down") -> audio.setStreamVolume(stream, wanted, 0)
+                    }
+                } catch (_: SecurityException) {
+                    return status("unsupported").put("message", "Android ограничил изменение этого звука. Проверьте раздел «Звук» и режим «Не беспокоить».")
+                }
+                val actual = audio.getStreamVolume(stream)
+                val muted = audio.isStreamMute(stream)
+                val confirmed = when {
+                    mute -> muted || actual == 0
+                    mode == "unmute" -> !muted
+                    mode == "status" -> true
+                    else -> actual == wanted
+                }
+                val level = if (muted) 0 else (actual * 100.0 / maximum).roundToInt()
+                return status(if (confirmed) "done" else "requested").put("level", level)
             }
             "brightness" -> {
                 if (mode == "status") return status("done").put("level", (Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) * 100 / 255))
@@ -178,7 +246,8 @@ internal class CortexPhoneActions(private val context: Context) {
                 }
                 val actualMode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
                 val actualLevel = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
-                return status(if (wanted == actualMode) "done" else "requested")
+                val verifiedLevel = mode in listOf("auto", "manual") || actualLevel == level * 255 / 100
+                return status(if (wanted == actualMode && verifiedLevel) "done" else "requested")
                     .put("level", (actualLevel * 100 + 127) / 255).put("automatic", actualMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
             }
             "rotate" -> {
@@ -192,7 +261,9 @@ internal class CortexPhoneActions(private val context: Context) {
             "ringer" -> {
                 val wanted = when (mode) { "vibrate" -> AudioManager.RINGER_MODE_VIBRATE;
                     "silent" -> AudioManager.RINGER_MODE_SILENT; else -> AudioManager.RINGER_MODE_NORMAL }
-                audio.ringerMode = wanted
+                try { audio.ringerMode = wanted } catch (_: SecurityException) {
+                    return status("unsupported").put("message", "Режим звука ограничен Android. Откройте «Звук» и проверьте режим «Не беспокоить».")
+                }
                 return status(if (audio.ringerMode == wanted) "done" else "requested")
             }
             "lock_screen" -> {
@@ -214,7 +285,9 @@ internal class CortexPhoneActions(private val context: Context) {
             "timer" -> return started(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, command.optInt("seconds")))
             "alarm" -> return started(Intent(AlarmClock.ACTION_SET_ALARM)
                 .putExtra(AlarmClock.EXTRA_HOUR, command.optInt("hour")).putExtra(AlarmClock.EXTRA_MINUTES, command.optInt("minute")))
-            "dial" -> return started(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(command.optString("number")))))
+            "dial" -> return started(Intent(Intent.ACTION_DIAL).apply {
+                command.optString("number").takeIf { it.isNotBlank() }?.let { data = Uri.fromParts("tel", it, null) }
+            })
             "sms" -> return started(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(command.optString("number"))))
                 .putExtra("sms_body", command.optString("text")))
             "search" -> return started(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(command.optString("query")))))
@@ -402,7 +475,23 @@ internal class CortexPhoneActions(private val context: Context) {
             "phone" -> done().put("value", Build.MANUFACTURER + " " + Build.MODEL + " · Android " + Build.VERSION.RELEASE)
             "ringer" -> done().put("value", when(audio.ringerMode) { AudioManager.RINGER_MODE_SILENT -> "silent"
                 AudioManager.RINGER_MODE_VIBRATE -> "vibrate"; else -> "sound" })
-            "time" -> done().put("value", java.time.ZonedDateTime.now().toString())
+            "time", "date" -> done().put("value", java.time.ZonedDateTime.now().toString())
+            "screen_timeout" -> {
+                val millis = Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, -1)
+                done().put("seconds", millis / 1000)
+            }
+            "ringtone" -> {
+                val uri = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)
+                val title = uri?.let { runCatching { RingtoneManager.getRingtone(context, it)?.getTitle(context) }.getOrNull() }
+                done().put("value", title ?: if (uri == null) "Мелодия звонка отключена." else "Мелодия установлена. Название доступно в настройках звука.")
+            }
+            "dnd" -> done().put("value", when (context.getSystemService(NotificationManager::class.java).currentInterruptionFilter) {
+                NotificationManager.INTERRUPTION_FILTER_ALL -> "Режим «Не беспокоить» выключен."
+                NotificationManager.INTERRUPTION_FILTER_PRIORITY -> "В режиме «Не беспокоить» разрешены приоритетные уведомления."
+                NotificationManager.INTERRUPTION_FILTER_ALARMS -> "Режим «Не беспокоить» пропускает только будильники."
+                NotificationManager.INTERRUPTION_FILTER_NONE -> "Режим «Не беспокоить» включён без исключений."
+                else -> "Android не сообщил состояние режима «Не беспокоить»."
+            })
             "locale" -> done().put("value", Locale.getDefault().toLanguageTag())
             "refresh" -> CortexDisplaySettings.info(context).put("status", "done")
             "rotate" -> done().put("enabled", Settings.System.getInt(context.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) != 0)

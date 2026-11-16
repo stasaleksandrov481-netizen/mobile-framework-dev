@@ -42,6 +42,9 @@ internal class CortexDeviceBridge(
             "open-settings" -> sendAction("settings") { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
             "assistant-permission" -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            "write-settings-permission" -> sendAction("write-settings") {
+                open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}")))
+            }
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -117,16 +120,16 @@ internal class CortexDeviceBridge(
             "action-start" -> {
                 val id = body.optString("id")
                 fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false,
-                          ephemeral: Boolean = false) =
+                          ephemeral: Boolean = false, localOnly: Boolean = false) =
                     emit(JSONObject().put("type", "action").put("id", id).put("phase", phase).put("text", text)
-                        .put("ok", ok).put("resumable", resumable).put("ephemeral", ephemeral)
+                        .put("ok", ok).put("resumable", resumable).put("ephemeral", ephemeral).put("localOnly", localOnly)
                         .put("external", !CortexRuntime.appVisible))
                 val handled = engine.start(body.optString("text"), body.optString("profile"),
                     force = body.optBoolean("force"), allowPhone = body.optBoolean("allowPhone", true),
                     source = body.optString("source", "chat").take(100),
                     beforeScreen = { activity.moveTaskToBack(true) },
                     progress = { event("progress", it) }) { result ->
-                    event("result", result.text, result.ok, result.resumable, result.ephemeral)
+                    event("result", result.text, result.ok, result.resumable, result.ephemeral, result.localOnly)
                 }
                 if (!handled) event("pass")
             }
@@ -154,7 +157,7 @@ internal class CortexDeviceBridge(
             "voice-cancel" -> speech.cancel(body.optString("id"))
             "voice-speak" -> {
                 val id = body.optString("id").take(90)
-                voiceOutput.speak(body.optString("text")) { ok ->
+                voiceOutput.speak(body.optString("text"), offlineOnly = body.optBoolean("offlineOnly")) { ok ->
                     emit(JSONObject().put("type", "voice-output").put("id", id).put("ok", ok))
                 }
             }
@@ -259,6 +262,7 @@ internal class CortexDeviceBridge(
             .put("androidRelease", Build.VERSION.RELEASE)
             .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+            .put("brightness", Settings.System.canWrite(context))
             .put("notificationAccess", CortexNotificationJournal.accessGranted(context))
             .put("deviceSnapshot", runCatching { CortexDeviceSnapshot.info(context) }.getOrNull())
             .put("compatibility", CortexAndroidCompatibility.report(context))

@@ -23,11 +23,15 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private var localTurn: Int? = null
     private var generation = 0
 
-    @Synchronized fun speak(text: String, complete: (Boolean) -> Unit) {
+    @Synchronized fun speak(text: String, offlineOnly: Boolean = false, complete: (Boolean) -> Unit) {
         stop()
         val turn = generation
-        val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
+        val normalized = CortexFaces.speechText(text).replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
         if (normalized.isBlank()) { handler.post { complete(false) }; return }
+        if (offlineOnly) {
+            useAndroidVoice(turn, normalized, complete, offlineOnly = true)
+            return
+        }
         request = bridge.speech(normalized) { response ->
             synchronized(this) {
                 if (turn != generation || request == null) return@speech
@@ -106,7 +110,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         }
     }
 
-    private fun useAndroidVoice(turn: Int, text: String, complete: (Boolean) -> Unit) {
+    private fun useAndroidVoice(turn: Int, text: String, complete: (Boolean) -> Unit, offlineOnly: Boolean = false) {
         handler.post {
             synchronized(this) {
                 if (turn != generation || localTurn == turn) return@post
@@ -122,14 +126,25 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                             finishAndroidVoice(turn, false, complete)
                             return@post
                         }
-                        val russian = runCatching { voice.setLanguage(Locale.forLanguageTag("ru-RU")) }
-                            .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
-                        if (russian == TextToSpeech.LANG_MISSING_DATA || russian == TextToSpeech.LANG_NOT_SUPPORTED) {
-                            val fallback = runCatching { voice.setLanguage(Locale.getDefault()) }
-                                .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
-                            if (fallback == TextToSpeech.LANG_NOT_SUPPORTED || fallback == TextToSpeech.LANG_MISSING_DATA) {
+                        val language = if (text.any { it in 'А'..'я' || it == 'ё' || it == 'Ё' }) Locale.forLanguageTag("ru-RU") else Locale.ENGLISH
+                        if (offlineOnly) {
+                            val localVoice = runCatching { voice.voices?.firstOrNull {
+                                !it.isNetworkConnectionRequired && it.locale.language == language.language && "notInstalled" !in it.features
+                            } }.getOrNull()
+                            if (localVoice == null || voice.setVoice(localVoice) != TextToSpeech.SUCCESS) {
                                 finishAndroidVoice(turn, false, complete)
                                 return@post
+                            }
+                        } else {
+                            val preferred = runCatching { voice.setLanguage(language) }
+                                .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
+                            if (preferred == TextToSpeech.LANG_MISSING_DATA || preferred == TextToSpeech.LANG_NOT_SUPPORTED) {
+                                val fallback = runCatching { voice.setLanguage(Locale.getDefault()) }
+                                    .getOrDefault(TextToSpeech.LANG_NOT_SUPPORTED)
+                                if (fallback == TextToSpeech.LANG_NOT_SUPPORTED || fallback == TextToSpeech.LANG_MISSING_DATA) {
+                                    finishAndroidVoice(turn, false, complete)
+                                    return@post
+                                }
                             }
                         }
                         voice.setAudioAttributes(AudioAttributes.Builder()

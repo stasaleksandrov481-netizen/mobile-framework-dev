@@ -8,14 +8,14 @@ internal object CortexLocalCommands {
     private val verbs = "включи(?:ть)?|выключи(?:ть)?|отключи(?:ть)?|погаси(?:ть)?|открой|открыть|закрой|закрыть|" +
         "запусти(?:ть)?|сверни|свернуть|заблокируй|заблокировать|сфоткай|сфоткайся|сфотографируй|сфотографировать|" +
         "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи|" +
-        "найди|поищи|заведи|скопируй|сними"
-    private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)\b))\s*""", RegexOption.IGNORE_CASE)
-    private val unpunctuated = Regex("""\s+(?=(?:$verbs)\b)""", RegexOption.IGNORE_CASE)
+        "найди|поищи|заведи|скопируй|сними|создай|добавь|выставь|зажги|подними|снизь|активируй|деактивируй|вруби|выруби|выбери|скажи"
+    private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)(?![\p{L}\p{N}_])))\s*""", RegexOption.IGNORE_CASE)
+    private val unpunctuated = Regex("""\s+(?=(?:$verbs)(?![\p{L}\p{N}_]))""", RegexOption.IGNORE_CASE)
     private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|бро|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
     private val infinitives = mapOf("включить" to "включи", "выключить" to "выключи", "отключить" to "отключи",
         "погасить" to "погаси", "открыть" to "открой", "закрыть" to "закрой", "запустить" to "запусти",
         "свернуть" to "сверни", "заблокировать" to "заблокируй", "сфотографировать" to "сфотографируй")
-    private val volume = Regex("""(?:установи|поставь|сделай|измени) громкость (?:на )?(\d{1,3})(?:\s*(?:%|процент(?:а|ов)?))?""")
+    private val quotes = Regex("""«[^»]*»|"[^"]*"""")
     private val website = Regex(
         """(?:открой|открыть|зайди на|перейди на|open) (?:сайт |страницу )?(?:[«"])?((?:https?://)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?::\d{1,5})?(?:[/?#][^\s"»]*)?)[»"]?""",
         RegexOption.IGNORE_CASE
@@ -31,9 +31,10 @@ internal object CortexLocalCommands {
     private val alarm = Regex("""(?:поставь|заведи|установи) будильник(?: на)? ([01]?\d|2[0-3]):([0-5]\d)""")
     private val webSearch = Regex("""(?:найди|поищи|погугли) (?:в интернете|в сети|в браузере) (.{2,140})""", RegexOption.IGNORE_CASE)
     private val mapSearch = Regex("""(?:найди|покажи|поищи) (?:на карте|на картах) (.{2,140})""", RegexOption.IGNORE_CASE)
-    private val clipboard = Regex("""(?:скопируй|скопировать) (?:текст )?[«\"](.{1,800})[»\"]""", RegexOption.IGNORE_CASE)
+    private val textValue = """(?:«([^»]+)»|"([^"]+)")"""
+    private val clipboard = Regex("""(?:скопируй|скопировать) (?:текст )?$textValue""", RegexOption.IGNORE_CASE)
     private val dialer = Regex("""(?:позвони|набери номер|открой набор номера) (\+?[\d ()-]{5,22})""", RegexOption.IGNORE_CASE)
-    private val message = Regex("""(?:напиши|создай) смс(?: на номер)? (\+?[\d ()-]{5,22}) (?:с текстом )?[«\"](.{1,1000})[»\"]""", RegexOption.IGNORE_CASE)
+    private val message = Regex("""(?:напиши|создай) смс(?: на номер)? (\+?[\d ()-]{5,22}) (?:с текстом )?$textValue""", RegexOption.IGNORE_CASE)
     private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|подскажи как)\s""")
     private val cameraNames = setOf("камера", "камеру", "фотокамеру", "camera")
     private val spaces = Regex("""\s+""")
@@ -43,36 +44,54 @@ internal object CortexLocalCommands {
             .replace(Regex("""^пожалуйста,?\s+|,?\s+пожалуйста$""", RegexOption.IGNORE_CASE), "")
         val request = normalized(original)
         if (request.isBlank() || instruction.containsMatchIn(request)) return null
-        clipboard.matchEntire(original)?.let { return listOf(command("copy_text", "text" to it.groupValues[1])) }
-        message.matchEntire(original)?.let { match ->
-            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
-            if (number.count(Char::isDigit) in 5..15) return listOf(command("sms", "number" to number, "text" to match.groupValues[2]))
-        }
-        dialer.matchEntire(original)?.let { match ->
-            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
-            if (number.count(Char::isDigit) in 5..15) return listOf(command("dial", "number" to number))
-        }
-        webSearch.matchEntire(original)?.let { return listOf(command("search", "query" to it.groupValues[1])) }
-        mapSearch.matchEntire(original)?.let { return listOf(command("maps", "query" to it.groupValues[1])) }
-        website.matchEntire(original)?.groupValues?.get(1)?.let { address ->
-            val url = if ("://" in address) address else "https://$address"
-            val parsed = runCatching { URI(url) }.getOrNull()
-            if (parsed?.host != null && parsed.userInfo == null && url.length <= 1500) {
-                return listOf(command("open_web", "target" to url))
-            }
-        }
-        val parts = request.split(separator)
+        parseLiteral(original)?.let { return listOf(it) }
+        val parts = splitCommands(original, separator)
         if (parts.size == 1) {
             store.matchEntire(original)?.groupValues?.get(1)?.trim()?.takeIf { it.length in 1..100 }?.let {
                 return listOf(command("play_store", "query" to it))
             }
         }
-        val commands = parseParts(parts, resolveApp) ?: parts.flatMap { it.split(unpunctuated) }
+        val commands = parseParts(parts, resolveApp) ?: parts.flatMap { splitCommands(it, unpunctuated) }
             .takeIf { it != parts }?.let { parseParts(it, resolveApp) }
         return commands?.filterIndexed { index, step ->
             step.optString("kind") != "app" || step.optString("target") != "camera" ||
                 commands.getOrNull(index + 1)?.optString("kind") != "capture_photo"
         }
+    }
+
+    private fun parseLiteral(text: String): JSONObject? {
+        clipboard.matchEntire(text)?.let { return command("copy_text", "text" to it.groupValues[1].ifEmpty { it.groupValues[2] }.take(800)) }
+        message.matchEntire(text)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            if (number.count(Char::isDigit) in 5..15) return command("sms", "number" to number, "text" to match.groupValues[2].ifEmpty { match.groupValues[3] }.take(1000))
+        }
+        dialer.matchEntire(text)?.let { match ->
+            val number = match.groupValues[1].filter { it.isDigit() || it == '+' }
+            if (number.count(Char::isDigit) in 5..15) return command("dial", "number" to number)
+        }
+        webSearch.matchEntire(text)?.let { return command("search", "query" to it.groupValues[1]) }
+        mapSearch.matchEntire(text)?.let { return command("maps", "query" to it.groupValues[1]) }
+        website.matchEntire(text)?.groupValues?.get(1)?.let { address ->
+            val url = if ("://" in address) address else "https://$address"
+            val parsed = runCatching { URI(url) }.getOrNull()
+            if (parsed?.host != null && parsed.userInfo == null && url.length <= 1500) {
+                return command("open_web", "target" to url)
+            }
+        }
+        return null
+    }
+
+    private fun splitCommands(text: String, separators: Regex): List<String> {
+        val protected = quotes.findAll(text).map { it.range }.toList()
+        val parts = mutableListOf<String>()
+        var start = 0
+        for (match in separators.findAll(text)) {
+            if (protected.any { match.range.first in it }) continue
+            parts += text.substring(start, match.range.first)
+            start = match.range.last + 1
+        }
+        parts += text.substring(start)
+        return parts
     }
 
     private fun parseParts(parts: List<String>, resolveApp: (String) -> String?): List<JSONObject>? {
@@ -81,12 +100,15 @@ internal object CortexLocalCommands {
     }
 
     private fun parseOne(text: String, resolveApp: (String) -> String?): JSONObject? {
-        val words = text.trim().trimEnd('.', '!', '?').replace(spaces, " ")
+        parseLiteral(text.trim())?.let { return it }
+        CortexSystemRequests.parsePayload(text.trim(), resolveApp)?.let { return it }
+        val words = normalized(text).trim().trimEnd('.', '!', '?').replace(spaces, " ")
             .removePrefix("пожалуйста, ").removePrefix("пожалуйста ").removeSuffix(", пожалуйста")
             .removeSuffix(" пожалуйста").replace(Regex("""^яркость(?: экрана)? (прибавь|увеличь|убавь|уменьши)(?= |$)"""),
                 "$1 яркость")
         val first = words.substringBefore(' ')
-        val plain = (infinitives[first] ?: first) + words.substring(first.length)
+        val verb = infinitives[first] ?: when (first) { "вруби", "зажги" -> "включи"; "выруби" -> "выключи"; else -> first }
+        val plain = verb + words.substring(first.length)
         CortexSystemRequests.parse(plain)?.let { return it }
         timer.matchEntire(plain)?.let { match ->
             val amount = match.groupValues[1].toInt()
@@ -112,10 +134,12 @@ internal object CortexLocalCommands {
             "переключи фонарик" -> command("torch", "mode" to "toggle")
             "убери громкость", "выключи звук", "отключи звук", "убери звук", "поставь без звука" ->
                 command("volume", "mode" to "mute", "stream" to "media")
-            "прибавь громкость", "увеличь громкость", "прибавь звук", "сделай погромче" -> command("volume", "mode" to "up")
-            "убавь громкость", "уменьши громкость", "убавь звук", "сделай потише" -> command("volume", "mode" to "down")
+            "прибавь громкость", "увеличь громкость", "прибавь звук", "сделай погромче", "чуть громче", "чуть погромче" -> command("volume", "mode" to "up")
+            "убавь громкость", "уменьши громкость", "убавь звук", "сделай потише", "чуть тише", "чуть потише" -> command("volume", "mode" to "down")
             "который час", "который сейчас час", "сколько сейчас времени", "сколько времени", "скажи время" ->
                 command("read_device", "target" to "time")
+            "какое сегодня число", "какое число", "какой сегодня день", "какая сегодня дата", "скажи сегодняшнюю дату" ->
+                command("read_device", "target" to "date")
             "сколько заряда", "сколько процентов заряда", "проверь заряд", "сколько заряда осталось", "покажи заряд" ->
                 command("read_device", "target" to "battery")
             "проверь память телефона", "сколько свободного места", "сколько памяти на телефоне", "проверь хранилище" ->
@@ -146,11 +170,18 @@ internal object CortexLocalCommands {
             "сделай экран ярче", "сделай поярче", "прибавь яркости" -> command("brightness", "mode" to "up")
             "сделай экран темнее", "сделай потемнее", "убавь яркости" -> command("brightness", "mode" to "down")
             "какая яркость", "проверь яркость" -> command("brightness", "mode" to "status")
+            "открой файлы", "покажи файлы", "открой проводник", "открой мои файлы", "файловый менеджер" ->
+                command("utility", "target" to "files")
+            "открой загрузки", "покажи скачанное", "открой скачанные файлы", "где загрузки" ->
+                command("utility", "target" to "downloads")
+            "открой контакты", "покажи контакты", "открой телефонную книгу", "открой список контактов" ->
+                command("utility", "target" to "contacts")
+            "добавь контакт", "создай контакт", "добавь новый контакт" -> command("contact_insert")
+            "открой экран набора", "открой звонилку", "открой набор номера" -> command("dial")
+            "покажи установленные приложения", "какие приложения установлены", "скажи какие приложения стоят" -> command("app_list")
             "тг", "телега", "телеграм", "telegram" -> command("app", "target" to "telegram")
             "тт", "тикток", "tiktok" -> command("app", "target" to "tiktok")
             else -> {
-                val level = volume.matchEntire(plain)?.groupValues?.get(1)?.toIntOrNull()
-                if (level != null && level in 0..100) return command("volume", "mode" to "set", "level" to level)
                 brightnessLevel.matchEntire(plain)?.groupValues?.get(1)?.toIntOrNull()?.let {
                     if (it in 1..100) return command("brightness", "mode" to "set", "level" to it)
                 }
