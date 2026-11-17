@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-11-17: релиз объединён в main и опубликован сайт
+
+- **PR и commit:** [#49](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/49) объединён squash-коммитом `05a18101c67b121db7ac64fcbd9c9fe27c6c988c`.
+- **Состав:** пять Android-файлов нового островка из PR #46, `CortexServerBridge.kt` из PR #47, документация и CI gate из PR #48, ускоренная per-PR Gradle concurrency.
+- **Проверки:** Android APK + unit/integration tests, website build/lint, CodeQL Security Scan и Agent Handoff Gate — **success** для объединённой ветки `cae7db6fa60a526f9d2a79678df185b477cd0717`.
+- **APK:** тестовый debug-артефакт `CORTEX-test-debug-146`, GitHub Actions run `43959855136`, ZIP артефакт `14274190711`. **Не является подписанным публичным APK**. UI на физическом устройстве не проверен.
+- **Vercel production:** проект `mobile-framework-dev`, домен `cortexapp.ru`, deployment `dpl_uf52Do9kUru568A2SttwLYGKw74h`, **READY**, SHA `05a1810`. Авторизованный GET `https://cortexapp.ru` вернул HTTP 200. В проверенном диапазоне runtime errors нет.
+- **Supabase:** Edge `cortex` остался **ACTIVE v44**, не перезаписывался. GitHub-copy устарела относительно runtime; миграции не применялись.
+- **Координация:** PR #46, #47, #48 закрыты с комментариями об интеграции. Следующим агентам работать от текущего `main` и сверять live Supabase. PR #41 остаётся конфликтующим и не интегрирован.
+- **Следующий шаг:** подтвердить отображение Android на тестовом устройстве; после подтверждения отдельно инициировать подписанный beta release через проверенный ключ. Не объявлять публичную APK доступной раньше времени.
+
 ## 2026-11-17: единый проверяемый релиз CORTEX, без смены backend
 
 - **Агент / задача:** собрать в одной ветке актуальные изменения островка и Android-защиты после сообщения пользователя о перепутанном интерфейсе.
