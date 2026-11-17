@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 
 export default function AuthCallback() {
+  const router = useRouter();
   const [state, setState] = useState<"loading" | "done" | "error">("loading");
 
   useEffect(() => {
@@ -33,10 +35,13 @@ export default function AuthCallback() {
         if (active) {
           setState("done");
           if (typeof BroadcastChannel !== "undefined") {
-            const channel = new BroadcastChannel("cortex-email-confirmed");
-            channel.postMessage({ confirmed: true });
-            channel.close();
+            try {
+              const channel = new BroadcastChannel("cortex-email-confirmed");
+              channel.postMessage({ confirmed: true });
+              channel.close();
+            } catch { /* Confirmation succeeded; cross-tab notification is optional. */ }
           }
+          router.replace("/account");
         }
       } catch {
         if (active) setState("error");
@@ -44,7 +49,7 @@ export default function AuthCallback() {
     }
     void complete();
     return () => { active = false; };
-  }, []);
+  }, [router]);
 
   return (
     <main className="simple-page">
@@ -52,9 +57,9 @@ export default function AuthCallback() {
       <p>{state === "loading"
         ? "Подождите несколько секунд."
         : state === "done"
-          ? "Регистрация завершена. Вернитесь к исходной вкладке: она обновится автоматически. Мы зарезервировали 5 000 ИИ-токенов к запуску беты 20 ноября."
+          ? "Регистрация завершена. Открываем личный кабинет CORTEX."
           : "Возможно, ссылка истекла или регистрация пока недоступна. Попробуйте ещё раз на странице регистрации."}</p>
-      <p><Link href={state === "error" ? "/register" : "/"}>{state === "error" ? "Повторить регистрацию" : "На главную"}</Link></p>
+      <p><Link href={state === "error" ? "/register" : "/account"}>{state === "error" ? "Повторить регистрацию" : "В личный кабинет"}</Link></p>
     </main>
   );
 }

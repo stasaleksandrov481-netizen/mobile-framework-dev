@@ -1,4 +1,5 @@
 import DownloadCTA from "@/components/DownloadCTA";
+import LandingAccountGate from "@/components/LandingAccountGate";
 import RegistrationCta from "@/components/RegistrationCta";
 import UiIcon from "@/components/UiIcon";
 import { safeHttpsDownloadUrl } from "@/lib/safe-url";
@@ -8,6 +9,7 @@ const downloadUrl = safeHttpsDownloadUrl(process.env.NEXT_PUBLIC_CORTEX_ANDROID_
 
 export default function Home() {
   return (
+    <LandingAccountGate>
     <div className="shell">
       <header className="site-header">
         <a className="brand" href="/" aria-label="CORTEX — на главную">
@@ -48,5 +50,6 @@ export default function Home() {
         </div>
       </footer>
     </div>
+    </LandingAccountGate>
   );
 }

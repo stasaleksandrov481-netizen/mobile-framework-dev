@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import { registrationIsOpen } from "../lib/registration-gate.ts";
+import { settleWithTimeout } from "../lib/settle-with-timeout.ts";
 import nextConfig from "../next.config.ts";
 
 test("health probes coalesce parallel requests and cache success", async () => {
@@ -37,6 +39,11 @@ test("health probes bound timeout and cache failures", async () => {
 test("health probes suppress upstream errors", async () => {
   const healthy = createCachedHealthCheck(async () => { throw Error("secret"); });
   assert.equal(await healthy(), false);
+});
+
+test("Slow account API calls time out instead of leaving an infinite spinner", async () => {
+  assert.equal(await settleWithTimeout(Promise.resolve("ok"), 100), "ok");
+  await assert.rejects(settleWithTimeout(new Promise(() => {}), 25), /CORTEX_REQUEST_TIMEOUT/);
 });
 
 test("APK URL only accepts absolute credential-free HTTPS URLs", () => {
@@ -129,4 +136,14 @@ test("Security headers restrict third-party origins and prohibit API caching", a
   assert.equal(common["Cross-Origin-Resource-Policy"], "same-origin");
   assert.equal(api["Cache-Control"], "no-store");
   assert.equal(api["X-Robots-Tag"], "noindex, nofollow");
+});
+
+test("Account quota RPC never accepts arbitrary user IDs from a browser", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/20261117180500_cortex_web_account_usage.sql", import.meta.url), "utf8");
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /account_id uuid := \(select auth\.uid\(\)\)/);
+  assert.match(sql, /public\.cortex_ai_usage\(account_id::text\)/);
+  assert.match(sql, /revoke all on function public\.cortex_web_account_usage\(\) from public, anon, authenticated/i);
+  assert.match(sql, /grant execute on function public\.cortex_web_account_usage\(\) to authenticated/i);
+  assert.ok(!/cortex_web_account_usage\(p_subject/i.test(sql));
 });

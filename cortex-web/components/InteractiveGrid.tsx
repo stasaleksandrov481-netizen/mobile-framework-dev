@@ -14,7 +14,7 @@ export default function InteractiveGrid() {
     const ctx = canvas?.getContext("2d", { alpha: false, desynchronized: true });
     if (!canvas || !panel || !ctx) return;
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     const pointer = { x: 0, y: 0 };
     const target = { x: 0, y: 0 };
     let width = 0;
@@ -179,15 +179,16 @@ export default function InteractiveGrid() {
       else schedule();
     };
     const onScroll = () => { bounds = panel.getBoundingClientRect(); };
-    const observer = new IntersectionObserver(([entry]) => {
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(([entry]) => {
       inView = entry.isIntersecting;
       if (!inView && frame) { cancelAnimationFrame(frame); frame = 0; }
       if (inView) schedule();
     }, { threshold: .01 });
-    const resizeObserver = new ResizeObserver(resize);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
 
-    resizeObserver.observe(panel);
-    observer.observe(panel);
+    resizeObserver?.observe(panel);
+    observer?.observe(panel);
+    if (!resizeObserver) window.addEventListener("resize", resize, { passive: true });
     panel.addEventListener("pointermove", onPointerMove);
     panel.addEventListener("pointerdown", onPointerDown);
     panel.addEventListener("pointerleave", onLeave);
@@ -198,8 +199,9 @@ export default function InteractiveGrid() {
     return () => {
       active = false;
       if (frame) cancelAnimationFrame(frame);
-      resizeObserver.disconnect();
-      observer.disconnect();
+      resizeObserver?.disconnect();
+      observer?.disconnect();
+      if (!resizeObserver) window.removeEventListener("resize", resize);
       panel.removeEventListener("pointermove", onPointerMove);
       panel.removeEventListener("pointerdown", onPointerDown);
       panel.removeEventListener("pointerleave", onLeave);
