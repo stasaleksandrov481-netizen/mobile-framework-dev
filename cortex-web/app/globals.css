@@ -1,5 +1,9 @@
 @import "@fontsource-variable/onest/wght.css";
 
+/* Shared loading screen for member-only navigation from the public landing. */
+.account-gate { min-height:100svh; display:grid; place-items:center; background:#070707; }
+.account-gate img { display:block; width:53px; height:53px; opacity:.9; }
+
 :root {
   color-scheme: dark;
   --bg: #050505;

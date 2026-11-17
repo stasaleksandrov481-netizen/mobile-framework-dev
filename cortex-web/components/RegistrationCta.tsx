@@ -10,8 +10,8 @@ export default function RegistrationCta({ isOpen }: { isOpen: boolean }) {
     return <span className="button button--secondary registration-checking" role="status" aria-label="Проверяем вход">Проверяем аккаунт…</span>;
   }
   if (email) {
-    return <Link className="button button--secondary registration-registered" href="/register" aria-label="Открыть мой аккаунт CORTEX">
-      <UiIcon name="check" size={18} /> Аккаунт активен <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+    return <Link className="button button--secondary registration-registered" href="/account" aria-label="Открыть личный кабинет CORTEX">
+      <UiIcon name="check" size={18} /> Личный кабинет <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
     </Link>;
   }
   if (!isOpen) return <span className="button button--primary button--disabled">Регистрация скоро</span>;

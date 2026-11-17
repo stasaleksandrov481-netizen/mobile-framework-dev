@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
@@ -14,6 +15,7 @@ type SuccessKind = "signup" | "signin" | "existing";
 const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
 
 export function RegistrationForm() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -50,6 +52,12 @@ export function RegistrationForm() {
     setSuccessKind((kind) => kind === "signup" || kind === "signin" ? kind : "existing");
     setMode("done");
   }, [accountChecking, activeEmail]);
+
+  useEffect(() => {
+    if (mode !== "done") return;
+    const timer = window.setTimeout(() => router.replace("/account"), 700);
+    return () => window.clearTimeout(timer);
+  }, [mode, router]);
 
   useEffect(() => {
     if (resendWait <= 0) return;
@@ -230,7 +238,7 @@ export function RegistrationForm() {
             <strong>{activeEmail || email}</strong>
             <div className="auth-success-status"><UiIcon name="check" size={14} /> Подтверждена</div>
           </div>
-          <Link href="/" className="button button--primary auth-submit">На главную <UiIcon name="arrow-right" size={18} /></Link>
+          <Link href="/account" className="button button--primary auth-submit">Перейти в кабинет <UiIcon name="arrow-right" size={18} /></Link>
           <button className="auth-success-logout" type="button" disabled={busy} onClick={() => void signOut()}>Выйти или сменить аккаунт</button>
           {error && <p role="alert" className="form-error">{error}</p>}
         </div>

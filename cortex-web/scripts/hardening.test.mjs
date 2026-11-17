@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
@@ -129,4 +130,14 @@ test("Security headers restrict third-party origins and prohibit API caching", a
   assert.equal(common["Cross-Origin-Resource-Policy"], "same-origin");
   assert.equal(api["Cache-Control"], "no-store");
   assert.equal(api["X-Robots-Tag"], "noindex, nofollow");
+});
+
+test("Account quota RPC never accepts arbitrary user IDs from a browser", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/20261117180500_cortex_web_account_usage.sql", import.meta.url), "utf8");
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /account_id uuid := \(select auth\.uid\(\)\)/);
+  assert.match(sql, /public\.cortex_ai_usage\(account_id::text\)/);
+  assert.match(sql, /revoke all on function public\.cortex_web_account_usage\(\) from public, anon, authenticated/i);
+  assert.match(sql, /grant execute on function public\.cortex_web_account_usage\(\) to authenticated/i);
+  assert.ok(!/cortex_web_account_usage\(p_subject/i.test(sql));
 });
