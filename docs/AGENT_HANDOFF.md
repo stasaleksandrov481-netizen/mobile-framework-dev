@@ -16,6 +16,17 @@
 
 ---
 
+## 2026-11-17: PR #54 объединён, Edge v45 опубликован и проверен
+
+- **Агент / задача:** завершить три security-правки из PR #54, подтвердить реальные статусы в GitHub/Vercel/Supabase.
+- **Репозиторий:** PR [#54](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/54) слит в `main` squash SHA `60f5b91ed56034cbcd278181faee636cdc44b0de`; UI сайта/Android не менялся. Полный список файлов и ограничений: `docs/SECURITY_THREE_FIXES_20261117.md`.
+- **CI:** Edge regression **50/50**, billing **6/6**, Android build/unit/web/tests, CodeQL и AI Handoff Gate **success** на PR head SHA `ee3afe928bdbe2a4e4e14f5006648d6ff29a6a94`. Debug APK собрана в Actions run `44031608642`, **не является подписанной публичной версией**.
+- **Supabase production:** Edge Function `cortex` обновлена с **v44 до ACTIVE v45**. Deployment `ezbr_sha256=5e5e9ddedaa9a544fac1f820730bffabeb71047544de99133e4f1788920d9403`. После деплоя повторно прочитаны 11 файлов, все совпадают с `main` (10 файлов из v44 неизменны; в `handler.ts` только доверенный IP-бакет). `verify_jwt=false` сохранён согласно текущему собственному auth handler. Предыдущее содержимое v44 было проверено и может служить исходником отката.
+- **SQL production:** **НЕ применялась** новая исходная baseline миграция `20261117080100_cortex_device_identity_baseline.sql`: таблицы, RLS, grants и RPC уже есть и работают в текущей БД. Базу не перезаписывали; на свежем развёртывании миграцию нужно применить в штатном порядке.
+- **Vercel production:** READY deployment `dpl_4cfAXSvfyyyQ37yBDfpswe4xR448`, ref `main`, SHA `60f5b91`, проект `mobile-framework-dev`. Предыдущее рабочее развёртывание `dpl_2nA3ZV9LgTPLXYgKSQK6YfH6yYsu` (SHA `d0d1932`) — кандидат отката.
+- **Ограничения:** прямой GET smoke-test внешним инструментом недоступен, но ACTIVE и исходники функции подтверждены через Supabase API; не писать, что публичный E2E выполнен. Android release signer guard — только локальный механизм, аппаратной attestation нет; APK и правильный UI не согласованы. Managed Vercel WAF `gen/rce/sqli/xss` в `log`, без анализа трафика не блокировать.
+- **Следующему агенту:** начинать от `main` SHA `60f5b91`, Supabase **v45**. Не деплоить устаревшую v44, не публиковать APK до сверки дизайна. Для полноценной верификации Android потребуется доверенная цепочка hardware key attestation, одноразовые вызовы и тесты на реальных устройствах; перед включением WAF block — проверить лог и ручной publish владельца.
+
 ## 2026-11-17: три усиления безопасности (ветка, до CI/деплоя)
 
 - **Агент / задача:** контроль официальной подписи Android release APK, защита IP-бакетов прямого Supabase Edge, фиксация приватного device RPC в SQL-миграции.
