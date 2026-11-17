@@ -130,6 +130,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         // The production RPC returns an account subject or stable, hashed guest subject.
         return Response.json({ subject: body.p_account || "guest_" + body.p_install,
           account_required: false, other_account_on_device: false });
+      case "/rest/v1/rpc/cortex_record_launch": return Response.json(null);
       case "/rest/v1/rpc/cortex_claim_guest": return Response.json(true);
       case "/rest/v1/rpc/cortex_ai_claim_early_bonus": return Response.json(true);
       case "/rest/v1/rpc/cortex_redis_config": return Response.json(null);
