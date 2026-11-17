@@ -8,7 +8,7 @@
 | Vercel production | `mobile-framework-dev` / `cortexapp.ru`; production deployment `dpl_uf52Do9kUru568A2SttwLYGKw74h` **READY**, ref `main`, SHA `05a1810`; авторизованный сайт HTTP 200 | Это **сайт**, не доказательство правильности Android APK |
 | Android в `main` | `app/build.gradle.kts`: `versionName=1.0.14`, `versionCode=114` | Пользователь 17.11 сообщил о неверном интерфейсе. Одобренную сборку/ветку ещё надо установить |
 | Android альтернативы | `release/cortex-1.0.14-20261116`, `fix/cortex-beta-ui-singleflight-20261116`, `audit/beta-stability-20261116` и исторические UI-ветки | Они могут **расходиться с `main`**; не считать ни одну верной без сверки с используемым APK |
-| Supabase production | Edge Function `cortex`, версия **44**, проект `jjcqrjztxohnifmziksy` | Файлы живой функции отличаются от `supabase/functions/cortex/` в GitHub; среди дополнительных файлов `settings.ts` |
+| Supabase production | Edge Function `cortex`, версия **44**, проект `jjcqrjztxohnifmziksy` | PR #52 переносит все 11 живых файлов; перед любым новым деплоем перепроверить runtime version, а SQL-миграция для identity ещё не зафиксирована |
 | AI device identity | Живая Edge Function использует `rpc/cortex_ai_device_identity` и принимает `X-Cortex-Device` | Функция RPC существует в production; старые Android-вызовы отправляют заголовок лишь на `presence`, а бесплатные AI-вызовы могут возвращать 426 |
 | Security PR | [#47](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/47), `security/stable-guest-device-quota-20261117` | Android-правка объединена с PR #46 и #48 в [PR #49](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/49), слита в `main` SHA `05a1810` без серверного кода |
 
@@ -24,15 +24,15 @@
 
 ## В чём расхождение
 
-В `main` хранится старый `supabase/functions/cortex/handler.ts`, тогда как production v44 уже реализует отдельную таблицу/функцию связки установки и устройства, требует `X-Cortex-Device` на бесплатных ИИ-запросах и содержит серверные возможности, которых в git-копии нет. Деплой старого GitHub handler способен **откатить защиту, настройки и API-контракты**.
+**До PR #52** в `main` хранился старый `handler.ts`, а production v44 уже требовал `X-Cortex-Device` и поддерживал изменение настроек. PR #52 переносит 11 файлов с побайтовой проверкой, но не применяется к живой Edge Function. Состояние может вновь разойтись, если другой агент обновит Supabase вне GitHub. Отдельно остаётся несверенная SQL-миграция `cortex_ai_device_identity`. Деплой из устаревшей копии способен **откатить защиту и контракты API**.
 
 ## Порядок разрешения
 
 1. Прочитать текущее `AGENTS.md`, этот инвентарь и `docs/AGENT_HANDOFF.md`.
 2. Проверить свежие GitHub refs, Vercel production SHA и Supabase Edge версию; обнаружить изменённые с момента снимка компоненты.
 3. Получить от пользователя однозначную привязку: **скриншот/имя последнего правильного APK + versionCode / SHA**, прежде чем менять UI или распространять Android.
-4. Сделать отдельный PR на **синхронизацию GitHub Edge-кода с production v44** и полный test-suite; сверить все файлы и миграции, не заливать обратно старые.
-5. После синхронизации разрабатывать серверные изменения только на утверждённой базе, не вручную параллельно в production и GitHub.
+4. Проверить [PR #52](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/52) и Edge test-suite (49 Edge + 6 billing). Исходники 11 файлов v44 синхронизированы, но SQL-модель и миграции ещё необходимо сверить. Не заливать обратно старые версии.
+5. После слияния PR #52 разрабатывать серверные изменения только на актуальной утверждённой базе, не вручную параллельно в production и GitHub.
 6. В PR перед релизом документировать тесты, rollback, изменения квот и то, затрагивает ли новая сборка интерфейс.
 
 ## Работа с ветками
