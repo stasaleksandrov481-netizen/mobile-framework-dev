@@ -13,7 +13,9 @@ export default function LandingAccountGate({ children }: { children: React.React
     if (!checking && email) router.replace("/account");
   }, [checking, email, router]);
 
-  if (checking || email) return (
+  // Keep the public landing in the server-rendered HTML for crawlers and guests.
+  // Once Auth verifies a member, replace it with the transition screen.
+  if (!checking && email) return (
     <div className="account-gate" role="status" aria-label="Открываем CORTEX">
       <img src="/cortex-mark.svg" width="53" height="53" alt="CORTEX" />
     </div>
