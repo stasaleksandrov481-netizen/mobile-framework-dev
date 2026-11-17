@@ -24,6 +24,16 @@ export function RegistrationForm() {
   const [wasSignin, setWasSignin] = useState(false);
   const [resendWait, setResendWait] = useState(0);
 
+  async function requireVerifiedSession(address: string) {
+    // The UI must never treat an Auth API response or an older cached session
+    // as proof that THIS email has just authenticated successfully.
+    const { data: { user }, error: sessionError } = await cortexAuth.auth.getUser();
+    if (sessionError || !user?.id || !user.email_confirmed_at ||
+        user.email?.toLowerCase() !== address.trim().toLowerCase()) {
+      throw new Error("Не удалось подтвердить вход. Повторите попытку с правильными данными.");
+    }
+  }
+
   useEffect(() => {
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (requestedMode === "signin") setMode("signin");
@@ -106,6 +116,7 @@ export function RegistrationForm() {
         });
         if (signupError) throw signupError;
         if (data.session) {
+          await requireVerifiedSession(email);
           await savePreregistration(notify);
           setWasSignin(false);
           setMode("done");
@@ -115,11 +126,12 @@ export function RegistrationForm() {
         }
         setPassword("");
       } else if (mode === "verify") {
-        if (!/^\d{6}$/.test(code)) throw new Error("Введите шестизначный код из письма.");
+        if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
         const { error: verifyError } = await cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
         });
         if (verifyError) throw verifyError;
+        await requireVerifiedSession(email);
         await savePreregistration(notify);
         setWasSignin(false);
         setMode("done");
@@ -134,11 +146,12 @@ export function RegistrationForm() {
         setResendWait(60);
         setMode("signin_code_verify");
       } else if (mode === "signin_code_verify") {
-        if (!/^\d{6}$/.test(code)) throw new Error("Введите шестизначный код из письма.");
+        if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
         const { error: verifyError } = await cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code, type: "email",
         });
         if (verifyError) throw verifyError;
+        await requireVerifiedSession(email);
         setWasSignin(true);
         setMode("done");
       } else if (mode === "signin") {
@@ -146,6 +159,7 @@ export function RegistrationForm() {
           email: email.trim().toLowerCase(), password,
         });
         if (signinError) throw signinError;
+        await requireVerifiedSession(email);
         // Signing in must not silently overwrite previously granted notification consent.
         setPassword("");
         setWasSignin(true);
@@ -188,10 +202,10 @@ export function RegistrationForm() {
             ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
             : mode === "verify"
               ? emailOtpReady
-                ? "Мы отправили шестизначный код. Введи его из письма, чтобы завершить регистрацию."
+                ? "Мы отправили восьмизначный код. Введи его из письма, чтобы завершить регистрацию."
                 : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
             : mode === "signin_code_verify"
-              ? "Мы отправили шестизначный код. Введи его из письма, чтобы продолжить."
+              ? "Мы отправили восьмизначный код. Введи его из письма, чтобы продолжить."
               : mode === "signin_code"
                 ? "Войди без пароля. Отправим одноразовый код на твою почту."
               : "Войди в свой аккаунт CORTEX."}</p>
