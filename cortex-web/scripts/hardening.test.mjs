@@ -61,6 +61,8 @@ test("Auth errors cannot leak raw database, SMTP or account-enumeration details"
   assert.equal(isRateLimited(Object.assign(new Error("temporary"), { status: 429 })), true);
   assert.match(safeAuthErrorMessage(Object.assign(new Error("Too many requests"), { status: 429 })), /Слишком много/);
   assert.equal(safeAuthErrorMessage(new Error("Invalid login credentials")), "Неверная почта или пароль.");
+  assert.match(safeAuthErrorMessage(new Error("Token has expired")), /запросите новый код/);
+  assert.match(safeAuthErrorMessage(new Error('gomail: could not send email: 550 non-local recipient verification failed')), /Почтовый сервер/);
 });
 
 test("Co-operators load from server config, seller is operator B, and incomplete data fails closed", () => {

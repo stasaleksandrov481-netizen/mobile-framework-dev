@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
 import { isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
+import { useCortexAccount } from "@/lib/use-cortex-account";
 
 type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
+type SuccessKind = "signup" | "signin" | "existing";
 const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
 
 export function RegistrationForm() {
@@ -21,8 +23,10 @@ export function RegistrationForm() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [wasSignin, setWasSignin] = useState(false);
+  const [successKind, setSuccessKind] = useState<SuccessKind>("existing");
   const [resendWait, setResendWait] = useState(0);
+  const { checking: accountChecking, email: activeEmail } = useCortexAccount();
+  const authSubmission = useRef(false);
 
   async function requireVerifiedSession(address: string) {
     // The UI must never treat an Auth API response or an older cached session
@@ -41,6 +45,13 @@ export function RegistrationForm() {
   }, []);
 
   useEffect(() => {
+    if (accountChecking || !activeEmail || authSubmission.current) return;
+    setEmail(activeEmail);
+    setSuccessKind((kind) => kind === "signup" || kind === "signin" ? kind : "existing");
+    setMode("done");
+  }, [accountChecking, activeEmail]);
+
+  useEffect(() => {
     if (resendWait <= 0) return;
     const timer = window.setTimeout(() => setResendWait((n) => Math.max(0, n - 1)), 1000);
     return () => window.clearTimeout(timer);
@@ -53,7 +64,7 @@ export function RegistrationForm() {
       try {
         const { data: { user } } = await cortexAuth.auth.getUser();
         if (active && user?.email?.toLowerCase() === email.trim().toLowerCase() && user.email_confirmed_at) {
-          setWasSignin(false);
+          setSuccessKind("signup");
           setMode("done");
         }
       } catch { /* Retry once the user returns to this tab. */ }
@@ -92,6 +103,7 @@ export function RegistrationForm() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
+    authSubmission.current = true;
     setBusy(true);
     setError("");
     try {
@@ -118,7 +130,7 @@ export function RegistrationForm() {
         if (data.session) {
           await requireVerifiedSession(email);
           await savePreregistration(notify);
-          setWasSignin(false);
+          setSuccessKind("signup");
           setMode("done");
         } else {
           setResendWait(60);
@@ -126,14 +138,16 @@ export function RegistrationForm() {
         }
         setPassword("");
       } else if (mode === "verify") {
-        if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
-        const { error: verifyError } = await cortexAuth.auth.verifyOtp({
-          email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
-        });
-        if (verifyError) throw verifyError;
+        if (activeEmail !== email.trim().toLowerCase()) {
+          if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
+          const { error: verifyError } = await cortexAuth.auth.verifyOtp({
+            email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
+          });
+          if (verifyError) throw verifyError;
+        }
         await requireVerifiedSession(email);
         await savePreregistration(notify);
-        setWasSignin(false);
+        setSuccessKind("signup");
         setMode("done");
       } else if (mode === "signin_code") {
         if (!emailOtpReady) throw new Error("Вход по коду пока не подключён.");
@@ -152,7 +166,7 @@ export function RegistrationForm() {
         });
         if (verifyError) throw verifyError;
         await requireVerifiedSession(email);
-        setWasSignin(true);
+        setSuccessKind("signin");
         setMode("done");
       } else if (mode === "signin") {
         const { error: signinError } = await cortexAuth.auth.signInWithPassword({
@@ -162,7 +176,7 @@ export function RegistrationForm() {
         await requireVerifiedSession(email);
         // Signing in must not silently overwrite previously granted notification consent.
         setPassword("");
-        setWasSignin(true);
+        setSuccessKind("signin");
         setMode("done");
       }
     } catch (failure) {
@@ -171,6 +185,7 @@ export function RegistrationForm() {
       }
       setError(safeAuthErrorMessage(failure));
     } finally {
+      authSubmission.current = false;
       setBusy(false);
     }
   }
@@ -183,17 +198,41 @@ export function RegistrationForm() {
     setMode(next);
   }
 
+  async function signOut() {
+    setBusy(true);
+    setError("");
+    try {
+      const { error: signOutError } = await cortexAuth.auth.signOut({ scope: "local" });
+      if (signOutError) throw signOutError;
+      setSuccessKind("existing");
+      setEmail("");
+      switchMode("signin");
+    } catch (failure) {
+      setError(safeAuthErrorMessage(failure));
+    } finally { setBusy(false); }
+  }
+
   return (
     <section className="auth-form-area" aria-labelledby="auth-title">
       <div className="auth-kicker"><span className="auth-kicker-dot" /> CORTEX · РАННИЙ ДОСТУП</div>
-      {mode === "done" ? (
+      {accountChecking ? (
+        <div className="auth-checking" role="status">Проверяем аккаунт…</div>
+      ) : mode === "done" ? (
         <div className="auth-success" role="status">
-          <div className="auth-success-mark"><UiIcon name="check" size={28} /></div>
-          <h1 id="auth-title">{wasSignin ? "С возвращением." : "Ты в списке."}</h1>
-          <p>{wasSignin
-            ? "Ты вошёл в свой аккаунт CORTEX. Открытая бета начнётся 20 ноября."
-            : "Почта подтверждена. Мы зарезервировали 5 000 бонусных ИИ-токенов к запуску беты."}</p>
+          <div className="auth-success-mark"><UiIcon name="check" size={27} /></div>
+          <p className="auth-success-kicker">АККАУНТ ПОДТВЕРЖДЁН</p>
+          <h1 id="auth-title">{successKind === "signup" ? "Всё готово." : successKind === "signin" ? "С возвращением." : "Вы уже с нами."}</h1>
+          <p className="auth-success-description">{successKind === "signup"
+            ? "Почта подтверждена. Аккаунт готов к открытой бете CORTEX 20 ноября."
+            : "Вы вошли в CORTEX. Повторно регистрироваться не нужно."}</p>
+          <div className="auth-success-details">
+            <span>ЭЛЕКТРОННАЯ ПОЧТА</span>
+            <strong>{activeEmail || email}</strong>
+            <div className="auth-success-status"><UiIcon name="check" size={14} /> Подтверждена</div>
+          </div>
           <Link href="/" className="button button--primary auth-submit">На главную <UiIcon name="arrow-right" size={18} /></Link>
+          <button className="auth-success-logout" type="button" disabled={busy} onClick={() => void signOut()}>Выйти или сменить аккаунт</button>
+          {error && <p role="alert" className="form-error">{error}</p>}
         </div>
       ) : (
         <>
@@ -202,7 +241,7 @@ export function RegistrationForm() {
             ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
             : mode === "verify"
               ? emailOtpReady
-                ? "Мы отправили восьмизначный код. Введи его из письма, чтобы завершить регистрацию."
+                ? "Мы отправили восьмизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
                 : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
             : mode === "signin_code_verify"
               ? "Мы отправили восьмизначный код. Введи его из письма, чтобы продолжить."
@@ -220,6 +259,7 @@ export function RegistrationForm() {
               <>
                 <label htmlFor="registration-code">Код из письма</label>
                 <OtpCodeInput value={code} onChange={setCode} disabled={busy} />
+                <p className="auth-otp-hint">Можно спокойно вводить код: отсчёт ниже касается только повторной отправки. Если код истёк, запросите новый и используйте последнее письмо.</p>
                 <button className="auth-resend" type="button" onClick={resendCode} disabled={busy || resendWait > 0}>
                   {resendWait > 0 ? `Отправить ещё раз через ${resendWait} с` : "Отправить код повторно"}
                 </button>
@@ -265,8 +305,9 @@ export function RegistrationForm() {
 
           <div className="auth-switch">
             {mode === "signup" ? <>Уже есть аккаунт? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
-              : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
-                : <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
+              : mode === "verify" ? <>Аккаунт уже есть? <button type="button" onClick={() => switchMode("signin")}>Войти</button> <button type="button" onClick={() => switchMode("signup")}>Другой адрес</button></>
+                : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
+                  : <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></>}
           </div>
           {emailOtpReady && (mode === "signin" || mode === "signin_code") && (
             <button type="button" className="auth-code-switch" onClick={() => switchMode(mode === "signin" ? "signin_code" : "signin")}>
