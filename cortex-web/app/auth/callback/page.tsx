@@ -35,9 +35,11 @@ export default function AuthCallback() {
         if (active) {
           setState("done");
           if (typeof BroadcastChannel !== "undefined") {
-            const channel = new BroadcastChannel("cortex-email-confirmed");
-            channel.postMessage({ confirmed: true });
-            channel.close();
+            try {
+              const channel = new BroadcastChannel("cortex-email-confirmed");
+              channel.postMessage({ confirmed: true });
+              channel.close();
+            } catch { /* Confirmation succeeded; cross-tab notification is optional. */ }
           }
           router.replace("/account");
         }

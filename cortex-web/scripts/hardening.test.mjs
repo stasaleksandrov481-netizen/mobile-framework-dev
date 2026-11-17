@@ -6,6 +6,7 @@ import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import { registrationIsOpen } from "../lib/registration-gate.ts";
+import { settleWithTimeout } from "../lib/settle-with-timeout.ts";
 import nextConfig from "../next.config.ts";
 
 test("health probes coalesce parallel requests and cache success", async () => {
@@ -38,6 +39,11 @@ test("health probes bound timeout and cache failures", async () => {
 test("health probes suppress upstream errors", async () => {
   const healthy = createCachedHealthCheck(async () => { throw Error("secret"); });
   assert.equal(await healthy(), false);
+});
+
+test("Slow account API calls time out instead of leaving an infinite spinner", async () => {
+  assert.equal(await settleWithTimeout(Promise.resolve("ok"), 100), "ok");
+  await assert.rejects(settleWithTimeout(new Promise(() => {}), 25), /CORTEX_REQUEST_TIMEOUT/);
 });
 
 test("APK URL only accepts absolute credential-free HTTPS URLs", () => {

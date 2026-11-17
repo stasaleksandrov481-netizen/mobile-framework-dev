@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cortexAuth } from "@/lib/cortex-auth";
+import { settleWithTimeout } from "@/lib/settle-with-timeout";
 
 type AccountState = { checking: boolean; email: string | null };
 
@@ -16,7 +17,7 @@ export function useCortexAccount(): AccountState {
     const refresh = async () => {
       const requestId = ++generation;
       try {
-        const { data: { user }, error } = await cortexAuth.auth.getUser();
+        const { data: { user }, error } = await settleWithTimeout(cortexAuth.auth.getUser(), 9_000);
         if (!active || generation !== requestId) return;
         setState({
           checking: false,

@@ -77,7 +77,10 @@ export function RegistrationForm() {
         }
       } catch { /* Retry once the user returns to this tab. */ }
     };
-    const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("cortex-email-confirmed");
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== "undefined") channel = new BroadcastChannel("cortex-email-confirmed");
+    } catch { /* Some private browsing modes disable cross-tab channels. */ }
     const onMessage = () => { void confirmed(); };
     const onVisible = () => { if (!document.hidden) void confirmed(); };
     channel?.addEventListener("message", onMessage);

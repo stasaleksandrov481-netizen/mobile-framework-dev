@@ -1,9 +1,9 @@
 /* Account workspace: deliberately isolated from the marketing and auth pages. */
-.account-gate { min-height: 100svh; display:grid; place-items:center; background:#070707; }
+.account-gate { min-height: 100vh; min-height: 100svh; display:grid; place-items:center; background:#070707; }
 .account-gate img { display:block; opacity:.9; animation:account-enter .7s ease-out both; }
 @keyframes account-enter { from { opacity:0; transform:scale(.94) } to { opacity:.9; transform:scale(1) } }
-.account-shell { min-height:100svh; background:#090909; color:#f3f3f3; display:grid; grid-template-columns:248px minmax(0,1fr); }
-.account-sidebar { display:flex; flex-direction:column; padding:32px 19px 21px; border-right:1px solid #252525; min-height:100svh; background:#0c0c0c; position:sticky; top:0; height:100svh; }
+.account-shell { min-height:100vh; min-height:100svh; background:#090909; color:#f3f3f3; display:grid; grid-template-columns:248px minmax(0,1fr); }
+.account-sidebar { display:flex; flex-direction:column; padding:32px 19px 21px; border-right:1px solid #252525; min-height:100vh; min-height:100svh; background:#0c0c0c; position:sticky; top:0; height:100vh; height:100svh; }
 .account-brand { display:inline-flex; align-items:center; gap:12px; width:max-content; padding:0 10px; color:#fff; font-size:18px; letter-spacing:.14em; font-weight:800; }
 .account-sidebar-section { margin:73px 11px 17px; color:#777; font-size:10px; letter-spacing:.11em; font-weight:690; }
 .account-nav { display:flex; flex-direction:column; gap:5px; }
@@ -26,7 +26,13 @@
 .account-avatar--olive { background:linear-gradient(135deg,#70745b,#30382c); }
 .account-avatar--clay { background:linear-gradient(135deg,#a07663,#513932); }
 .account-avatar--plum { background:linear-gradient(135deg,#857184,#423749); }
-.account-content { display:flex; flex-direction:column; min-width:0; min-height:100svh; }
+.account-content { display:flex; flex-direction:column; min-width:0; min-height:100vh; min-height:100svh; }
+.account-unavailable { display:flex; min-height:100vh; min-height:100svh; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:30px; text-align:center; background:#090909; }
+.account-unavailable h1 { font-size:clamp(25px,5vw,36px); font-weight:700; letter-spacing:-.04em; }
+.account-unavailable p { max-width:480px; font-size:13px; line-height:1.65; color:#aaa; }
+.account-unavailable button { margin-top:13px; min-height:43px; padding:0 23px; background:#efefef; border:0; border-radius:10px; color:#111; font-weight:690; font-size:12px; }
+.account-unavailable a { font-size:12px; color:#999; }
+.account-unavailable a:hover { color:#fff; }
 .account-topbar { min-height:75px; border-bottom:1px solid #252525; padding:0 clamp(24px,4vw,68px); display:flex; align-items:center; justify-content:space-between; gap:20px; font-size:12px; color:#a4a4a4; }
 .account-topbar-status { display:flex; align-items:center; gap:10px; font-size:11px; color:#bdbdbd; }
 .account-status-dot { display:block; width:7px; height:7px; border-radius:50%; background:#c7d8bd; box-shadow:0 0 12px #7b8f70aa; }

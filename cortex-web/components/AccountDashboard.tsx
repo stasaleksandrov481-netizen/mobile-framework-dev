@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { cortexAuth } from "@/lib/cortex-auth";
+import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import UiIcon from "@/components/UiIcon";
 
 type Panel = "overview" | "profile";
@@ -72,6 +73,8 @@ export function AccountDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(true);
+  const [authCheckError, setAuthCheckError] = useState("");
+  const [authRetry, setAuthRetry] = useState(0);
   const [panel, setPanel] = useState<Panel>("overview");
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
@@ -88,12 +91,12 @@ export function AccountDashboard() {
     setLoadingData(true);
     setDataError("");
     try {
-      const [reservationResponse, quotaResponse] = await Promise.all([
+      const [reservationResponse, quotaResponse] = await settleWithTimeout(Promise.all([
         cortexAuth.from("cortex_preregistrations")
           .select("bonus_tokens,bonus_spent,bonus_granted_at,registered_at,notify_opt_in")
           .eq("user_id", accountId).maybeSingle(),
         cortexAuth.rpc("cortex_web_account_usage"),
-      ]);
+      ]), 10_000);
       // A failed API query is not the same as a zero balance.
       setReservation(!reservationResponse.error && validReservation(reservationResponse.data) ? reservationResponse.data : null);
       setQuota(!quotaResponse.error && validQuota(quotaResponse.data) ? quotaResponse.data : null);
@@ -111,9 +114,16 @@ export function AccountDashboard() {
     let active = true;
     const boot = async () => {
       try {
-        const { data: { user: current }, error } = await cortexAuth.auth.getUser();
+        const { data: { user: current }, error } = await settleWithTimeout(cortexAuth.auth.getUser(), 9_000);
         if (!active) return;
-        if (error || !current?.id || !current.email || !current.email_confirmed_at) {
+        if (error) {
+          if (error.name !== "AuthSessionMissingError") {
+            setAuthCheckError("Не удалось проверить аккаунт. Проверь соединение и попробуй ещё раз.");
+            setChecking(false);
+            return;
+          }
+        }
+        if (!current?.id || !current.email || !current.email_confirmed_at) {
           router.replace("/register?mode=signin");
           return;
         }
@@ -123,7 +133,10 @@ export function AccountDashboard() {
         setChecking(false);
         void refreshData(current.id);
       } catch {
-        if (active) router.replace("/register?mode=signin");
+        if (active) {
+          setAuthCheckError("Сервер долго не отвечает. Попробуй обновить проверку аккаунта.");
+          setChecking(false);
+        }
       }
     };
     void boot();
@@ -131,7 +144,7 @@ export function AccountDashboard() {
       if (event === "SIGNED_OUT") router.replace("/register?mode=signin");
     });
     return () => { active = false; subscription.unsubscribe(); };
-  }, [router, refreshData]);
+  }, [router, refreshData, authRetry]);
 
   const displayName = useMemo(() => user ? accountName(user) : "", [user]);
   const currentTone = avatarTone(user?.user_metadata?.cortex_avatar_tone);
@@ -184,6 +197,14 @@ export function AccountDashboard() {
   if (checking) return <div className="account-gate" role="status" aria-label="Загружаем личный кабинет">
     <img src="/cortex-mark.svg" width="53" height="53" alt="CORTEX" />
   </div>;
+
+  if (authCheckError) return <main className="account-unavailable">
+    <img src="/cortex-mark.svg" width="47" height="47" alt="CORTEX" />
+    <h1>Не удалось загрузить кабинет.</h1>
+    <p role="alert">{authCheckError}</p>
+    <button type="button" onClick={() => { setAuthCheckError(""); setChecking(true); setAuthRetry(n => n + 1); }}>Повторить</button>
+    <Link href="/register?mode=signin">Вернуться ко входу</Link>
+  </main>;
 
   return (
     <div className="account-shell">
