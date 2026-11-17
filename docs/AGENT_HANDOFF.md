@@ -16,6 +16,16 @@
 
 ---
 
+## 2026-11-17: три усиления безопасности (ветка, до CI/деплоя)
+
+- **Агент / задача:** контроль официальной подписи Android release APK, защита IP-бакетов прямого Supabase Edge, фиксация приватного device RPC в SQL-миграции.
+- **Ветка:** `security/three-hardening-fixes-20261117` от `main` SHA `d0d1932ea7afd3361eabbf510f50cc72a44c8322`. Коммиты в ветке: `f0199f2` (SQL), `c377530` (Edge IP), `aa762c1` (тест), `1135419`, `4300d22`, `c4080b0` (Android), `fc051e3` (уточнение безопасности), `7a6960a` (runbook).
+- **Файлы:** `supabase/migrations/20261117080100_cortex_device_identity_baseline.sql`, `supabase/functions/cortex/handler.ts` и `handler.test.ts`, `app/build.gradle.kts`, `app/src/main/java/app/cortex/assistant/CortexApkIntegrity.kt`, `CortexServerBridge.kt`, `docs/SECURITY_THREE_FIXES_20261117.md`.
+- **Проверки:** контракт тестов Edge + GitHub Actions Android/Web/CodeQL **ожидаются** после открытия PR. SQL-схема сверена read-only по `pg_catalog` в действующем Supabase: первичные ключи, CHECK, RLS, grants, точное определение RPC. Миграция не применялась к production.
+- **Production:** **не менялся** при создании записи: Supabase Edge v44, Vercel READY на `main` SHA `d0d1932`, Android public APK не выпускалась. Managed Vercel WAF `gen/rce/sqli/xss` в `log`; настройку без анализа трафика не публиковать.
+- **Ограничения:** локальный Android signer check не является аппаратной аттестацией, изменённый APK может его обойти; `X-Cortex-Device` остаётся подделываемым. Защищённый IP через Supabase `CF-Connecting-IP` и общий fallback имеют смысл только для hosted ingress. Сначала завершить CI и проверить runtime snapshot перед Edge v45; после любого деплоя обновить здесь SHA/version/deployment ID.
+- **Следующему агенту:** перед дальнейшими Android/UI правками согласовать у владельца SHA одобренного интерфейса; hardware attestation проектировать server-verified и fail-open на время миграции. До включения CRS-blocking проверить ложные срабатывания и получить ручную публикацию владельца.
+
 ## 2026-11-17: итог security-merge и фактического деплоя сайта
 
 - **Агент / задача:** закончить проверенную синхронизацию Edge v44, закрепить CI и передать точный release snapshot.
