@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-11-17: отдельное исключение для публичной веб-регистрации по требованию владельца
+
+- **Агент / задача:** владелец явно потребовал открыть веб-регистрацию всем, осознавая, что локализация персональных данных в РФ ещё не выполнена. Не выдавать техническое открытие за юридическое соответствие.
+- **Основа / ветка:** от `main` `d3e6d4cacb53a8d5c2fc5410744e17a1c6aff102`, `feat/cortex-public-registration-20261117`; отдельный сайт/документация, **не включать Android PR #57 в этот релиз**. Итоговый PR/SHA уточнить после отправки GitHub.
+- **Изменения:** `cortex-web/lib/registration-gate.ts` добавляет обратимый путь только при двух явных production-флагах: `CORTEX_ENABLE_REGISTRATION=true` и `CORTEX_PUBLIC_SIGNUP_EXCEPTION=true`. `CORTEX_RF_DATA_COMPLIANCE_VERIFIED` остаётся ложным/отсутствующим, адреса операторов не выдумываются. Обновлены тест, `tsconfig.json` (импорт `.ts` для Node-тестов), `.env.example`, README, security gate и достоверное описание текущей обработки в `/privacy`.
+- **Проверки / продакшен:** до выпуска тесты/CI и отдельный новый production deployment обязательны. На момент начала работы `cortexapp.ru` открыт публично через `ssoProtection=all_except_custom_domains`, `main` deployment `dpl_3hRmFmcdnr2sSHGSyfgqwRsJhwto` READY; `/api/healthz` 200, `/api/status` 200 `cache: degraded`, `/api/internal/notify-beta` 401. Supabase `jjcqrjztxohnifmziksy` ACTIVE_HEALTHY в `eu-west-1`; auth settings показывают `disable_signup=false`, `mailer_autoconfirm=false`. Код/SQL/Edge Supabase не менять.
+- **Риски / откат / следующий шаг:** требования локализации данных граждан РФ не выполнены; два юридических адреса не настроены; антибот CAPTCHA для прямого Supabase Auth signup не проверена, Redis на сайте не настроен. **Внешняя регистрация через Supabase уже была разрешена**, но UI оставался закрыт. Не заявлять о полной юридической готовности, не подделывать compliance-флаг. Для отката выключить `CORTEX_PUBLIC_SIGNUP_EXCEPTION`, повторно задеплоить сайт и проверить UI. Продолжить миграцию персональных данных в РФ, проверку SMTP/OTP, CAPTCHA, RLS двух аккаунтов и бизнес-лимитов до массовой рекламы.
+
 ## 2026-11-17: AGENTS.md синхронизирован с релизом Edge v45
 
 - **Агент / задача:** устранить устаревшее указание на v44 и «отсутствующую SQL-миграцию» в обязательном корневом `AGENTS.md`, чтобы другой агент не начал с неверного источника.
