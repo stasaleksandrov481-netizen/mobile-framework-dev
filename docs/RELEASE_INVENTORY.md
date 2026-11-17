@@ -1,5 +1,9 @@
 # Инвентаризация релизов CORTEX
 
+## Итог опубликованного security-релиза 17.11.2026
+
+PR #54 слит в `main` SHA `60f5b91`. Vercel READY `dpl_4cfAXSvfyyyQ37yBDfpswe4xR448`. Supabase Edge `cortex` **ACTIVE v45**, 11 опубликованных файлов после выпуска совпали с `main`. Полные проверки PR: 50/50 Edge, 6/6 billing, Android CI, CodeQL, Handoff Gate. Подписанная публичная Android APK **не выпускалась**; SQL baseline добавлена в git, действующая БД не менялась. Блокировка managed WAF не включена из-за отсутствия проверки ложных срабатываний. Прежняя v44 доступна как baseline для восстановления при необходимости.
+
 ## Изолированная security-ветка 17.11.2026 (не production)
 
 `security/three-hardening-fixes-20261117`: исправляет доверие к подставляемому `X-Forwarded-For` в прямом Supabase Edge, добавляет тесты на IP-спуфинг, исходную SQL-миграцию `cortex_ai_device_identity` и локальный контроль release-подписи Android APK. Подробности: [SECURITY_THREE_FIXES_20261117.md](SECURITY_THREE_FIXES_20261117.md).
@@ -11,14 +15,14 @@
 
 | Компонент | Проверенное состояние | Что учитывать |
 | --- | --- | --- |
-| GitHub default | `main`, security PR #52 merge SHA `15cad8ba025587581b12af2749df937a7b84e7ea` | Источник Edge v44 и автоматические API/billing тесты теперь в `main`; перепроверять SHA перед работой |
-| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; deployment `dpl_F7dquhdgkYMXdFkybFVAqH84DzjL` **READY**, ref `main`, SHA `15cad8b` | Сайт собран и назначен домену; ручная проверка UI/APK отсутствует. Rollback `dpl_BJ3FBazwuDZqM1nsYN88fyxgJoMo` |
+| GitHub default | `main`, security PR #54 merge SHA `60f5b91ed56034cbcd278181faee636cdc44b0de` | Источник текущей Edge v45 и миграции device identity; перепроверять SHA перед работой |
+| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; deployment `dpl_4cfAXSvfyyyQ37yBDfpswe4xR448` **READY**, ref `main`, SHA `60f5b91` | Изменения Android UI не публиковались. Rollback `dpl_2nA3ZV9LgTPLXYgKSQK6YfH6yYsu` |
 | Android в `main` | `app/build.gradle.kts`: `versionName=1.0.14`, `versionCode=114` | Пользователь 17.11 сообщил о неверном интерфейсе. Одобренную сборку/ветку ещё надо установить |
 | Android альтернативы | `release/cortex-1.0.14-20261116`, `fix/cortex-beta-ui-singleflight-20261116`, `audit/beta-stability-20261116` и исторические UI-ветки | Они могут **расходиться с `main`**; не считать ни одну верной без сверки с используемым APK |
-| Supabase production | Edge Function `cortex`, **ACTIVE v44**, проект `jjcqrjztxohnifmziksy` | В PR #52 синхронизированы 11 исходных файлов без деплоя Edge; SQL-миграция identity ещё не подтверждена |
+| Supabase production | Edge Function `cortex`, **ACTIVE v45**, проект `jjcqrjztxohnifmziksy` | 11 исходных файлов сверены после деплоя; `handler.ts` не доверяет XFF; SQL baseline в main, но не применялась повторно |
 | AI device identity | Живая Edge Function использует `rpc/cortex_ai_device_identity` и принимает `X-Cortex-Device` | Функция RPC существует в production; старые Android-вызовы отправляют заголовок лишь на `presence`, а бесплатные AI-вызовы могут возвращать 426 |
 | Security PR | [#47](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/47), `security/stable-guest-device-quota-20261117` | Android-правка объединена с PR #46 и #48 в [PR #49](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/49), слита в `main` SHA `05a1810` без серверного кода |
-| Security sync | [PR #52](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/52), merge SHA `15cad8b` | 49 Edge + 6 billing тестов, CodeQL, Android/web CI success; нет нового подписанного APK |
+| Security sync | [PR #54](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/54), merge SHA `60f5b91` | 50 Edge + 6 billing тестов, CodeQL, Android/web CI success; локальная проверка APK подписи, SQL baseline и живой Edge v45 |
 
 ## Новая интеграционная ветка (17.11.2026)
 
