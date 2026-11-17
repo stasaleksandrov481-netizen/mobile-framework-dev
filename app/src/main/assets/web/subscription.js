@@ -14,6 +14,7 @@ const CortexSubscription = (() => {
     { code: "ultra", price_kopecks: 79900, daily_tokens: 200000, advanced_tokens: 60000 }
   ];
   const number = new Intl.NumberFormat("ru-RU");
+  const readableTokens = value => Number.isSafeInteger(value) && value >= 0 ? number.format(value) : "—";
   const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 2, minimumFractionDigits: 0 });
   function date(value) {
     if (!value) return "—";
@@ -26,7 +27,8 @@ const CortexSubscription = (() => {
     const subscription = ctx.connection.subscription;
     const quota = ctx.connection.quota || subscription?.quota;
     const current = quota?.plan || (Cortex.state.account ? "free" : "guest");
-    const plans = Array.isArray(subscription?.plans) ? subscription.plans : defaults;
+    const livePlans = Array.isArray(subscription?.plans) && subscription.plans.length > 0;
+    const plans = livePlans ? subscription.plans : defaults;
     const paid = ["start", "pro", "ultra"].includes(current);
     const canBuy = subscription?.checkout === true;
     const loadError = ctx.connection.subscriptionError;
@@ -41,8 +43,17 @@ const CortexSubscription = (() => {
           selected ? "subscription-renew" : "subscription-checkout", plan.code, "outline") : "";
       return `<article class="sub-plan${selected ? " sub-current" : ""}"><header><h3>${names[plan.code]}</h3>
         <span>${plan.price_kopecks ? esc(money.format(plan.price_kopecks / 100)) + " / мес." : "Бесплатно"}</span></header>
-        <p>${descriptions[plan.code]}</p>${action}</article>`;
+        <p>${descriptions[plan.code]}</p>
+        <small>${livePlans ? `${readableTokens(plan.daily_tokens)} токенов/день` : "Лимиты загружаются"}</small>
+        ${livePlans && Number(plan.advanced_tokens) > 0 ? `<small>${readableTokens(plan.advanced_tokens)} токенов продвинутых моделей</small>` : ""}
+        ${action}</article>`;
     }).join("");
+    const compare = `<details class="sub-compare"><summary>Сравнить тарифы и лимиты</summary>
+      ${livePlans ? `<div><table><thead><tr><th scope="col">Тариф</th><th scope="col">В день</th><th scope="col">Продвинутые</th><th scope="col">Цена</th></tr></thead>
+      <tbody>${plans.filter(plan => Object.hasOwn(names, plan.code)).map(plan => `<tr><th scope="row">${esc(names[plan.code])}</th>
+        <td>${readableTokens(plan.daily_tokens)}</td><td>${readableTokens(plan.advanced_tokens)}</td>
+        <td>${plan.price_kopecks ? esc(money.format(plan.price_kopecks / 100)) : "Бесплатно"}</td></tr>`).join("")}</tbody></table></div>` :
+        '<p class="muted">Сравнение появится после получения тарифов с сервера.</p>'}</details>`;
     const payments = Array.isArray(subscription?.payments) ? subscription.payments : [];
     const history = payments.length ? `<ul class="sub-payments">${payments.map(payment =>
       `<li><div><strong>${esc(names[payment.plan])} · ${esc(money.format(payment.amount / 100))}</strong>
@@ -51,7 +62,7 @@ const CortexSubscription = (() => {
     return detail("Подписка", "", `<div class="sub-page">${hero}
       ${loadError ? `<p class="sub-status" role="status">${esc(loadError)} ${button("Обновить", "", "subscription-refresh", "", "quiet")}</p>` : ""}
       <section class="sub-section"><h2>Тарифы</h2>${!canBuy ? `<p class="sub-status">${current === "guest" ? "Для покупки понадобится аккаунт." : "Оплата подписок пока закрыта."}</p>` : ""}
-      <div class="sub-plans">${catalogue}</div></section>
+      <div class="sub-plans">${catalogue}</div>${compare}</section>
       <p class="sub-note">Локальные команды, сценарии, напоминания и настройки островка бесплатны и безлимитны.</p>
       <section class="sub-section"><h2>История платежей</h2>${history}</section>
       <nav class="sub-legal" aria-label="Документы и помощь">

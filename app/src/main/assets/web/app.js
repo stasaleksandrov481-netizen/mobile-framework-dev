@@ -27,6 +27,8 @@
     } catch { return []; }
   };
   const supportThread = loadSupport();
+  let supportTickets = [];
+  let supportInboxState = "loading";
   let supportPending = false, supportEpoch = 0;
   const filters = { search: "" };
   const connection = { email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
@@ -53,6 +55,7 @@
   const quotaRing = form.querySelector(".quota-ring");
   const modelPicker = form.querySelector(".ai-model-picker");
   const voiceButton = form.querySelector(".voice-button");
+  const dictateButton = form.querySelector(".dictate-button");
   const stop = form.querySelector(".stop-button");
   const voicePanel = form.querySelector("#voice-inline");
   const voiceControl = voicePanel.querySelector(".voice-control");
@@ -255,7 +258,7 @@
     screen.dataset.chat = route === "chat" ? chatId : "";
     screen.className = "screen " + route + "-screen";
     screen.innerHTML = Planner.routes.has(route) ? Planner.page(route) : U.page(route, {
-      connection, permissions, compatibility: androidCompatibility, wakeState, islandCamera,
+      connection, permissions, compatibility: androidCompatibility, wakeState, islandCamera, supportTickets, supportInboxState,
       native: Boolean(device), chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
@@ -448,6 +451,7 @@
     send.disabled = !filled || working;
     send.hidden = !filled || working;
     voiceButton.hidden = !device || filled || working || Boolean(voice);
+    dictateButton.hidden = !device || working || Boolean(voice);
     stop.hidden = !working || Boolean(voice);
     app.style.setProperty("--composer-h", form.offsetHeight + "px");
     if (scroll && stick) scroll.scrollTop = scroll.scrollHeight;
@@ -494,12 +498,24 @@
     if (submit) submit.disabled = supportPending;
   }
 
+  function paintSupportTickets() {
+    const host = screen.querySelector("#support-ticket-list");
+    if (host) host.innerHTML = U.supportTicketItems({ supportTickets, supportInboxState });
+  }
+
   async function refreshSupportReplies() {
-    if (!Api.available) return;
+    if (!Api.available) {
+      supportInboxState = "offline";
+      if (route === "support") paintSupportTickets();
+      return;
+    }
     const epoch = supportEpoch;
     try {
       const data = await Api.request("support-inbox");
       if (epoch !== supportEpoch) return;
+      supportTickets = Array.isArray(data.tickets) ? data.tickets.filter(item =>
+        item && typeof item.id === "string" && typeof item.message === "string").slice(0, 50) : [];
+      supportInboxState = "ready";
       const known = new Set(supportThread.map(item => item.id).filter(Boolean));
       const replies = Array.isArray(data.replies) ? data.replies : [];
       for (const reply of replies.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))) {
@@ -507,8 +523,13 @@
         known.add(reply.id);
         rememberSupport("assistant", reply.message, reply.id);
       }
-      if (route === "support") paintSupport();
-    } catch { /* Keep local messages if the support server is unavailable. */ }
+      if (route === "support") { paintSupportTickets(); paintSupport(); }
+    } catch {
+      if (epoch === supportEpoch) {
+        supportInboxState = "offline";
+        if (route === "support") paintSupportTickets();
+      }
+    }
   }
 
   async function sendSupport(message) {
@@ -529,6 +550,7 @@
         if (!result.sent) throw Api.failure("support_delivery");
         if (supportEpoch !== epoch) return;
         rememberSupport("assistant", "Обращение передано специалисту. Ответ появится здесь после обработки.");
+        void refreshSupportReplies();
       } else {
         const turns = supportThread.slice(-7).map(entry => ({ role: entry.role, content: entry.text }));
         // The dedicated support model is free for the user and has separate abuse limits.
@@ -702,6 +724,8 @@
     if (changed) {
       supportEpoch++;
       supportPending = false;
+      supportTickets = [];
+      supportInboxState = "loading";
       supportThread.splice(0, supportThread.length, ...loadSupport());
       connection.quota = null;
       connection.subscription = null;
@@ -741,7 +765,7 @@
       if (epoch !== statusEpoch) return;
       connection.status = "offline";
     }
-    if (["profile", "models"].includes(route)) render();
+    if (["profile", "usage", "models"].includes(route)) render();
     if (route === "account") {
       const status = screen.querySelector("[data-auth-status]");
       if (status) {
@@ -801,7 +825,7 @@
     if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
     connection.quota = quota;
     syncComposer();
-    if (["profile", "models", "subscription"].includes(route)) render();
+    if (["profile", "usage", "models", "subscription"].includes(route)) render();
   });
   addEventListener("cortex-guest-id", event => {
     if (S.account || typeof event.detail !== "string" || !/^@g\d{6,17}$/.test(event.detail)) return;
@@ -1056,6 +1080,9 @@
     if (!retry) {
       if (!chat.messages.length) chat.title = text.replace(/\s+/g, " ").slice(0, 72);
       chat.messages.push({ role: "user", text });
+      // Save the first user turn before the network call: a failed response
+      // must not erase the conversation when Android closes the WebView.
+      chat.saved = true;
       drafts.delete(chat.id);
     }
     const attachment = includeScreen && screenContext?.attached ? { app: screenContext.app, text: screenContext.text } : null;
@@ -1119,8 +1146,7 @@
   }
 
   function newChat(control) {
-    const item = M.createChat(true);
-    saved();
+    const item = M.createChat();
     navigate("chat", { id: item.id, origin: control, newChat: true });
     haptic();
   }
@@ -1277,6 +1303,7 @@
           app_version: diagnostics ? U.version : "", screenshot: draft.screenshot
         } });
         if (!result.sent) throw Api.failure("support_delivery");
+        void refreshSupportReplies();
         if (activeSheet?.support !== draft) { flash("Обращение отправлено"); return; }
         showSheet("Обращение отправлено", `<div class="support-success"><span class="success-check">${icon("check", 26)}</span>
           ${result.reference ? `<p>Номер обращения ${esc(result.reference)}</p>` : ""}${button("Готово", "", "close", "", "primary")}</div>`);
@@ -1675,12 +1702,7 @@
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
     },
-    "quota-detail": () => {
-      const quota = connection.quota;
-      if (!quota || quota.unit !== "tokens") return flash("Баланс пока недоступен.");
-      showSheet("Использование", `<p>${quota.unlimited ? "Без лимита" :
-        `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")}`}</p>`);
-    },
+    "quota-detail": () => navigate("usage"),
     "copy-code"(_, control) { return copyText(control.closest(".code-block")?.querySelector("code")?.textContent); },
     dictate: (_, control) => startVoice(true, control),
     "voice-chat": (_, control) => startVoice(false, control),
@@ -1939,7 +1961,7 @@
     if (!hidden) {
       // Pick up voice-only island changes made while the WebView was backgrounded.
       syncIslandOptions();
-      if (["profile", "models", "account"].includes(route)) refreshConnection();
+      if (["profile", "usage", "models", "account"].includes(route)) refreshConnection();
       if (route === "schedule") Planner.enter(route);
     }
   }

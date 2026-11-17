@@ -3,13 +3,13 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.12";
+  let version = "1.0.15";
   const tabs = [
     ["chats", "Чаты", "message"], ["home", "Кортекс", ""], ["profile", "Профиль", "user"]
   ];
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
-    notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
+    notifications: "settings", "phone-tools": "settings", data: "profile", notes: "data", usage: "profile", memory: "profile", permissions: "profile",
     support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
     chat: "home", schedule: "phone-tools", scenarios: "phone-tools", energy: "settings",
     account: "profile"
@@ -71,6 +71,42 @@ const CortexUI = (() => {
     return `<span class="portrait ${size}" aria-hidden="true">${account?.avatar ?
       `<img src="${esc(account.avatar)}" alt="">` : initials ? esc(initials) : icon("user", size === "large" ? 29 : 21)}</span>`;
   }
+  const tokens = value => Number.isFinite(Number(value)) && Number(value) >= 0
+    ? new Intl.NumberFormat("ru-RU").format(Math.floor(Number(value))) : "—";
+  function resetLabel(quota) {
+    const timestamp = Date.parse(quota?.reset_at || "");
+    return Number.isFinite(timestamp) ? new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Moscow", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+    }).format(new Date(timestamp)) + " МСК" : "Время обновления уточняется";
+  }
+  function usageChart(quota) {
+    const rows = Array.isArray(quota?.history) ? quota.history.filter(item =>
+      /^\d{4}-\d{2}-\d{2}$/.test(item?.day || "") && Number.isFinite(item?.used) && item.used >= 0).slice(-7) : [];
+    if (!rows.length) return '<p class="muted">История за неделю пока не получена с сервера.</p>';
+    const maximum = Math.max(1, ...rows.map(item => item.used));
+    return `<div class="usage-chart" role="img" aria-label="Расход токенов за семь дней">
+      ${rows.map(item => {
+        const height = Math.max(item.used > 0 ? 5 : 0, Math.round(item.used / maximum * 100));
+        const day = new Date(item.day + "T12:00:00Z").toLocaleDateString("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" });
+        return `<div class="usage-day" aria-label="${esc(day)}: ${tokens(item.used)} токенов" title="${esc(day)}: ${tokens(item.used)}">
+          <strong>${tokens(item.used)}</strong><span class="usage-bar"><i style="height:${height}%"></i></span><small>${esc(day)}</small></div>`;
+      }).join("")}</div>`;
+  }
+  function usageSummary(quota) {
+    if (quota?.unit !== "tokens") return `<section class="usage-overview glass-card"><h2>Использование ИИ</h2>
+      <p class="muted">Статистика появится после подключения к серверу.</p></section>`;
+    return `<section class="usage-overview glass-card"><div class="usage-heading"><h2>Использование ИИ</h2>
+      ${button("Подробнее", "", "go", "usage", "quiet")}</div>
+      <p class="usage-today"><strong>${tokens(quota.used)}</strong> токенов сегодня · ${quota.unlimited ? "Без лимита" :
+        `${tokens(quota.remaining)} из ${tokens(quota.limit)} осталось`}</p>
+      <p class="muted">Обновление лимита: ${esc(resetLabel(quota))}</p>${usageChart(quota)}</section>`;
+  }
+  function usage(ctx) {
+    const quota = ctx.connection?.quota;
+    return detail("Использование ИИ", "Статистика по данным сервера", usageSummary(quota) +
+      `<section class="panel stack"><p>Статистика отражает расход токенов, рассчитанный сервером. Данные обновляются после запросов к ИИ.</p>
+      ${button("Посмотреть тарифы", "spark", "go", "subscription", "outline")}</section>`);
+  }
   function composer() {
     return `<form class="composer" id="composer" autocomplete="off">
       <div id="screen-context" class="screen-context" hidden>
@@ -89,6 +125,7 @@ const CortexUI = (() => {
         <textarea id="composer-input" name="message" aria-label="Сообщение" rows="1" maxlength="6000"
           enterkeyhint="send" placeholder="Спросите CORTEX..."></textarea>
         <div class="composer-send-actions">
+          <button class="composer-button dictate-button" type="button" aria-label="Диктовка в поле ввода" title="Диктовка в поле ввода" ${attributes("dictate")}>${icon("mic", 21)}</button>
           <button class="composer-button voice-button" type="button" aria-label="Голосовой разговор" ${attributes("voice-chat")}>${icon("wave", 22)}</button>
           <button class="composer-button send-button" type="submit" aria-label="Отправить сообщение" hidden disabled>${icon("sendUp", 23)}</button>
           <button class="composer-button stop-button" type="button" aria-label="Остановить задачу" ${attributes("stop")} hidden>${icon("stop", 19)}</button>
@@ -233,6 +270,7 @@ const CortexUI = (() => {
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
         </section>
+        ${usageSummary(ctx.connection?.quota)}
         ${group(tile("Настройки", "", "sliders", "go", "settings") +
           tile("Данные и чаты", "", "folder", "go", "data") +
           tile("Память и персонализация", "", "memory", "go", "memory"))}
@@ -303,6 +341,7 @@ const CortexUI = (() => {
   function settings() {
     return detail("Настройки", "", group(
       tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
+      tile("Вызов CORTEX", "Островок, голос, сценарии и расписание", "mic", "go", "phone-tools") +
       tile("Энергопотребление", "", "bolt", "go", "energy") +
       tile("Подписка", "Тарифы, лимиты и платежи", "spark", "go", "subscription") +
       tile("Модели ИИ", "Профили моделей", "spark", "go", "models") +
@@ -423,6 +462,7 @@ const CortexUI = (() => {
     return detail("Данные и чаты", "", `<section class="panel stack">
       ${switchRow("Контекст прошлых чатов", "Учитывать сохранённые беседы", p.rememberSaved, "rememberSaved")}
     </section>` + group(
+      tile("Заметки", "Личные записи на устройстве", "note", "go", "notes") +
       tile("Экспорт чатов", "JSON", "download", "export") +
       tile("Очистить историю", "", "trash", "clear-chats", "", "danger") +
       tile("Сбросить данные", "", "trash", "clear-local", "", "danger")
@@ -498,12 +538,34 @@ const CortexUI = (() => {
       <div class="actions">${button("Журнал действий", "history", "action-history", "", "outline")}
       ${button("Повторить начальную настройку", "refresh", "open-setup", "", "outline")}</div>`);
   }
-  function support() {
-    return heading("Поддержка", "") + `<section class="support-chat" id="support-chat">
-      <div class="support-messages" id="support-messages" aria-live="polite"><div class="support-message support-assistant">Напишите, что случилось. Я помогу разобраться.</div></div>
-      <form class="support-compose" id="support-compose"><textarea name="message" rows="1" maxlength="3000" required placeholder="Сообщение поддержке" aria-label="Сообщение поддержке"></textarea>
-        <button type="submit" aria-label="Отправить">${icon("sendUp", 21)}</button></form>
-    </section>`;
+  function supportTicketItems(ctx) {
+    const types = { contact: "Обращение", bug: "Ошибка", idea: "Предложение", complaint: "Жалоба" };
+    const statuses = { new: "Получено", open: "В работе", pending: "Ожидает ответа", answered: "Ответили", closed: "Закрыто" };
+    const tickets = Array.isArray(ctx.supportTickets) ? ctx.supportTickets : [];
+    return tickets.length ? tickets.map(item => `<article class="support-ticket">
+      <div><strong>${types[item.category] || "Обращение"}</strong><span>${esc(statuses[item.status] || "Получено")}</span></div>
+      <p>${esc(String(item.message || "").slice(0, 280))}</p>
+      <small>${esc(item.created_at && Number.isFinite(Date.parse(item.created_at)) ?
+        new Date(item.created_at).toLocaleDateString("ru-RU") : "")}</small></article>`).join("") :
+      `<p class="muted">${ctx.supportInboxState === "offline" ? "Не удалось загрузить обращения. Проверьте интернет." :
+        ctx.supportInboxState === "ready" ? "Отправленных обращений пока нет." : "Загружаю обращения…"}</p>`;
+  }
+  function support(ctx) {
+    return heading("Поддержка", "Помощь и связь с разработчиками") + `<div class="scroll detail-scroll stack support-detail">
+      <section class="panel stack"><h2>Написать команде CORTEX</h2>
+        <div class="support-quick-actions">
+          ${button("Обращение", "help", "support-form", "contact", "outline")}
+          ${button("Ошибка", "shield", "support-form", "bug", "outline")}
+          ${button("Предложение", "plus", "support-form", "idea", "outline")}
+          ${button("Жалоба", "file", "support-form", "complaint", "outline")}
+        </div><p class="muted">К обращению можно приложить скриншот. Оно попадёт сотруднику поддержки.</p></section>
+      <section class="panel stack"><h2>Мои обращения</h2><div id="support-ticket-list" class="support-tickets">${supportTicketItems(ctx)}</div></section>
+      ${faq()}
+      <section class="panel stack"><h2>Помощник</h2><p class="muted">Задайте вопрос здесь или напишите «оператор» для обращения к сотруднику.</p>
+        <div class="support-chat" id="support-chat"><div class="support-messages" id="support-messages" aria-live="polite"></div>
+          <form class="support-compose" id="support-compose"><textarea name="message" rows="1" maxlength="3000" required placeholder="Вопрос помощнику" aria-label="Вопрос помощнику"></textarea>
+            <button type="submit" aria-label="Отправить">${icon("sendUp", 21)}</button></form></div>
+      </section></div>`;
   }
 
   const questions = [
@@ -511,7 +573,7 @@ const CortexUI = (() => {
     ["Команды", "Чем отличаются диктовка и разговор?", "Диктовка вставляет распознанный текст в поле ввода. Голосовой разговор отправляет реплику после паузы. Доступность распознавания без сети зависит от службы Android."],
     ["Разрешения", "Как включить управление экраном?", "Откройте «Вызов», затем «Управление экраном». В специальных возможностях Android включите службу CORTEX. На защищённых экранах завершите действие вручную."],
     ["Разрешения", "Почему островок пропал?", "Проверьте разрешение «Поверх других окон» и режим островка в разделе «Вызов». При режиме «По вызову» островок появляется после команды или запуска."],
-    ["Токены", "Что расходует токены ИИ?", "В гостевом режиме доступно 5 000 токенов в день, после входа — 20 000. Локальные команды, напоминания и сценарии выполняются без расхода токенов."],
+    ["Токены", "Что расходует токены ИИ?", "Действующий лимит зависит от вашего тарифа. Точный расход, остаток и время обновления показаны в разделе «Использование ИИ». Локальные команды не расходуют токены."],
     ["Токены", "Почему ИИ временно недоступен при наличии токенов?", "У OpenRouter есть общий дневной и минутный бюджет. Пока облако недоступно, локальные команды остаются доступны."],
     ["Сценарии", "Как запустить сценарий голосом?", "Сохраните сценарий и скажите «Запусти сценарий» и его название. Можно также указать свою фразу в конструкторе."],
     ["Сценарии", "Когда сработает отложенное действие?", "Срок и статус видны в «Расписании». Android может задержать запуск. Если экран заблокирован или Android ограничил запуск в фоне, нажмите уведомление после разблокировки."],
@@ -546,7 +608,7 @@ const CortexUI = (() => {
   }
 
   function page(route, ctx) {
-    const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
+    const pages = { home, chat, chats, profile, account, settings, usage, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
       data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
@@ -560,5 +622,5 @@ const CortexUI = (() => {
   }
   return { esc, icon, iconButton, button, tile, detail, get version() { return version; },
     setVersion(value) { if (/^\d+\.\d+\.\d+(?:[-.][a-z0-9.]+)?$/i.test(value)) version = value; },
-    tabs, parent, page, composer, navigation, history, chatItems, accountModes, accountAvailability };
+    tabs, parent, page, composer, navigation, history, chatItems, supportTicketItems, accountModes, accountAvailability };
 })();

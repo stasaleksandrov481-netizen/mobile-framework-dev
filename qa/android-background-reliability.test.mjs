@@ -36,3 +36,13 @@ test("foreground islands and support jobs stop cleanly if an OEM denies them", (
   assert.match(bridge, /status\("overlay-mode", false, "Android ограничил запуск островка/);
   assert.match(island, /CortexRuntime\.reportWake\("Android ограничил запуск островка в фоне/);
 });
+
+test("speech callbacks from an obsolete recognizer cannot stop a replacement session", () => {
+  const speech = kotlin("CortexSpeech");
+  assert.match(speech, /private fun current\(\) = activeId == id && recognizer === r/);
+  assert.match(speech, /override fun onError\(error: Int\) \{\s*if \(!current\(\)\) return/);
+  assert.match(speech, /override fun onResults\(results: Bundle\?\) \{\s*if \(current\(\)\)/);
+  assert.match(speech, /runCatching \{ recognizer\?\.cancel\(\) \}/);
+  assert.match(speech, /runCatching \{ recognizer\?\.destroy\(\) \}/);
+  assert.match(speech, /runCatching \{ SpeechRecognizer\.isRecognitionAvailable\(activity\) \}/);
+});
