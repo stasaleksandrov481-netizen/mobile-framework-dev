@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.12";
+  let version = "1.0.15";
   const tabs = [
     ["chats", "Чаты", "message"], ["home", "Кортекс", ""], ["profile", "Профиль", "user"]
   ];
