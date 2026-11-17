@@ -2,7 +2,8 @@ import { createClient } from "@supabase/supabase-js";
 import { projectUrl, publishableKey } from "./project.js";
 
 const db = createClient(projectUrl, publishableKey, {
-  auth: { flowType: "pkce", persistSession: true, detectSessionInUrl: true, autoRefreshToken: true }
+  auth: { flowType: "pkce", persistSession: true, storage: window.sessionStorage,
+    detectSessionInUrl: true, autoRefreshToken: true }
 });
 const app = document.querySelector("#app");
 const feedback = document.querySelector("#feedback");
@@ -12,11 +13,13 @@ const labels = {
   roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
-const roles = { owner: "Владелец", admin: "Разработчик", support: "Поддержка" };
+const roles = { owner: "Владелец", admin: "Администратор", support: "Поддержка" };
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
 let quotaId = "", supportFilter = "active", ownId = "";
+const IDLE_LIMIT_MS = 30 * 60 * 1000;
+let lastInteraction = Date.now(), signingOut = false;
 
 const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -46,36 +49,59 @@ function flash(text) {
   feedbackTimer = setTimeout(() => { feedback.hidden = true; }, 5200);
 }
 
+const safeError = (error, context = "operation") => {
+  const code = String(error?.code || "");
+  if (code === "invalid_credentials" || code === "invalid_grant") return "Неверная почта или пароль.";
+  if (code === "over_request_rate_limit" || code === "over_email_send_rate_limit")
+    return "Слишком много попыток. Подождите несколько минут.";
+  if (code === "mfa_challenge_expired" || code === "otp_expired") return "Код истёк. Запросите новый.";
+  if (code === "invalid_otp") return "Неверный код. Проверьте Authenticator.";
+  if (code === "42501") return "Недостаточно прав для этой операции.";
+  return context === "auth" ? "Не удалось подтвердить вход. Проверьте данные и попробуйте снова." :
+    "Не удалось выполнить действие. Попробуйте ещё раз.";
+};
+
+function authFooter() {
+  return '<div class="auth-foot"><span>Доступ только для сотрудников CORTEX</span>' +
+    '<span>Защищённое соединение · MFA</span></div>';
+}
+
 function showAuth(title, body) {
-  app.innerHTML = '<main class="auth"><div class="wordmark">CORTEX CONTROL</div><h1>' + escape(title) + '</h1>' + body + '</main>';
+  app.innerHTML = '<div class="auth-layout"><section class="auth-aside" aria-label="Панель управления CORTEX">' +
+    '<div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span>CORTEX <strong>CONTROL</strong></span></div>' +
+    '<div class="aside-content"><span class="overline">СИСТЕМА УПРАВЛЕНИЯ</span>' +
+    '<h2>Всё важное.<br>Под контролем.</h2>' +
+    '<p>Состояние сервиса, пользователи, обращения, подписки и системные события.</p>' +
+    '<div class="aside-line"><span class="status-dot"></span>Защищённый доступ к данным</div></div>' +
+    '<div class="aside-bottom">CORTEX / INTERNAL</div></section>' +
+    '<main class="auth-panel"><div class="auth-mobile-brand"><span class="brand-mark" aria-hidden="true">C</span>CORTEX CONTROL</div>' +
+    '<div class="auth-inner"><div class="auth-icon" aria-hidden="true">C</div>' +
+    '<span class="overline">CORTEX CONTROL</span><h1>' + escape(title) + '</h1>' + body + authFooter() +
+    '</div></main></div>';
 }
 
 function signIn() {
-  showAuth("Вход в панель", form("signin",
-    field("email", "Email", "email", "", 'autocomplete="username" required') +
-    field("password", "Пароль", "password", "", 'autocomplete="current-password" required'), "Войти") +
-    '<div class="actions">' + button("Забыли пароль?", "recover") + '</div>');
+  showAuth("Вход в панель", '<p class="auth-description">Используйте аккаунт с выданной ролью администратора.</p>' +
+    form("signin", field("email", "Электронная почта", "email", "", 'autocomplete="username" maxlength="254" required') +
+      field("password", "Пароль", "password", "", 'autocomplete="current-password" required minlength="8"') +
+      '<div class="auth-form-tools">' + button("Показать пароль", "password-visibility") +
+      button("Забыли пароль?", "recover") + '</div>', "Продолжить") +
+    '<div class="auth-note"><span class="status-dot"></span>После пароля потребуется код из Authenticator</div>');
 }
 
 function recover(email) {
   const address = field("email", "Почта", "email", email || "", 'autocomplete="email" required');
-  showAuth(email ? "Новый пароль" : "Восстановление доступа", email ?
+  showAuth(email ? "Новый пароль" : "Восстановление доступа", '<p class="auth-description">Код будет отправлен на подтверждённую почту.</p>' + (email ?
     form("reset-password", address + field("code", "Код из письма", "text", "", 'inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" required') +
-      field("password", "Новый пароль", "password", "", 'minlength="10" maxlength="72" autocomplete="new-password" required'),
-      "Изменить пароль") : form("send-recovery", address, "Отправить код"));
-}
-
-function signUp() {
-  showAuth("Новый аккаунт", form("signup",
-    field("email", "Email", "email", "", 'autocomplete="email" required') +
-    field("password", "Пароль", "password", "", 'autocomplete="new-password" minlength="8" required'), "Создать") +
-    button("Назад ко входу", "signin"));
+      field("password", "Новый пароль", "password", "", 'minlength="16" maxlength="72" autocomplete="new-password" required'),
+      "Изменить пароль") : form("send-recovery", address, "Отправить код")) +
+    '<div class="auth-links">' + button("Вернуться ко входу", "signin") + '</div>');
 }
 
 function showMfa(list) {
   const factors = list.all.filter(item => item.factor_type === "totp" && item.status === "verified");
   if (!enrollment && !factors.length) {
-    showAuth("Настройка защиты", '<p>Подключите приложение для одноразовых кодов. Для входа в панель нужен код из этого приложения.</p>' +
+    showAuth("Настройка защиты", '<p class="auth-description">Подключите Google Authenticator, Microsoft Authenticator или совместимое приложение. Сохраните резервные коды своего аккаунта в безопасном месте.</p>' +
       '<div class="actions">' + button("Подключить Authenticator", "enroll") + button("Выйти", "logout") + '</div>');
     return;
   }
@@ -114,9 +140,7 @@ async function initialize() {
   const grant = data(await db.from("cortex_admin_roles").select("role").eq("user_id", user.id).maybeSingle());
   role = grant?.role;
   if (!Object.hasOwn(roles, role)) {
-    showAuth("Доступ к панели", '<p>Аккаунт подтверждён. Для доступа нужна роль CORTEX.</p>' +
-      form("claim-owner", field("code", "Ключ владельца", "password", "", 'required autocomplete="off"'), "Получить доступ владельца") +
-      form("claim-admin", field("code", "Ключ разработчика", "password", "", 'required autocomplete="off"'), "Получить доступ разработчика") +
+    showAuth("Доступ ограничен", '<p class="auth-description">Для этого аккаунта не назначена роль в CORTEX Control. Обратитесь к владельцу сервиса.</p>' +
       button("Выйти", "logout"));
     return;
   }
@@ -136,10 +160,13 @@ function drawShell() {
   if (!allowedTabs().includes(tab)) tab = "overview";
   const navigation = allowedTabs().map(key => '<button type="button" data-action="tab" data-value="' + key + '"' +
     (key === tab ? ' aria-current="page"' : '') + '>' + labels[key] + '</button>').join("");
-  app.innerHTML = '<header class="top"><div class="wordmark">CORTEX CONTROL</div><span class="role">' +
+  app.innerHTML = '<header class="top"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span>CORTEX <strong>CONTROL</strong></span></div>' +
+    '<div class="top-status"><span class="status-dot"></span>Рабочая среда</div><span class="role">' +
     escape(roles[role]) + '</span>' + (ownId ? button("Мой ID · " + ownId, "copy-my-id") : "") +
     '<button type="button" class="menu-button" data-action="menu" aria-controls="mobile-nav" aria-expanded="false">Меню</button></header>' +
-    '<div class="layout"><aside><nav aria-label="Разделы">' + navigation + '</nav>' + button("Выйти", "logout") + '</aside>' +
+    '<div class="layout"><aside><div class="sidebar-caption">УПРАВЛЕНИЕ</div><nav aria-label="Разделы">' + navigation + '</nav>' +
+    '<div class="sidebar-footer"><div class="sidebar-session"><span class="status-dot"></span>Защищённая сессия<div class="subtle">Автовыход через 30 минут бездействия</div></div>' +
+    button("Завершить сеанс", "logout") + '</div></aside>' +
     '<main id="dashboard"><h1>' + labels[tab] + '</h1><p>Загрузка…</p></main></div>' +
     '<dialog id="mobile-nav" aria-label="Меню"><div class="dialog-head"><strong>CORTEX Control</strong>' +
     button("Закрыть", "close-menu") + '</div><nav aria-label="Разделы">' + navigation + '</nav>' + button("Выйти", "logout") + '</dialog>';
@@ -154,10 +181,12 @@ async function loadTab() {
   const page = tab, version = ++renderVersion;
   try {
     const html = await views[page]();
-    if (version === renderVersion && main.isConnected) main.innerHTML = '<h1>' + labels[page] + '</h1>' + html;
+    if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div><span class="overline">CORTEX / ' +
+      escape(page.toUpperCase()) + '</span><h1>' + labels[page] + '</h1></div>' +
+      '<div class="heading-tools"><span class="muted">Данные в реальном времени</span>' + button("Обновить", "refresh") + '</div></div>' + html;
   } catch (error) {
     if (version === renderVersion && main.isConnected) {
-      main.innerHTML = '<h1>' + labels[page] + '</h1><p>' + escape(error.message) + '</p>' + button("Повторить", "refresh");
+      main.innerHTML = '<h1>' + labels[page] + '</h1><p>' + safeError(error) + '</p>' + button("Повторить", "refresh");
     }
   }
 }
@@ -173,14 +202,17 @@ async function overview() {
     ai_requests_today: "Запросов к ИИ сегодня (новый учёт)", ai_requests_total: "Запросов к ИИ с 16 ноября",
     ai_attempts_today: "Обращений к моделям сегодня", ai_success_today: "Успешных ответов моделей сегодня" };
   const cards = Object.entries(labels).map(([key, label]) =>
-    card(label, '<strong class="count">' + dateNumber(activity[key]) + '</strong>')).join("");
+    '<section class="metric-card"><span class="metric-label">' + escape(label) + '</span><strong class="count">' +
+    dateNumber(activity[key]) + '</strong></section>').join("");
   const seen = (activity.online || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
     escape(row.signed_in ? "Аккаунт" : "Гость") + ' · ' + date(row.last_seen_at) + ' МСК · ' + escape(row.version) + '</span></li>').join("");
   const opened = (daily.data?.today || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
     date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
   const dailyList = daily.error ? '<p>Не удалось загрузить список.</p>' : opened ?
     '<ul class="record-list">' + opened + '</ul>' : '<p>Сегодня пока нет открытий с аккаунтом.</p>';
-  return '<div class="cards">' + cards + card("Открытые обращения", '<strong class="count">' + dateNumber(activity.support_open) + '</strong>') +
+  return '<div class="dashboard-intro"><div><span class="overline">ОБЩАЯ КАРТИНА</span><h2>Состояние CORTEX</h2>' +
+    '<p>Актуальные показатели, активность и обращения пользователей.</p></div><span class="live-badge"><span class="status-dot"></span>Live</span></div>' +
+    '<div class="metrics-grid">' + cards + '<section class="metric-card"><span class="metric-label">Открытые обращения</span><strong class="count">' + dateNumber(activity.support_open) + '</strong></section>' +
     '</div><p class="muted">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
     'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
     'старые записи не выдаются за достоверную статистику.</p>' +
@@ -363,8 +395,16 @@ app.addEventListener("click", async event => {
   try {
     switch (action) {
       case "signin": signIn(); break;
-      case "signup": signUp(); break;
       case "recover": recover(""); break;
+      case "password-visibility": {
+        const password = app.querySelector('input[name="password"]');
+        if (password) {
+          const wasHidden = password.type === "password";
+          password.type = wasHidden ? "text" : "password";
+          control.textContent = wasHidden ? "Скрыть пароль" : "Показать пароль";
+        }
+        break;
+      }
       case "logout": data(await db.auth.signOut()); await initialize(); break;
       case "refresh-auth": await initialize(); break;
       case "enroll": {
@@ -422,7 +462,7 @@ app.addEventListener("click", async event => {
         await loadTab();
         break;
     }
-  } catch (error) { flash(error.message); }
+  } catch (error) { flash(safeError(error)); }
   finally { if (control.isConnected) control.disabled = false; }
 });
 
@@ -453,12 +493,6 @@ app.addEventListener("submit", async event => {
         signIn();
         flash("Пароль изменён.");
         return;
-      case "signup": {
-        const result = data(await db.auth.signUp({ email: read("email"), password: String(formData.get("password")), options: { emailRedirectTo: redirectTo } }));
-        if (result.session) await initialize();
-        else showAuth("Подтвердите email", '<p>Откройте ссылку из письма, затем вернитесь в панель и войдите.</p>' + button("Ко входу", "signin"));
-        return;
-      }
       case "mfa": {
         const list = data(await db.auth.mfa.listFactors());
         const factorId = read("factor") || factor;
@@ -472,11 +506,6 @@ app.addEventListener("submit", async event => {
         await initialize();
         return;
       }
-      case "claim-owner":
-      case "claim-admin":
-        data(await db.rpc(target.dataset.form === "claim-owner" ? "cortex_claim_owner" : "cortex_claim_developer", { p_code: read("code") }));
-        await initialize();
-        return;
       case "reply": {
         const id = read("ticket_id");
         const message = read("message");
@@ -542,10 +571,31 @@ app.addEventListener("submit", async event => {
     }
     flash("Изменения сохранены.");
     await loadTab();
-  } catch (error) { flash(error.message); }
+  } catch (error) { flash(safeError(error, ["signin", "send-recovery", "reset-password", "mfa"].includes(target.dataset.form) ? "auth" : "operation")); }
   finally { if (submitButton.isConnected) submitButton.disabled = false; }
 });
 
 initialize().catch(error => {
-  showAuth("Не удалось подключиться", '<p>' + escape(error.message) + '</p>' + button("Повторить", "refresh-auth") + button("Выйти", "logout"));
+  showAuth("Не удалось подключиться", '<p>' + safeError(error) + '</p>' + button("Повторить", "refresh-auth") + button("Выйти", "logout"));
+});
+
+for (const type of ["pointerdown", "keydown"]) {
+  document.addEventListener(type, () => { lastInteraction = Date.now(); }, { passive: true });
+}
+
+async function expireIdleSession() {
+  if (signingOut || !user || Date.now() - lastInteraction <= IDLE_LIMIT_MS) return;
+  signingOut = true;
+  try {
+    await db.auth.signOut({ scope: "local" });
+    await initialize();
+    flash("Сеанс завершён после 30 минут бездействия.");
+  } catch {
+    signIn();
+  } finally { signingOut = false; lastInteraction = Date.now(); }
+}
+
+setInterval(expireIdleSession, 60_000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) void expireIdleSession();
 });
