@@ -48,6 +48,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     }.getOrNull()?.takeIf { it.matches(Regex("^[a-f0-9]{16}$")) }
     private val endpoint = "https://jjcqrjztxohnifmziksy.supabase.co/functions/v1/cortex/v1/"
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
+    private val approvedApkSignature = CortexApkIntegrity.releaseSignerMatches(context)
 
     fun handle(raw: String, reply: JavaScriptReplyProxy) {
         if (raw.length > 270_000) {
@@ -220,7 +221,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.requestMethod = method
             connection.setRequestProperty("Accept", if (onEvent == null) "application/json" else "text/event-stream")
             connection.setRequestProperty("X-Cortex-Install", installId)
-            deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            // A re-signed APK cannot claim the Android ID on official release builds.
+            // This local guard does not replace server-side hardware attestation.
+            if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")
