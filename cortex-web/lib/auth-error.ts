@@ -13,7 +13,10 @@ export function safeAuthErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (/invalid login credentials/i.test(message)) return "Неверная почта или пароль.";
   if (/email not confirmed/i.test(message)) return "Сначала подтвердите адрес электронной почты.";
-  if (/token has expired|invalid token|otp_expired/i.test(message)) return "Код истёк или введён неверно. Проверьте письмо.";
+  if (/token has expired|invalid token|otp_expired/i.test(message)) return "Код неверный или уже истёк. Проверьте последнее письмо либо запросите новый код ниже.";
+  if (/error sending (confirmation |magic link )?email|failed to send (confirmation |magic link )?email|could not send email|non-local recipient/i.test(message)) {
+    return "Почтовый сервер не смог отправить письмо. Попробуйте позже или напишите на support@cortexapp.ru.";
+  }
   if (/password should|password is too|weak_password/i.test(message)) return "Пароль не соответствует требованиям безопасности. Используйте более сложный пароль.";
   if (/invalid email|email address.*invalid/i.test(message)) return "Проверьте правильность электронной почты.";
   // No raw Supabase/PostgREST errors: schema names, provider diagnostics and
