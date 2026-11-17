@@ -25,7 +25,7 @@ class CortexSpeech(private val activity: Activity, private val emit: (JSONObject
 
     fun listen(id: String, language: String, preferOffline: Boolean) {
         stop()
-        if (!SpeechRecognizer.isRecognitionAvailable(activity)) {
+        if (!runCatching { SpeechRecognizer.isRecognitionAvailable(activity) }.getOrDefault(false)) {
             voice(id, "error", "На устройстве нет доступного распознавания речи.")
             return
         }
@@ -38,20 +38,24 @@ class CortexSpeech(private val activity: Activity, private val emit: (JSONObject
     private fun beginListening(id: String, language: String, preferOffline: Boolean) {
         if (activeId != id) return
         try {
-            val offline = preferOffline && Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(activity)
+            val offline = preferOffline && Build.VERSION.SDK_INT >= 31 &&
+                runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(activity) }.getOrDefault(false)
             val r = if (offline && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(activity)
                 else SpeechRecognizer.createSpeechRecognizer(activity)
             recognizer = r
             r.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) = voice(id, "ready")
-                override fun onBeginningOfSpeech() = voice(id, "hearing")
-                override fun onRmsChanged(rmsdB: Float) = voice(id, "level", level = ((rmsdB + 2) / 16).coerceIn(0f, 1f).toDouble())
+                private fun current() = activeId == id && recognizer === r
+                override fun onReadyForSpeech(params: Bundle?) { if (current()) voice(id, "ready") }
+                override fun onBeginningOfSpeech() { if (current()) voice(id, "hearing") }
+                override fun onRmsChanged(rmsdB: Float) {
+                    if (current()) voice(id, "level", level = ((rmsdB + 2) / 16).coerceIn(0f, 1f).toDouble())
+                }
                 override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() = voice(id, "finishing")
+                override fun onEndOfSpeech() { if (current()) voice(id, "finishing") }
                 override fun onError(error: Int) {
-                    if (activeId != id) return
+                    if (!current()) return
                     if (offline && error in OFFLINE_UNAVAILABLE) {
-                        recognizer?.destroy()
+                        runCatching { r.destroy() }
                         recognizer = null
                         ui.post { beginListening(id, language, false) }
                         return
@@ -60,13 +64,13 @@ class CortexSpeech(private val activity: Activity, private val emit: (JSONObject
                     voice(id, "error", "Распознавание речи не завершилось. Попробуйте снова.")
                 }
                 override fun onResults(results: Bundle?) {
-                    if (activeId == id) {
+                    if (current()) {
                         stop()
                         voice(id, "result", results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty())
                     }
                 }
                 override fun onPartialResults(partialResults: Bundle?) {
-                    if (activeId == id) voice(id, "partial", partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty())
+                    if (current()) voice(id, "partial", partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty())
                 }
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
@@ -87,8 +91,8 @@ class CortexSpeech(private val activity: Activity, private val emit: (JSONObject
     fun cancel(id: String?) { if (id == null || activeId == id) stop() }
     fun stop() {
         activeId = null
-        recognizer?.cancel()
-        recognizer?.destroy()
+        runCatching { recognizer?.cancel() }
+        runCatching { recognizer?.destroy() }
         recognizer = null
         CortexRuntime.recording = false
     }

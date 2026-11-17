@@ -16,17 +16,19 @@ function fixture() {
     CortexMarkdown: { render: text => text, renderStream: text => text, webUrl: value => value },
   });
   vm.runInContext(source("model.js"), context);
+  vm.runInContext(source("subscription.js"), context);
   vm.runInContext(source("screens.js"), context);
   vm.runInContext("globalThis.CortexTest = Cortex; globalThis.CortexUITest = CortexUI;", context);
   return { model: context.CortexTest, ui: context.CortexUITest, saved };
 }
 
-test("chat composer keeps only model picker and quota below the input", () => {
+test("chat composer has separate dictation and voice actions, with a compact footer", () => {
   const { ui } = fixture();
   const html = ui.composer();
   assert.match(html, /class="composer-input-row"[\s\S]*?<textarea[\s\S]*?<div class="composer-send-actions"/);
   assert.match(html, /class="composer-footer"[\s\S]*?class="ai-model-picker"[\s\S]*?class="quota-ring"/);
-  assert.doesNotMatch(html, /class="composer-button mic-button"/);
+  assert.match(html, /class="composer-button dictate-button"[^>]*aria-label="Диктовка в поле ввода"/);
+  assert.match(html, /class="composer-button voice-button"[^>]*aria-label="Голосовой разговор"/);
   assert.ok(html.includes('/favicons/nvidia.com'));
   assert.ok(!html.includes('www.google.com/s2/favicons'));
 });
@@ -57,16 +59,68 @@ test("model feedback survives restart and affects following prompts", () => {
   assert.match(JSON.stringify(restarted.turns(restarted.state.chats[0], "")), /Не понравился ответ.*Слишком длинное/);
 });
 
-test("support is a single chat and account/profile no longer repeats quotas", () => {
+test("support has direct human forms, server inbox, FAQ and optional AI help", () => {
   const { ui, model } = fixture();
-  const support = ui.page("support", {});
+  const support = ui.page("support", { supportInboxState: "ready", supportTickets: [
+    { id: "abc", category: "bug", status: "open", message: "<script>bad</script>", created_at: "2026-11-17T10:00:00Z" }
+  ] });
   assert.match(support, /id="support-messages"/);
   assert.match(support, /id="support-compose"/);
-  assert.doesNotMatch(support, /Мои обращения|Сообщить об ошибке|Частые вопросы/);
+  assert.match(support, /Мои обращения|Частые вопросы|data-faq/);
+  for (const kind of ["contact", "bug", "idea", "complaint"]) assert.match(support, new RegExp(`data-action="support-form" data-value="${kind}"`));
+  assert.match(support, /&lt;script&gt;bad&lt;\/script&gt;/);
+  assert.doesNotMatch(support, /<script>bad<\/script>/);
   const profile = ui.page("profile", { connection: {}, native: false });
-  assert.doesNotMatch(profile, /quota-panel|Токены ИИ/);
+  assert.match(profile, /Использование ИИ/);
   assert.equal(model.noteCommand("создай заметку План: Проверить релиз"), "Создал заметку «План»." );
   assert.match(model.noteCommand("покажи заметки"), /Проверить релиз/);
+});
+
+test("phone tools, notes and detailed usage are real navigable pages", () => {
+  const { ui } = fixture();
+  assert.equal(ui.parent["phone-tools"], "settings");
+  assert.equal(ui.parent.notes, "data");
+  assert.equal(ui.parent.usage, "profile");
+  assert.match(ui.page("settings", {}), /data-value="phone-tools"/);
+  assert.match(ui.page("data", {}), /data-value="notes"/);
+  assert.match(ui.page("phone-tools", { permissions: {} }), /Расписание|Сценарии/);
+  assert.match(ui.page("notes", {}), /Создать заметку/);
+});
+
+test("weekly token chart and reset time use server quota instead of hard-coded quotas", () => {
+  const { ui } = fixture();
+  const quota = { id: "guest_test", unit: "tokens", used: 150, remaining: 850, limit: 1000,
+    reset_at: "2026-11-18T00:00:00Z", history: Array.from({length: 7}, (_, i) => ({
+      day: `2026-11-${String(11 + i).padStart(2, "0")}`, used: 100 + i * 10
+    })) };
+  const profile = ui.page("profile", { connection: { quota } });
+  assert.match(profile, /1.0.0|Использование ИИ/);
+  assert.equal((profile.match(/class="usage-day"/g) || []).length, 7);
+  assert.match(profile, /03:00 МСК/);
+  const detail = ui.page("usage", { connection: { quota } });
+  assert.match(detail, /Статистика по данным сервера/);
+  const sub = ui.page("subscription", { connection: { quota, subscription: { checkout: false, plans: [
+    { code: "free", price_kopecks: 0, daily_tokens: 35000, advanced_tokens: 0 },
+    { code: "pro", price_kopecks: 39900, daily_tokens: 100000, advanced_tokens: 20000 }
+  ] } } });
+  assert.match(sub, /Сравнить тарифы и лимиты/);
+  assert.match(sub, /100\s?000 токенов\/день/u);
+});
+
+test("the first message persists even without an assistant reply; empty chats do not", () => {
+  const { model, saved } = fixture();
+  const blank = model.createChat();
+  const first = model.createChat();
+  first.messages.push({ role: "user", text: "Проверь расписание завтра" });
+  first.saved = true;
+  assert.equal(model.save(), true);
+  const stored = JSON.parse(saved.get("cortex.interface.v2"));
+  assert.equal(stored.chats.length, 1);
+  assert.equal(stored.chats[0].messages[0].text, "Проверь расписание завтра");
+  assert.ok(!stored.chats.some(item => item.id === blank.id));
+  const app = source("app.js");
+  assert.match(app, /chat\.messages\.push\(\{ role: "user", text \}\);\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*chat\.saved = true;/);
+  assert.doesNotMatch(app, /M\.createChat\(true\)/);
 });
 
 test("public question coalescing never drops personalised chat context", () => {

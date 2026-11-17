@@ -48,7 +48,7 @@ jobs:
         run: node --disable-warning=ExperimentalWarning --experimental-transform-types --test supabase/functions/cortex/handler.test.ts supabase/functions/cortex/provider.test.ts supabase/functions/cortex/redis.test.ts supabase/functions/cortex/singleflight.test.ts cortex-control/tests/billing.test.js
 
       - name: Verify island onboarding, privacy and phone awareness
-        run: node --test qa/island-onboarding.test.mjs qa/island-command.test.mjs qa/island-surface-motion.test.mjs qa/memory.test.mjs qa/notification-awareness.test.mjs qa/account-email.test.mjs qa/markdown-layout.test.mjs qa/statistics.test.mjs qa/chat-beta-polish.test.mjs
+        run: node --test qa/island-onboarding.test.mjs qa/island-command.test.mjs qa/island-surface-motion.test.mjs qa/memory.test.mjs qa/notification-awareness.test.mjs qa/account-email.test.mjs qa/markdown-layout.test.mjs qa/statistics.test.mjs qa/chat-beta-polish.test.mjs qa/android-background-reliability.test.mjs qa/android-compatibility.test.mjs
 
       - name: Verify signed WebView update packaging
         run: python3 -m unittest discover -s tools -p 'test_package_web_update.py' -v
