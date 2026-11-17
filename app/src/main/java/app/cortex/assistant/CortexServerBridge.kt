@@ -221,8 +221,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.requestMethod = method
             connection.setRequestProperty("Accept", if (onEvent == null) "application/json" else "text/event-stream")
             connection.setRequestProperty("X-Cortex-Install", installId)
-            // A re-signed APK cannot claim the Android ID on official release builds.
-            // This local guard does not replace server-side hardware attestation.
+            // Detect accidental re-signing or tampering in an unmodified release.
+            // A patched client can bypass this: server-side attestation is required.
             if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
