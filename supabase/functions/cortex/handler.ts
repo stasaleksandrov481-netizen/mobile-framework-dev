@@ -1,11 +1,12 @@
 import {
   type Account, type Network, type ModelProfile, type ModelResponse, type MeasuredUsage, Failure, body, chatInput, completeText, completion,
-  confirmedQuota, failureBody, relay, retryableModelError,
+  confirmedQuota, failureBody, relay, retryableModelError, SELECTABLE_MODELS,
   supportInput, verifyCompletion, MODEL_PRICE_CEILINGS,
 } from "./provider.ts";
 import { createControl } from "./control.ts";
 import { createRedisCache } from "./redis.ts";
 import { checkedVisualPlan, visualFormat, visualGuide, visualTool, visualToolName } from "./visual.ts";
+import { checkedSettingsPlan, settingsFormat, settingsGuide, settingsTool, settingsToolName } from "./settings.ts";
 import { AUDIO_CODEC, encodeAdpcm4 } from "./audio.ts";
 import { ChatFlights, chatFlightKey } from "./singleflight.ts";
 
@@ -372,19 +373,38 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     return account && allowed(account.email) ? account : null;
   }
 
-  async function actor(request: Request): Promise<{ account: Account | null; bucket: string; ip: string }> {
+  async function actor(request: Request): Promise<{ account: Account | null; bucket: string; ip: string; device: string | null }> {
     const account = await lookup(request);
-    if (account) return { account, bucket: "account:" + account.id, ip: "" };
+    if (account) return { account, bucket: "account:" + account.id, ip: "", device: await deviceIdentity(request) };
     if (request.headers.has("authorization")) throw new Failure("sign_in", 401);
     if (!guests) throw new Failure("sign_in", 401);
     const install = request.headers.get("x-cortex-install") || "";
     if (!CAPABILITY.test(install)) throw new Failure("client_version", 400);
-    return { account: null, bucket: "guest:" + await hash(install), ip: await peer(request) };
+    return { account: null, bucket: "guest:" + await hash(install), ip: await peer(request), device: await deviceIdentity(request) };
   }
 
   async function installIdentity(request: Request): Promise<string | null> {
     const raw = request.headers.get("x-cortex-install") || "";
     return CAPABILITY.test(raw) ? await hash(raw) : null;
+  }
+
+  async function deviceIdentity(request: Request): Promise<string | null> {
+    // Never store the raw Android ID. It is a best-effort reinstall signal,
+    // not an authentication credential or hardware attestation.
+    const raw = request.headers.get("x-cortex-device") || "";
+    return /^[a-f0-9]{16}$/.test(raw) ? await hash("cortex-device-v1:" + raw) : null;
+  }
+
+  async function aiIdentity(request: Request, account: Account | null): Promise<{
+    id: string | null; device: boolean; otherAccount: boolean; accountRequired: boolean;
+  }> {
+    const install = await installIdentity(request);
+    const device = await deviceIdentity(request);
+    if (!install || !device) return { id: account?.id || null, device: false, otherAccount: false, accountRequired: false };
+    const result = await database<{ subject?: string; account_required?: boolean; other_account_on_device?: boolean }>(
+      "rpc/cortex_ai_device_identity", "POST", { p_install: install, p_device: device, p_account: account?.id || null });
+    return { id: result.subject || null, device: true,
+      otherAccount: result.other_account_on_device === true, accountRequired: result.account_required === true };
   }
 
   async function ticketOwners(request: Request, account: Account | null): Promise<string[]> {
@@ -394,9 +414,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   }
 
   async function subject(request: Request, account: Account | null): Promise<string | null> {
-    if (account) return account.id;
-    const install = guests ? await installIdentity(request) : null;
-    return install ? "guest_" + install : null;
+    if (!account && !guests) return null;
+    return (await aiIdentity(request, account)).id;
   }
 
   async function usage(request: Request, account: Account | null): Promise<Quota | null> {
@@ -414,6 +433,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   function budget(caller: Awaited<ReturnType<typeof actor>>): Promise<unknown> {
     return reserve(
       { bucket: "chat:" + caller.bucket, seconds: 60, maximum: caller.account ? 16 : 12 },
+      ...(caller.device ? [{ bucket: "chat:device:" + caller.device, seconds: 60, maximum: 16 }] : []),
       ...(caller.account ? [] : [
         { bucket: "chat:ip:" + caller.ip, seconds: 60, maximum: 20 },
         { bucket: "chat:guests:global:minute", seconds: 60, maximum: guestGlobalMinute },
@@ -534,6 +554,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           await reserve(
             { bucket: "status:caller:" + (install || "ip:" + await peer(request)),
               seconds: 60, maximum: install ? 30 : 90 },
+            { bucket: "status:ip:" + await peer(request), seconds: 60, maximum: 600 },
             { bucket: "status:global", seconds: 60, maximum: 9000 },
           );
         }
@@ -561,9 +582,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       }
       if (path === "/v1/subscription" && method === "GET") {
         const caller = await actor(request);
+        await reserve({ bucket: "subscription:" + caller.bucket, seconds: 60, maximum: 20 });
         const id = await subject(request, caller.account);
         if (!id) throw new Failure("sign_in", 401);
-        await reserve({ bucket: "subscription:" + caller.bucket, seconds: 60, maximum: 20 });
         const result = await database<Record<string, unknown>>("rpc/cortex_subscription", "POST", { p_subject: id });
         return json({ ...result, checkout: Boolean(caller.account && result.checkout && checkoutReady) });
       }
@@ -682,10 +703,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // do not expose text-model token counts, so this is a deterministic
         // service-token equivalent based on UTF-8 input length. Never accept
         // a price, model or reported usage figure from the client.
-        const id = await subject(request, caller.account);
+        const identity = await aiIdentity(request, caller.account);
+        const id = identity.id;
         if (!id) throw new Failure("sign_in", 401);
         const access = await usage(request, caller.account);
         const paidSpeech = Boolean(paidKey && ["start", "pro", "ultra"].includes(access?.plan || ""));
+        if (!paidSpeech && !identity.device) throw new Failure("client_version", 426);
+        if (!paidSpeech && identity.otherAccount) throw new Failure("free_device_account_limit", 403);
         const inputUnits = Math.max(1, Math.ceil(new TextEncoder().encode(text.trim()).byteLength / 4));
         const outputUnits = Math.max(100, Math.ceil(text.trim().length * 1.5));
         const amounts = { p_subject: id, p_input: inputUnits, p_output: outputUnits };
@@ -785,18 +809,22 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if (caller.account) await claimEarlyBonus(caller.account);
         const isChat = path === "/v1/chat";
         const input = isChat ? chatInput(await body(request, 260_000)) : {
-          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, webSearch: false, profile: undefined, modelId: undefined,
+          messages: [{ role: "user", content: "Reply with just OK." }] as const, limit: 512, device: false, repair: false, plan: false, visual: false, settings: false, webSearch: false, profile: undefined, modelId: undefined,
         };
         const gate = await control.gate(request, caller.account);
         if (gate.mode !== "open") throw new Failure(gate.mode, 403);
-        const id = await subject(request, caller.account);
-        if (!id) throw new Failure("sign_in", 401);
-        // Reject bursts before loading the model catalog and account quota.
+        // Throttle before creating any persistent device mapping. Rotated
+        // install/device IDs cannot bypass the per-IP guest bucket.
         await budget(caller);
+        const identity = await aiIdentity(request, caller.account);
+        const id = identity.id;
+        if (!id) throw new Failure(identity.accountRequired ? "sign_in" : "client_version", identity.accountRequired ? 401 : 426);
         const [key, modelOverride, access] = await Promise.all([
           providerKey().catch(() => ""), configuredModel(), usage(request, caller.account),
         ]);
         const hasPaidPlan = ["start", "pro", "ultra"].includes(access?.plan || "");
+        if (!hasPaidPlan && !identity.device) throw new Failure("client_version", 426);
+        if (!hasPaidPlan && identity.otherAccount) throw new Failure("free_device_account_limit", 403);
         if (!key && !(paidKey && hasPaidPlan)) throw new Failure("unconfigured", 503);
         const wantsAdvanced = isChat && (input.profile === "deep" ||
           (input.visual || input.plan) && ["pro", "ultra"].includes(access?.plan || ""));
@@ -804,21 +832,21 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const basic = Boolean(hasPaidPlan && paidKey && paidModelId.test(paidFast));
         // Model selection applies only to conversational replies. Phone plans
         // retain their verified tool-compatible model routing.
-        const chosen = !input.visual && !input.plan && !input.device && !input.repair ? input.modelId : undefined;
+        const chosen = !input.visual && !input.settings && !input.plan && !input.device && !input.repair ? input.modelId : undefined;
         const chosenFree = chosen?.endsWith(":free") ? chosen : undefined;
         const chosenPaid = chosen && !chosenFree ? chosen : undefined;
         if (chosenPaid && (!hasPaidPlan || !access?.advanced_tokens || !(paidKey || key))) {
           throw new Failure("paid_unavailable", 403);
         }
         const preferred = input.repair ? profiles.auto : input.profile ? profiles[input.profile] : models;
-        const candidates = input.visual ? [...visualTools, ...visualSchemas]
+        const candidates = input.visual || input.settings ? [...visualTools, ...visualSchemas]
           : [...new Set([chosenFree, ...(chosen ? [] : [modelOverride]), ...preferred, ...models]
             .filter((model): model is string => typeof model === "string" && FREE_MODEL.test(model)))];
         await database("rpc/cortex_track_ai_request", "POST", { p_subject: id,
           p_kind: !isChat ? "check" : input.visual ? "visual" : "chat" });
         // Only exact duplicate safe chats are combined. Auth, access control,
         // account checks and rate limits still run for every caller.
-        const flightKey = isChat && access?.allowed !== false
+        const flightKey = isChat && !input.settings && access?.allowed !== false
           ? chatFlightKey(input, id, access?.plan || "guest") : null;
         let quota: Quota | undefined;
         const hold = (model?: string, advanced = false) => async (estimatedInput: number, output: number) => {
@@ -876,16 +904,16 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           };
         };
         const upstream = new AbortController();
-        const quick = input.visual || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
+        const quick = input.visual || input.settings || input.profile !== "deep";
+        const firstTokenMs = input.visual || input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
         // A mirrored generation survives the first request disconnecting while
         // another caller is still consuming it. All flights remain time-bound.
         const signal = AbortSignal.any([...(flightKey ? [] : [request.signal]), upstream.signal,
-          AbortSignal.timeout(input.visual ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
-        const scope = input.visual ? "visual:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
+          AbortSignal.timeout(input.visual || input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
+        const scope = input.visual ? "visual:" : input.settings ? "settings:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
-        const ordered = input.visual ? [
+        const ordered = input.visual || input.settings ? [
           ...ready.filter(model => visualTools.includes(model)).slice(0, 1),
           ...ready.filter(model => visualSchemas.includes(model)).slice(0, 1),
         ] : ready;
@@ -896,7 +924,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // A rotated Vault key may serve both free and paid routes. Only accounts
         // with an advanced-token budget can spend against Haiku's paid ceiling.
         const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
-        const paidCandidates = chosenFree ? [] : chosenPaid ? [{ model: chosenPaid, advanced: true }] : [
+        const paidCandidates = input.settings || chosenFree ? [] : chosenPaid ? [{ model: chosenPaid, advanced: true }] : [
           ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
           ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
           ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
@@ -906,7 +934,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const routeModels = chosenPaid ? paidCandidates : chosenFree
           ? [{ model: chosenFree, advanced: false }]
           : [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
-        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.visual ? 2 : 3);
+        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.visual || input.settings ? 2 : 3);
         const messages = [...input.messages];
         if (access?.context_chars) {
           let chars = messages.reduce((total, turn) => total + turn.content.length, 0);
@@ -944,7 +972,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           if (failure && lastModel) restModel(lastModel, failure);
           while (!signal.aborted && next < maxAttempts) {
             if (next >= routeModels.length) {
-              if (catalogChecked || input.visual || chosen) break;
+              if (catalogChecked || input.visual || input.settings || chosen) break;
               catalogChecked = true;
               const live = await freeCatalog();
               routeModels.push(...live.filter(model => !choices.includes(model) &&
@@ -960,14 +988,15 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 const { failure, until } = quotaBlock;
                 throw new Failure(failure.code, failure.status, Math.ceil((until - Date.now()) / 1000));
               }
-              const format = !input.visual ? undefined : visualTools.includes(model)
-                ? { tools: [visualTool], tool_choice: "required" } : { response_format: visualFormat };
-              const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual,
+              const format = !(input.visual || input.settings) ? undefined : visualTools.includes(model)
+                ? { tools: [input.settings ? settingsTool : visualTool], tool_choice: "required" }
+                : { response_format: input.settings ? settingsFormat : visualFormat };
+              const result = await completion(network, paid ? (paidKey || key) : key, [model], messages, isChat && !input.visual && !input.settings,
                 input.limit, signal, input.device, input.repair,
                 paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? MODEL_PRICE_CEILINGS[model] ||
                   { prompt: advanced ? 0.60 : 0.20, completion: advanced ? 0.60 : 0.20 } : undefined,
-                input.webSearch);
+                input.webSearch, input.settings ? settingsGuide : "");
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {
@@ -985,6 +1014,18 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const produce = async (): Promise<Response> => {
         let response = await getResponse();
         if (!response) throw new Failure("model", 502);
+        if (input.settings) {
+          while (response) {
+            try {
+              const plan = checkedSettingsPlan(await completeText(response, settingsToolName), SELECTABLE_MODELS);
+              return json({ text: JSON.stringify(plan), quota: await response.finish() ?? quota });
+            } catch (error) {
+              if (!(error instanceof Failure)) throw error;
+              response = await getResponse(error);
+            }
+          }
+          throw new Failure("invalid_plan", 502);
+        }
         if (input.visual) {
           while (response) {
             try {
