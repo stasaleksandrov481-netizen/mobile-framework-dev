@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHandler } from "./handler.ts";
 import { createControl } from "./control.ts";
 import { checkedVisualPlan } from "./visual.ts";
+import { checkedSettingsPlan } from "./settings.ts";
 import { AUDIO_CODEC } from "./audio.ts";
 import { MODEL_PRICE_CEILINGS } from "./provider.ts";
 
@@ -125,6 +126,11 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       case "/rest/v1/cortex_admin_roles": return Response.json([{ role: "admin" }]);
 
       case "/rest/v1/cortex_ai_settings": return Response.json([{ model: null }]);
+      case "/rest/v1/rpc/cortex_ai_device_identity":
+        // The production RPC returns an account subject or stable, hashed guest subject.
+        return Response.json({ subject: body.p_account || "guest_" + body.p_install,
+          account_required: false, other_account_on_device: false });
+      case "/rest/v1/rpc/cortex_record_launch": return Response.json(null);
       case "/rest/v1/rpc/cortex_claim_guest": return Response.json(true);
       case "/rest/v1/rpc/cortex_ai_claim_early_bonus": return Response.json(true);
       case "/rest/v1/rpc/cortex_redis_config": return Response.json(null);
@@ -234,9 +240,12 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
     }
   });
   function call(path: string, payload?: unknown, headers: Record<string, string> = {}, method?: string) {
+    const clientInstall = headers["x-cortex-install"] || install;
+    const clientDevice = Buffer.from(clientInstall).toString("hex").slice(-16).padStart(16, "0");
     return app(new Request("https://examplecortex.supabase.co/functions/v1/cortex/v1/" + path, {
       method: method ?? (payload === undefined ? "GET" : "POST"),
-      headers: { "x-cortex-install": install, "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0",
+      headers: { "x-cortex-install": install, "x-cortex-device": clientDevice,
+         "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0",
         ...(payload === undefined ? {} : { "content-type": "application/json" }), ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
     }));
@@ -265,6 +274,30 @@ test("guest traffic shares an atomic global budget even when install and IP rota
   // A user prompt is one logical request even if free providers are retried.
   assert.equal(aiRequests.length, 2);
   assert.ok(models.length > aiRequests.length);
+});
+
+test("free AI requires a syntactically valid device ID and reserves a device budget", async () => {
+  const { call, reservations, models } = fixture();
+  for (const device of ["", "fake-attestation", "0123456789abcdeg"]) {
+    const result = await call("check", {}, { "x-cortex-device": device });
+    assert.equal(result.status, 426);
+    assert.equal((await result.json()).error, "client_version");
+  }
+  assert.equal(models.length, 0);
+  const accepted = await call("check", {});
+  assert.equal(accepted.status, 200);
+  await accepted.body?.cancel();
+  assert.ok(reservations.some(rules => rules.some(rule =>
+    rule.bucket.startsWith("chat:device:") && rule.seconds === 60 && rule.maximum === 16)));
+});
+
+test("settings plans reject unsupported keys and embedded HTML", () => {
+  assert.deepEqual(checkedSettingsPlan('{"actions":[{"key":"reduceMotion","value":"true"}]}', new Set()),
+    { actions: [{ key: "reduceMotion", value: true }] });
+  assert.throws(() => checkedSettingsPlan('{"actions":[{"key":"deleteAccount","value":"true"}]}', new Set()));
+  assert.throws(() => checkedSettingsPlan('{"actions":[{"key":"tone","value":"<script>"}]}', new Set()));
+  assert.throws(() => checkedSettingsPlan('{"actions":[{"key":"reduceMotion","value":"true"},' +
+    '{"key":"reduceMotion","value":"false"}]}', new Set()));
 });
 
 test("simulated concurrent status flood is rejected before expensive account and provider lookups", async () => {
@@ -834,7 +867,8 @@ test("browser-simple content types cannot submit state-changing gateway requests
   assert.equal(models.length, 0);
   assert.ok(!requests.some(path => path.includes("/rpc/cortex_ai_reserve")));
   const permitted = await raw(new Request(endpoint, {
-    method: "POST", headers: { "x-cortex-install": install, "content-type": "application/json; charset=UTF-8" },
+    method: "POST", headers: { "x-cortex-install": install, "x-cortex-device": "0123456789abcdef",
+      "content-type": "application/json; charset=UTF-8" },
     body: JSON.stringify(chatPayload("Hello")),
   }));
   assert.equal(permitted.status, 200);

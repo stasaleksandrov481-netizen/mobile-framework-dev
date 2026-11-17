@@ -8,7 +8,7 @@
 - Android: `app/`; интерфейс: `app/src/main/assets/web/`; нативные функции: `app/src/main/java/app/cortex/assistant/`.
 - Сайт: `cortex-web/`; служебная панель: `cortex-control/`.
 - Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. На 17.11.2026 production связан с `main`; **это не означает, что Android APK с `main` имеет одобренный пользователем интерфейс**.
-- Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex`. На 17.11.2026 **живая версия 44 новее серверных исходников в `main`**: в ней есть `cortex_ai_device_identity`, `settings.ts` и другие серверные изменения. **Запрещено выкатывать Edge Function из `main`/PR без сверки каждого файла с живой версией и проверки совместимости.**
+- Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex`. **PR #52** переносит в репозиторий точные 11 файлов живой v44 (ранее в `main` было расхождение); после слияния перепроверить версию и все файлы перед любым деплоем. SQL-миграция для `cortex_ai_device_identity` ещё не подтверждена в GitHub. **Не выкатывать Edge Function или БД без проверки совместимости и текущего production snapshot.**
 - Android `main` по `app/build.gradle.kts`: `1.0.14` / `114`. Версия интерфейса, которую пользователь считает правильной, пока не подтверждена. Не выпускать и не распространять новый APK, пока не установлен её точный commit SHA.
 
 ## Обязательная последовательность
