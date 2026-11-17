@@ -1,5 +1,7 @@
 import java.net.URI
 import java.security.KeyFactory
+import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.interfaces.RSAPublicKey
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
@@ -33,6 +35,19 @@ val hasSigning = signingInputs.values.any { it != null }
 if (hasSigning) {
     require(signingInputs.values.none { it == null }) { "Provide all four CORTEX signing environment variables." }
 }
+// Verify the packaged APK against its signing certificate. This is local tamper
+// detection, not cryptographic proof to the server that an app is genuine.
+val expectedSignerSha256 = if (hasSigning) {
+    val store = KeyStore.getInstance(
+        file(requireNotNull(signingInputs["CORTEX_KEYSTORE_FILE"])),
+        requireNotNull(signingInputs["CORTEX_STORE_PASSWORD"]).toCharArray()
+    )
+    val certificate = requireNotNull(store.getCertificate(requireNotNull(signingInputs["CORTEX_KEY_ALIAS"]))) {
+        "Signing key alias does not have a certificate."
+    }
+    MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+        .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+} else ""
 
 android {
     namespace = "app.cortex.assistant"
@@ -46,6 +61,7 @@ android {
         versionName = "1.0.14"
         buildConfigField("String", "CORTEX_WEB_UPDATE_ROOT", quotedBuildValue(webUpdateRoot))
         buildConfigField("String", "CORTEX_WEB_UPDATE_PUBLIC_KEY", quotedBuildValue(webUpdatePublicKey))
+        buildConfigField("String", "CORTEX_RELEASE_SIGNER_SHA256", quotedBuildValue(expectedSignerSha256))
     }
     buildFeatures { buildConfig = true }
     signingConfigs {
