@@ -20,6 +20,10 @@ export default function SupportPage() {
         <p>Откройте «Профиль» → «Помощь и поддержка» → «Написать разработчику» и создайте обращение. Ответ появится в разделе «Мои обращения».</p>
         <h2>Прямое сообщение в Telegram</h2>
         <p>Если приложение недоступно, напишите администратору CORTEX <a href={supportUrl}>@{supportUsername}</a>. Если вопрос касается оплаты, приложите номер заказа. Пароль, коды входа и реквизиты карты передавать не нужно.</p>
+        <section aria-labelledby="subscriber-telegram">
+          <h2 id="subscriber-telegram">Закрытый Telegram для подписчиков</h2>
+          <p>Канал и рассылка приглашений в разработке. После запуска при покупке Start, Pro или Ultra одноразовая ссылка будет приходить на почту, указанную в аккаунте CORTEX.</p>
+        </section>
         <nav className="legal-links" aria-label="Документы CORTEX">
           <Link href="/pricing">Тарифы и цены</Link>
           <Link href="/terms">Пользовательское соглашение</Link>

@@ -342,7 +342,9 @@ async function subscriptions() {
   const states = { creating: "Создаётся", pending: "Ожидает оплаты", confirmed: "Подтверждено", canceled: "Отменено", refunded: "Возврат" };
   const entries = result.recent.map(p => '<li><span>' + escape(p.public_id || p.subject) + ' · ' + escape(planNames[p.plan]) +
     '<br><small>' + escape(states[p.state]) + ' · ' + (p.mode === "manual" ? "Промодоступ до " + date(p.ends_at) : rub(p.amount)) +
-    '</small></span>' + (p.state === "confirmed" ? button(p.mode === "manual" ? "Отозвать" : "Возврат",
+    (p.mode === "live" && p.ends_at ? ' · до ' + escape(date(p.ends_at)) : "") +
+    '</small><br><small>Заказ ' + escape(p.id) + '</small></span>' +
+    (p.state === "confirmed" ? button(p.mode === "manual" ? "Отозвать" : "Возврат",
       p.mode === "manual" ? "billing-revoke" : "billing-refund", p.id) : "") + '</li>').join("");
   return '<div class="cards">' + summary + budget + grant + '</div><div class="cards">' + plans + '</div>' +
     card("Подписчики и платежи", entries ? '<ul class="record-list">' + entries + '</ul>' : '<p>Записей пока нет.</p>');

@@ -30,3 +30,11 @@
 @media(prefers-reduced-motion:reduce){.sub-page *{animation:none!important;transition:none!important}}
 
 .sub-legal { display: flex; flex-wrap: wrap; gap: 6px; padding-block: 4px; }
+
+.sub-plan-details { display:grid; gap:4px; margin:0; padding-left:18px; color:#dedede; font-size:12px; line-height:1.5 }
+.sub-community { display:grid; gap:6px; padding:16px; border:1px solid #fff4; border-radius:23px }
+.sub-community :is(h2,p) { margin:0 }
+.sub-community .action { justify-self:start }
+.sub-payment-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:4px }
+.sub-checkout { display:grid; gap:12px }
+.sub-checkout p { margin:0; overflow-wrap:anywhere }

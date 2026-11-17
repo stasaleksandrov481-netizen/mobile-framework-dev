@@ -773,7 +773,35 @@
   }
 
   let paymentInProgress = false;
-  async function subscriptionAction(operation, value) {
+  function openBillingLink(url) {
+    if (!sendDevice("open-link", { url })) flash("Не удалось открыть страницу оплаты.");
+  }
+
+  function checkoutConfirmation(operation, code) {
+    if (paymentInProgress) return;
+    if (!S.account) { navigate("account"); return; }
+    const plan = CortexSubscription.checkoutPlan(connection.subscription, code);
+    if (!plan) { flash("Актуальная цена недоступна. Обновите тарифы."); return; }
+    const account = S.account;
+    if (!account.email) { flash("Для оплаты нужна электронная почта аккаунта."); return; }
+    showSheet(operation === "renew" ? "Продление подписки" : "Подписка CORTEX", `
+      <div class="sub-checkout">
+        <p><strong>${esc(plan.name)} · ${esc(CortexSubscription.formatAmount(plan.amount))} / месяц</strong></p>
+        <p>Один платёж за месяц доступа. Продление вручную.</p>
+        <p>Для создания транзакции Платега получит почту аккаунта <strong>${esc(account.email)}</strong>.</p>
+        <nav class="sub-legal" aria-label="Условия оплаты">
+          ${button("Публичная оферта", "", "subscription-info", "offer", "quiet")}
+          ${button("Политика конфиденциальности", "", "subscription-info", "privacy", "quiet")}
+        </nav>
+        <div class="actions">${button("Перейти к оплате", "", "confirm", "", "primary")}</div>
+      </div>`, { confirm: () => {
+        if (S.account?.id !== account.id) return;
+        if (S.account.email !== account.email) { flash("Почта аккаунта изменилась. Откройте оплату заново."); return; }
+        return subscriptionAction(operation, code, plan.amount);
+      } });
+  }
+
+  async function subscriptionAction(operation, value, displayedAmount) {
     if (paymentInProgress) return;
     if (!S.account) { navigate("account"); return; }
     paymentInProgress = true;
@@ -784,7 +812,22 @@
       if (account !== S.account?.id) return;
       if (result.checkout_url) {
         const url = Markdown.webUrl(result.checkout_url);
-        if (!url || !sendDevice("open-link", { url })) flash("Не удалось открыть страницу оплаты.");
+        const target = url && new URL(url);
+        if (!target || target.protocol !== "https:" ||
+            (target.hostname !== "platega.io" && !target.hostname.endsWith(".platega.io")) ||
+            !Number.isSafeInteger(result.amount) || result.amount <= 0) {
+          flash("Не удалось открыть страницу оплаты.");
+        } else if (result.amount === displayedAmount) {
+          openBillingLink(url);
+        } else {
+          const amount = esc(CortexSubscription.formatAmount(result.amount));
+          showSheet("К оплате по заказу", `<div class="sub-checkout">
+            <p><strong>${amount}</strong> за месяц доступа. Сумма указана в заказе.</p>
+            <div class="actions">${button("Перейти к оплате", "", "confirm", "", "primary")}</div>
+          </div>`, { confirm: () => {
+            if (S.account?.id === account) openBillingLink(url);
+          } });
+        }
       } else if (operation === "status") {
         flash(result.state === "confirmed" ? "Оплата подтверждена." : "Статус платежа обновлён.");
       }
@@ -1614,12 +1657,18 @@
     },
     go: (value, control) => navigate(value, { origin: control }),
     "subscription-info": page => {
-      if (!["privacy", "terms", "support"].includes(page)) return;
+      if (!["privacy", "terms", "offer", "pricing", "support", "support#subscriber-telegram"].includes(page)) return;
       if (!sendDevice("open-link", { url: "https://cortexapp.ru/" + page })) flash("Не удалось открыть ссылку.");
     },
     "subscription-refresh": () => { if (!subscriptionLoad) void refreshSubscription(); },
-    "subscription-checkout": value => void subscriptionAction("checkout", value),
-    "subscription-renew": value => void subscriptionAction("renew", value),
+    "subscription-checkout": value => checkoutConfirmation("checkout", value),
+    "subscription-renew": value => checkoutConfirmation("renew", value),
+    "subscription-copy-order": id => {
+      const payments = connection.subscription?.payments;
+      if (CortexSubscription.validOrderId(id) && Array.isArray(payments) && payments.some(payment => payment.id === id)) {
+        void copyText(id);
+      }
+    },
     "subscription-status": value => void subscriptionAction("status", value),
     back, close: dismissSheet,
     confirm() {
