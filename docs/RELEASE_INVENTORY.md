@@ -4,13 +4,14 @@
 
 | Компонент | Проверенное состояние | Что учитывать |
 | --- | --- | --- |
-| GitHub default | `main`, новый объединённый SHA `05a18101c67b121db7ac64fcbd9c9fe27c6c988c` | Ветка меняется; перепроверять SHA перед каждой работой |
-| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; production deployment `dpl_uf52Do9kUru568A2SttwLYGKw74h` **READY**, ref `main`, SHA `05a1810`; авторизованный сайт HTTP 200 | Это **сайт**, не доказательство правильности Android APK |
+| GitHub default | `main`, security PR #52 merge SHA `15cad8ba025587581b12af2749df937a7b84e7ea` | Источник Edge v44 и автоматические API/billing тесты теперь в `main`; перепроверять SHA перед работой |
+| Vercel production | `mobile-framework-dev` / `cortexapp.ru`; deployment `dpl_F7dquhdgkYMXdFkybFVAqH84DzjL` **READY**, ref `main`, SHA `15cad8b` | Сайт собран и назначен домену; ручная проверка UI/APK отсутствует. Rollback `dpl_BJ3FBazwuDZqM1nsYN88fyxgJoMo` |
 | Android в `main` | `app/build.gradle.kts`: `versionName=1.0.14`, `versionCode=114` | Пользователь 17.11 сообщил о неверном интерфейсе. Одобренную сборку/ветку ещё надо установить |
 | Android альтернативы | `release/cortex-1.0.14-20261116`, `fix/cortex-beta-ui-singleflight-20261116`, `audit/beta-stability-20261116` и исторические UI-ветки | Они могут **расходиться с `main`**; не считать ни одну верной без сверки с используемым APK |
-| Supabase production | Edge Function `cortex`, версия **44**, проект `jjcqrjztxohnifmziksy` | PR #52 переносит все 11 живых файлов; перед любым новым деплоем перепроверить runtime version, а SQL-миграция для identity ещё не зафиксирована |
+| Supabase production | Edge Function `cortex`, **ACTIVE v44**, проект `jjcqrjztxohnifmziksy` | В PR #52 синхронизированы 11 исходных файлов без деплоя Edge; SQL-миграция identity ещё не подтверждена |
 | AI device identity | Живая Edge Function использует `rpc/cortex_ai_device_identity` и принимает `X-Cortex-Device` | Функция RPC существует в production; старые Android-вызовы отправляют заголовок лишь на `presence`, а бесплатные AI-вызовы могут возвращать 426 |
 | Security PR | [#47](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/47), `security/stable-guest-device-quota-20261117` | Android-правка объединена с PR #46 и #48 в [PR #49](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/49), слита в `main` SHA `05a1810` без серверного кода |
+| Security sync | [PR #52](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/52), merge SHA `15cad8b` | 49 Edge + 6 billing тестов, CodeQL, Android/web CI success; нет нового подписанного APK |
 
 ## Новая интеграционная ветка (17.11.2026)
 

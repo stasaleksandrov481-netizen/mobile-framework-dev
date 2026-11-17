@@ -16,10 +16,20 @@
 
 ---
 
+## 2026-11-17: итог security-merge и фактического деплоя сайта
+
+- **Агент / задача:** закончить проверенную синхронизацию Edge v44, закрепить CI и передать точный release snapshot.
+- **Ветка и коммит:** [PR #52](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/52) слит в `main` на `15cad8ba025587581b12af2749df937a7b84e7ea`; отдельный docs-only PR обновляет этот журнал.
+- **Исходники:** все 11 файлов `supabase/functions/cortex/` по содержимому совпадали с живой Edge v44 на момент синхронизации. UI Android, сайт и платежи не менялись, только исходники Edge, автоматические тесты и документация.
+- **Проверки:** CI PR #52 на SHA `f664136ff0de792fe1052c428cb1c1c5ad6eb7df` полностью `success`: 49/49 Edge, 6/6 billing, CodeQL, Handoff Gate, полный Android/build/web test suite. Debug APK `CORTEX-test-debug-158`, workflow run `44029859687`, artifact `14304224675`; **не подписанный публичный релиз**.
+- **Vercel production:** auto-deployment `dpl_F7dquhdgkYMXdFkybFVAqH84DzjL` **READY**, `main` SHA `15cad8b`, alias `cortexapp.ru`. Визуальная/авторизованная ручная проверка UI не проведена; в сайт программно не вносилось изменений.
+- **Supabase production:** Edge Function `cortex` остаётся **ACTIVE v44**, никаких функций/миграций не выкатывали. Не публиковать старую SQL-версию; `cortex_ai_device_identity` и связанные private-таблицы имеют работающую схему, но отсутствует подтверждённая миграция в GitHub.
+- **Риски и следующий шаг:** `X-Cortex-Device` — подделываемый Android ID, не доказательство подлинности; Vercel WAF `gen/rce/sqli/xss` работает в `log` и не защищает прямой Supabase API. Требуются проверенная attestation с безопасной деградацией для устройств без Google Play, анализ трафика перед блокирующим WAF, SQL migration baseline, подтверждение одобренного APK и отдельный подписанный релиз. Исходный Vercel rollback-кандидат: `dpl_BJ3FBazwuDZqM1nsYN88fyxgJoMo` (SHA `6f144ca`).
+
 ## 2026-11-17: сверка безопасности Supabase Edge v44 с исходниками
 
 - **Агент / задача:** подготовка защищённой основы для дальнейших исправлений после запроса владельца.
-- **Ветка / PR:** `security/sync-edge-runtime-v44-20261117`; PR и commit SHA фиксируются после публикации изменений.
+- **Ветка / PR:** `security/sync-edge-runtime-v44-20261117`; [PR #52](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/52) слит в `main` squash SHA `15cad8ba025587581b12af2749df937a7b84e7ea`.
 - **Проверка:** через Supabase API считаны все **11 файлов** текущей Edge Function `cortex` v44. С `main` совпадают 8; в GitHub устарели `handler.ts` и `provider.ts`, а `settings.ts` отсутствует. Никаких ключей не извлекали.
 - **Изменения:** три файла приводятся к **побайтовому соответствию** действующей v44; тесты Edge дополняются контрактом `X-Cortex-Device`, лимитом `chat:device` и белым списком настроек. Лимиты, биллинг и UI production не изменяются.
 - **База данных:** advisory `rls_enabled_no_policy` на закрытых таблицах является ожидаемым deny-by-default; функции `SECURITY DEFINER` требуют AAL2, одноразовые секреты или конкретную роль и не должны быть массово отозваны. Есть предупреждение о выключенной leaked-password protection. RPC `cortex_ai_device_identity` существует в живой БД, но **её исходная миграция в GitHub ещё не подтверждена**: выкатывать из чистой БД без проверки нельзя.
