@@ -1,5 +1,12 @@
 # Инвентаризация релизов CORTEX
 
+## Изолированная security-ветка 17.11.2026 (не production)
+
+`security/three-hardening-fixes-20261117`: исправляет доверие к подставляемому `X-Forwarded-For` в прямом Supabase Edge, добавляет тесты на IP-спуфинг, исходную SQL-миграцию `cortex_ai_device_identity` и локальный контроль release-подписи Android APK. Подробности: [SECURITY_THREE_FIXES_20261117.md](SECURITY_THREE_FIXES_20261117.md).
+
+До успешного CI и отдельной сверки runtime **продолжает работать Supabase Edge v44**, а production Android **не заменён**. Локальная проверка сертификата APK не равна серверной hardware attestation. Веб-WAF CRS пока наблюдает в `log`; прямой Supabase endpoint им не защищён. Не считать три механизма полностью запущенными.
+
+
 Проверено 17.11.2026. Это **снимок фактического состояния**, а не команда на публикацию.
 
 | Компонент | Проверенное состояние | Что учитывать |

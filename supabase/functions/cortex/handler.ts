@@ -359,8 +359,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const reserve = (...rules: Limit[]) => database("rpc/cortex_reserve", "POST", { p_limits: rules });
   const expires = () => encodeURIComponent(new Date().toISOString());
   async function peer(request: Request): Promise<string> {
-    const address = request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0] || "unknown";
-    return (await hash(address.trim().slice(0, 64))).slice(0, 18);
+    // Hosted Supabase ingress supplies CF-Connecting-IP. X-Forwarded-For's
+    // leftmost entry is caller-controlled and must NEVER create fresh budgets.
+    // Unknown/non-hosted ingress shares one conservative bucket instead of
+    // trusting a forged IP, while the guest global cap remains authoritative.
+    const candidate = request.headers.get("cf-connecting-ip")?.trim() || "";
+    const address = /^[0-9a-fA-F:.]{2,45}$/.test(candidate) ? candidate.toLowerCase() : "unknown";
+    return (await hash("cortex-peer-v2:" + address)).slice(0, 18);
   }
 
   async function lookup(request: Request): Promise<Account | null> {

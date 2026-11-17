@@ -253,6 +253,30 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
   return { call, models, requests, reservations, aiRequests, paidHolds, raw: app };
 }
 
+test("direct Edge rate limits ignore spoofed forwarded addresses and use trusted ingress IP", async () => {
+  const { call, reservations } = fixture();
+  const base = { "x-cortex-install": install, "x-cortex-device": "0123456789abcdef" };
+  const headers = [
+    { ...base, "x-forwarded-for": "192.0.2.1" },
+    { ...base, "x-forwarded-for": "198.51.100.99", "cf-connecting-ip": "garbage" },
+    { ...base, "x-forwarded-for": "192.0.2.1", "cf-connecting-ip": "203.0.113.10" },
+    { ...base, "x-forwarded-for": "198.51.100.99", "cf-connecting-ip": "203.0.113.11" },
+  ];
+  for (const header of headers) {
+    const response = await call("check", {}, header);
+    assert.equal(response.status, 200);
+    await response.body?.cancel();
+  }
+  const keys = reservations.filter(rules => rules.some(rule => rule.bucket.startsWith("chat:ip:")))
+    .map(rules => rules.find(rule => rule.bucket.startsWith("chat:ip:"))!.bucket);
+  assert.equal(keys.length, 4);
+  assert.equal(keys[0], keys[1], "untrusted forwarding headers cannot rotate IP buckets");
+  assert.notEqual(keys[0], keys[2], "a valid Supabase ingress IP creates its own bucket");
+  assert.notEqual(keys[2], keys[3], "different real clients remain separately throttled");
+  assert.equal(reservations.filter(rules => rules.some(rule =>
+    rule.bucket === "chat:guests:global:minute")).length, 4);
+});
+
 test("guest traffic shares an atomic global budget even when install and IP rotate", async () => {
   const { call, reservations, aiRequests, models } = fixture();
   const payload = chatPayload("Привет", false);
