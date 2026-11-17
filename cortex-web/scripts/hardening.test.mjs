@@ -4,6 +4,7 @@ import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
+import { registrationIsOpen } from "../lib/registration-gate.ts";
 import nextConfig from "../next.config.ts";
 
 test("health probes coalesce parallel requests and cache success", async () => {
@@ -85,6 +86,28 @@ test("Co-operators load from server config, seller is operator B, and incomplete
     assert.equal(operatorDetailsComplete(), true);
     process.env.CORTEX_LEGAL_OPERATOR_B_INN = "invalid";
     assert.equal(operatorDetailsComplete(), false);
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+});
+
+test("Public signup requires explicit enabling and never silently claims verified compliance", () => {
+  const keys = ["CORTEX_ENABLE_REGISTRATION", "CORTEX_RF_DATA_COMPLIANCE_VERIFIED",
+    "CORTEX_PUBLIC_SIGNUP_EXCEPTION", "CORTEX_LEGAL_OPERATOR_A_ADDRESS", "CORTEX_LEGAL_OPERATOR_B_ADDRESS"];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    for (const key of keys) delete process.env[key];
+    assert.equal(registrationIsOpen(), false);
+    process.env.CORTEX_PUBLIC_SIGNUP_EXCEPTION = "true";
+    assert.equal(registrationIsOpen(), false, "override alone must not open signup");
+    process.env.CORTEX_ENABLE_REGISTRATION = "true";
+    assert.equal(registrationIsOpen(), true, "explicit exception permits the owner-authorized beta");
+    assert.equal(process.env.CORTEX_RF_DATA_COMPLIANCE_VERIFIED, undefined);
+    delete process.env.CORTEX_PUBLIC_SIGNUP_EXCEPTION;
+    assert.equal(registrationIsOpen(), false, "removing the exception closes incomplete signup");
   } finally {
     for (const key of keys) {
       if (previous[key] === undefined) delete process.env[key];
