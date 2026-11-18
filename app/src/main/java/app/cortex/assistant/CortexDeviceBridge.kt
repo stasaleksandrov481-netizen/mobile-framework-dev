@@ -142,7 +142,7 @@ internal class CortexDeviceBridge(
                 emit(JSONObject().put("type", "visual-privacy").put("enabled", options.getBoolean("visual-model-consent", false)))
             }
             "action-history" -> emit(JSONObject().put("type", "action-history").put("entries", CortexActionState.history(context)))
-            "gate-state" -> CortexActionState.setGate(body.optString("mode"))
+            "gate-cache" -> emit(JSONObject().put("type", "gate-cache").put("gate", CortexActionState.cachedGate(context)))
             "support-notify-config" -> CortexSupportNotification.configure(context, body.optBoolean("enabled"))
             "support-notification" -> body.optJSONArray("ids")?.let {
                 CortexSupportNotification.update(context, it, body.optBoolean("seen"))

@@ -25,7 +25,7 @@ test("island customization controls rendering and first-step feedback", () => {
   assert.match(surface, /canvas\.drawText\("Выполняю"/);
   assert.match(surface, /if \(style\.progress && compactAlpha/);
   const engine = native("CortexActionEngine.kt");
-  assert.match(engine, /report\("Выполняю…"\)\s+delay\(1_000L\)/);
+  assert.match(engine, /if \(CortexActionState\.firstCommand\) \{\s+CortexActionState\.firstCommand = false\s+delay\(1_000L\)/);
   assert.match(engine, /direct != null && reply == null -> \{\s*firstStep\(::report\)\s*executeSystem/);
   assert.match(engine, /!visualAllowed ->/);
   assert.match(native("CortexPhoneActions.kt"), /attempts = 6, interval = 105L/);
@@ -89,4 +89,15 @@ test("Android and web island presets agree on true black", () => {
   assert.equal(commands.defaults.opacity, 100);
   assert.equal(commands.parse("Сделай островок чёрным").style.background, "#000000");
   assert.match(web("planner.js"), /background: "#000000", text: "#ffffff"/);
+});
+
+test("Android 13+ keeps the compositor bounds fixed while the touchable region changes", () => {
+  const service = native("CortexIslandService.kt");
+  const island = native("LiquidIslandView.kt");
+  assert.match(service, /val touchBox = geometry\.window\(opening \|\| moving\)/);
+  assert.match(service, /val box = if \(Build\.VERSION\.SDK_INT >= 33\) geometry\.window\(true\) else touchBox/);
+  assert.match(service, /view\.place\(geometry, box, touchBox\)/);
+  assert.match(service, /maximumObscuringOpacityForTouch/);
+  assert.match(service, /alpha = windowAlpha\(false\)/);
+  assert.match(island, /surface\.setTouchableRegion\(touchRegion\)/);
 });

@@ -69,6 +69,15 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var screenListenerRegistered = false
     private var hiddenByVoice = false
     private var touchThrough = false
+    private val passThroughAlpha by lazy {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val maximum = getSystemService(InputManager::class.java).maximumObscuringOpacityForTouch
+            (maximum - .03f).coerceIn(0f, 1f)
+        } else 1f
+    }
+
+    private fun windowAlpha(passThrough: Boolean): Float =
+        if (Build.VERSION.SDK_INT >= 33 || passThrough) passThroughAlpha else 1f
     private var task: CortexActionState.Status? = null
     private val actionBusy get() = task?.phase == "executing"
     private val actionStatus: (CortexActionState.Status) -> Unit = ::updateTask
@@ -100,6 +109,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     override fun onCreate() {
         super.onCreate()
+        CortexActionState.restoreGate(this)
         running = this
         CortexActionState.listener = actionStatus
         CortexRuntime.islandVisibility = visibilityChanged
@@ -178,6 +188,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             hiddenByVoice = false
         }
         if (systemRequested) {
+            assistant.refreshGate()
             openFromSystem()
             return if (backgroundDisabled()) START_NOT_STICKY else START_STICKY
         }
@@ -306,7 +317,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         ui.removeCallbacks(clearTask)
         if (actionBusy) {
             reply = ""
-            setExpanded(false)
+            if (!busy) setExpanded(false)
         } else {
             val remaining = RESULT_MS - (SystemClock.uptimeMillis() - status.at)
             ui.postDelayed(clearTask, remaining.coerceAtLeast(0))
@@ -454,6 +465,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         view.cancelPlacementWait()
         val generation = ++layoutGeneration
         opening = open
+        view.conversation.media(if (open && CortexActionState.gate == "open") CortexMedia.player(this) else null)
         moving = true
         if (!open) {
             keyboardFocus = false
@@ -491,12 +503,10 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private fun placeIsland(view: LiquidIslandView) {
         val geometry = placement ?: return
         val params = window ?: return
-        val box = geometry.window(opening || moving)
-        // A left-gravity overlay changes its physical anchor when Android
-        // shrinks the expanded touch window to the compact capsule. Some OEM
-        // window managers briefly compose that move as a leftward snap.
-        // Anchor the WINDOW by its centre instead: width changes cannot shift
-        // the capsule, whose artwork is still positioned in screen coordinates.
+        val touchBox = geometry.window(opening || moving)
+        val box = if (Build.VERSION.SDK_INT >= 33) geometry.window(true) else touchBox
+        // Android 13+ keeps the surface fixed; older versions resize around its center.
+        // The artwork uses screen coordinates in both cases.
         val x = (box.exactCenterX() - geometry.screen.bounds.exactCenterX()).roundToInt()
         val y = box.top - geometry.screen.bounds.top
         val flags = windowFlags(keyboardFocus)
@@ -507,7 +517,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         params.width = box.width().coerceAtLeast(1)
         params.height = box.height().coerceAtLeast(1)
         params.flags = flags
-        view.place(geometry, box)
+        view.place(geometry, box, touchBox)
         if (changed && view.isAttachedToWindow) runCatching { manager.updateViewLayout(view, params) }
     }
 
@@ -550,7 +560,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 busy = false
                 reply = answer.trim()
                 updateStatus(if (ok) "done" else "error", "")
-                if (!hiddenByVoice && !poweringOff) setExpanded(true)
+                if (!hiddenByVoice && !poweringOff) {
+                    setExpanded(true)
+                    if (opening && CortexActionState.gate == "open") {
+                        ui.postDelayed({
+                            if (opening && !busy && CortexActionState.gate == "open") island?.conversation?.media(CortexMedia.player(this))
+                        }, 400L)
+                    }
+                }
                 if (fromVoice && !poweringOff && reply.isNotBlank()) voiceOutput.speak(reply) { /* Speech is optional. */ }
             })
     }
@@ -581,6 +598,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            alpha = windowAlpha(false)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
             if (Build.VERSION.SDK_INT >= 30) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
@@ -608,15 +626,12 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         val enabled = point != null
         if (enabled == touchThrough) return enabled
         touchThrough = enabled
-        lp.alpha = if (enabled && Build.VERSION.SDK_INT >= 31) {
-            val maximum = getSystemService(InputManager::class.java).maximumObscuringOpacityForTouch
-            (maximum - .03f).coerceIn(0f, 1f)
-        } else 1f
+        lp.alpha = windowAlpha(enabled)
         lp.flags = windowFlags(keyboardFocus && !actionBusy)
         val updated = runCatching { manager.updateViewLayout(view, lp) }.isSuccess
         if (!updated) {
             touchThrough = false
-            lp.alpha = 1f
+            lp.alpha = windowAlpha(false)
             lp.flags = windowFlags(keyboardFocus && !actionBusy)
         }
         return enabled && updated

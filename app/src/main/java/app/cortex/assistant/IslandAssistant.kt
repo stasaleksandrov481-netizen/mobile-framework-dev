@@ -12,6 +12,14 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
     private val memory = CortexPrivateMemory(context)
     private var request: String? = null
     private var generation = 0L
+    private var lastGateCheck: Long? = null
+
+    fun refreshGate() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastGateCheck?.let { now - it < 30_000L } == true) return
+        lastGateCheck = now
+        gateway.status()
+    }
 
     fun send(
         text: String, profile: String, modelId: String? = null, beforeScreen: () -> Unit,
@@ -19,6 +27,8 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         finished: (String, Boolean) -> Unit
     ) {
         if (request != null) return
+        refreshGate()
+        CortexActionState.gateMessage()?.let { finished(it, false); return }
         val turn = ++generation
         val tools = toolsAllowed()
         val unlocked = !context.getSystemService(KeyguardManager::class.java).isDeviceLocked
@@ -99,7 +109,7 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
             "update" -> "Для продолжения обновите CORTEX."
             "sign_in" -> "Для ИИ нужен вход в профиль CORTEX."
             "timeout" -> "Ответ занял слишком много времени."
-            "offline" -> "Связь с сервером потеряна. Проверьте интернет."
+            "offline" -> "Нет связи с ИИ. Проверьте интернет. Команды телефона работают на устройстве."
             else -> "ИИ временно недоступен. Попробуйте ещё раз."
         }
     }

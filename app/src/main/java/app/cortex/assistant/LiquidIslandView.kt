@@ -12,6 +12,8 @@ import android.graphics.PathMeasure
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
+import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -38,6 +40,9 @@ internal class LiquidIslandView(
     private val contentClip = Rect()
     private val expandedClip = android.graphics.Path()
     private val box = Rect()
+    private val touchBox = Rect()
+    private val appliedTouchRegion = Rect()
+    private val touchRegion = Region()
     private val location = IntArray(2)
     private val laidOutAt = IntArray(2)
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -85,7 +90,11 @@ internal class LiquidIslandView(
         setContents()
     }
 
-    fun place(value: IslandPlacement, frame: Rect) {
+    fun place(value: IslandPlacement, frame: Rect, touchFrame: Rect) {
+        if (touchFrame != touchBox) {
+            touchBox.set(touchFrame)
+            updateTouchRegion()
+        }
         if (value === placement && frame == box) return
         placement = value
         box.set(frame)
@@ -128,9 +137,8 @@ internal class LiquidIslandView(
 
     fun windowContains(point: PointF): Boolean {
         if (!isAttachedToWindow) return false
-        getLocationOnScreen(location)
-        return point.x >= location[0] && point.x < location[0] + width &&
-            point.y >= location[1] && point.y < location[1] + height
+        return point.x >= touchBox.left && point.x < touchBox.right &&
+            point.y >= touchBox.top && point.y < touchBox.bottom
     }
 
     fun reduceMotion(reduced: Boolean) {
@@ -291,8 +299,26 @@ internal class LiquidIslandView(
             (compact.right - location[0]).roundToInt(), (compact.bottom - location[1]).roundToInt())
     }
 
+    // Keep the surface size and position stable while the capsule morphs.
+    // Only the part of the surface that contains the island handles touch.
+    private fun updateTouchRegion() {
+        if (Build.VERSION.SDK_INT < 33 || !isAttachedToWindow || touchBox.isEmpty) return
+        val surface = rootSurfaceControl ?: return
+        getLocationOnScreen(location)
+        val left = touchBox.left - location[0]
+        val top = touchBox.top - location[1]
+        val right = touchBox.right - location[0]
+        val bottom = touchBox.bottom - location[1]
+        if (appliedTouchRegion.left == left && appliedTouchRegion.top == top &&
+            appliedTouchRegion.right == right && appliedTouchRegion.bottom == bottom) return
+        appliedTouchRegion.set(left, top, right, bottom)
+        touchRegion.set(appliedTouchRegion)
+        surface.setTouchableRegion(touchRegion)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        updateTouchRegion()
         val geometry = placement ?: return
         val now = SystemClock.uptimeMillis()
         val moving = motion && isShown && windowVisibility == VISIBLE
@@ -474,6 +500,7 @@ internal class LiquidIslandView(
     override fun onDetachedFromWindow() {
         cancelPlacementWait()
         cancelAnimation()
+        appliedTouchRegion.setEmpty()
         super.onDetachedFromWindow()
     }
 

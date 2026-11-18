@@ -1,6 +1,8 @@
 package app.cortex.assistant
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -83,6 +85,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         return id
     }
 
+    fun status() {
+        enqueue(UUID.randomUUID().toString(), JSONObject().put("operation", "status"), {}, {})
+    }
+
     fun inbox(done: (JSONObject) -> Unit) {
         enqueue(UUID.randomUUID().toString(), JSONObject().put("operation", "support-inbox"), {}, done)
     }
@@ -126,7 +132,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
 
     private fun perform(request: JSONObject, id: String, onEvent: (JSONObject) -> Unit): JSONObject {
         return when (request.optString("operation")) {
-            "status" -> call("GET", "status", null, id)
+            "status" -> call("GET", "status", null, id, timeoutMs = 8_000)
             "subscription" -> call("GET", "subscription", null, id)
             "subscription-payment" -> call("POST", "subscription/payment", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
             "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
@@ -211,6 +217,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private fun call(method: String, route: String, payload: JSONObject?, id: String,
                      onEvent: ((JSONObject) -> Unit)? = null, bearerOverride: String? = null,
                      timeoutMs: Int? = null): JSONObject {
+        val network = context.getSystemService(ConnectivityManager::class.java)
+        val capabilities = network.getNetworkCapabilities(network.activeNetwork)
+        if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) throw GatewayFailure("offline")
         val connection = (URL(endpoint + route).openConnection() as HttpURLConnection)
         connections[id] = connection
         try {
@@ -261,6 +270,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                         val account = it.optJSONObject("account")
                         if (account == null && !token.isNullOrEmpty()) store.clear()
                         CortexScenarios.selectAccount(context, account?.optString("id"))
+                        it.optJSONObject("gate")?.let { gate ->
+                            main.post { if (jobs.containsKey(id)) CortexActionState.saveGate(context, gate) }
+                        }
                     }
                 }
             }

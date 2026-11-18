@@ -2567,11 +2567,28 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
   mask-image: linear-gradient(transparent 13%, #000 42%, #000 69%, transparent 91%);
 }
 .app-shell[data-route="chat"][data-chat-content="empty"] .ambient { opacity: .58; }
-.app-shell[data-route="chat"] .wave-canvas { filter: blur(1.6px); }
+.app-shell[data-route="chat"] .wave-canvas { filter: blur(2.4px) saturate(0); }
+.chat-offline {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  border: 1px solid #ffffff22;
+  padding: 15px;
+  border-radius: 18px;
+  background: radial-gradient(ellipse at top left, #ffffff13, transparent 65%), #141414;
+}
+.chat-offline p { margin: 5px 0 10px; opacity: .76; }
+.chat-offline-symbol { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 14px; background: #ffffff11; }
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell:not(.reduce-motion) .chat-offline { animation: chat-offline-in .38s cubic-bezier(.2,.73,.2,1) both; }
+}
+@keyframes chat-offline-in {
+  from { opacity: 0; transform: translateX(-5px) scale(.985); }
+}
 .message.assistant.new-response .message-body,
 .message.assistant .message-body.reply-reveal {
   position: relative;
-  animation: cortex-ink-reveal .62s cubic-bezier(.2,.75,.22,1) both;
+  animation: cortex-ink-reveal .54s cubic-bezier(.18,.72,.24,1) both;
 }
 .message.assistant.new-response .message-body::after,
 .message.assistant .message-body.reply-reveal::after {
@@ -2579,13 +2596,13 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(105deg, transparent 20%, #ffffff13 49%, transparent 72%);
+  background: linear-gradient(108deg, transparent 14%, #ffffff0a 40%, #ffffff20 52%, transparent 76%);
   animation: cortex-ink-light .72s ease-out both;
 }
 @keyframes cortex-ink-reveal {
-  0% { opacity: .18; filter: blur(2px); clip-path: inset(0 42% 0 0); }
-  60% { opacity: 1; filter: blur(0); clip-path: inset(0 4% 0 0); }
-  100% { clip-path: inset(0); }
+  0% { opacity: .28; filter: blur(2px); clip-path: inset(0 49% 0 0 round 16px); }
+  54% { opacity: 1; filter: blur(.25px); clip-path: inset(0 8% 0 0 round 7px); }
+  100% { filter: none; clip-path: none; }
 }
 @keyframes cortex-ink-light {
   from { transform: translateX(-65%); opacity: .8; }

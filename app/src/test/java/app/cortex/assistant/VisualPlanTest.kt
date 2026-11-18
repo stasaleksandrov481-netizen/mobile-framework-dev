@@ -95,4 +95,26 @@ class VisualPlanTest {
         assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
             "", "com.example:id/btnOpen", "Button"))
     }
+    @Test fun colloquialMessageRetainsRecipientAndTextAcrossMessengerClarification() {
+        val pending = requireNotNull(ConversationRequest.parse("напиши рыбке как дела", installed))
+        assertEquals("рыбке", pending.recipient)
+        assertEquals("как дела", pending.message)
+        assertTrue(pending.app.isBlank())
+        assertTrue(pending.question.startsWith("В каком мессенджере"))
+        val answer = pending.withAnswer("давай в телеграме")
+        assertEquals("Telegram", answer.app)
+        assertEquals("рыбке", answer.recipient)
+        assertEquals("как дела", answer.message)
+        assertTrue(answer.send)
+        assertTrue(answer.question.isBlank())
+    }
+
+    @Test fun sameSentenceMessengerAndMessageStaySeparate() {
+        val request = requireNotNull(ConversationRequest.parse("напиши рыбке в тг как дела", installed))
+        assertEquals("Telegram", request.app)
+        assertEquals("рыбке", request.recipient)
+        assertEquals("как дела", request.message)
+        assertNull(ConversationRequest.parse("напиши статью о погоде", installed))
+    }
+
 }

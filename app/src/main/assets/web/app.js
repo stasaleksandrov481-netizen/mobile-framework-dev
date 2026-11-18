@@ -17,7 +17,7 @@
   const device = window.CortexDevice;
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
-  const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
+  const drafts = new Map(), errors = new Map(), actionReplies = new Map();
   const supportStore = () => "cortex.support.chat.v1:" + (S.account?.id || "guest");
   const loadSupport = () => {
     try {
@@ -36,7 +36,7 @@
   let deviceSnapshot = null;
   let androidCompatibility = null;
   const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
-  let route = "home", chatId = "", rule = "goal";
+  let route = "home", chatId = "";
   let accountMode = "password", accountEmail = "";
   let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
   let connectionLoad, subscriptionLoad;
@@ -259,7 +259,7 @@
       native: Boolean(device), chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
-      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail,
+      accountMode, email: accountEmail,
       resendWait: Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000))
     });
     if (route === "support") {
@@ -711,7 +711,6 @@
       subscriptionEpoch++;
       drafts.clear();
       errors.clear();
-      ruleDrafts.clear();
       screenContext = null;
       refreshScreen();
       Planner.accountChanged();
@@ -1009,6 +1008,7 @@
     const request = chat.messages.at(-1)?.text || "";
     const native = await nativeAction(job, request);
     if (native || pending !== job) return native || {};
+    if (Api.android && navigator.onLine === false) throw Api.failure("offline");
     const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
     const deviceContext = {
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
@@ -1670,8 +1670,8 @@
       localStorage.removeItem(supportStore());
       sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
-      drafts.clear(); errors.clear(); ruleDrafts.clear();
-      chatId = ""; rule = "goal";
+      drafts.clear(); errors.clear();
+      chatId = "";
       syncIslandOptions(); appearance(); render(); flash("Локальные данные сброшены");
     }),
     stop: () => stopAnswer(),
@@ -1778,8 +1778,7 @@
     }),
     "personality-edit"() {
       const person = M.profile();
-      editor("Манера общения", field("tone", "Тон", person.tone) +
-        field("description", "Роль", person.description, { max: 380, rows: 3 }), values => {
+      editor("Манера общения", field("tone", "Тон", person.tone, { max: 90 }), values => {
         Object.assign(S.edits.cortex, values); saved("Манера общения сохранена"); closeSheet(); render();
       });
     },
@@ -1787,10 +1786,6 @@
       if (!Object.hasOwn(M.styles, value)) return;
       S.edits.cortex.style = value;
       saved(); render();
-    },
-    rule(value) {
-      if (!M.instructionFields.some(item => item.id === value)) return;
-      rule = value; render();
     },
     quality(value) { if (Object.hasOwn(M.motion, value)) preference("quality", value); },
     language(value) { if (Object.hasOwn(M.languages, value)) preference("language", value); },
@@ -1853,10 +1848,6 @@
       return;
     }
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
-    if (form.id === "rule-form") {
-      const rules = S.instructions.cortex ||= {};
-      rules[rule] = data.rule; ruleDrafts.delete(rule); saved("Инструкция сохранена");
-    }
     if (form.id === "editor" && activeSheet?.submit) {
       const error = form.querySelector(".form-error");
       const submit = form.querySelector('[type="submit"]');
@@ -1890,7 +1881,6 @@
       clearTimeout(historySearchTimer);
       historySearchTimer = setTimeout(historyItems, 160);
     }
-    if (input.name === "rule") ruleDrafts.set(rule, input.value);
   });
   function visibleViewportHeight() {
     return Math.round(Math.min(innerHeight, window.visualViewport?.height || innerHeight));

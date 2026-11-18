@@ -2,12 +2,6 @@
 
 const Cortex = (() => {
   const key = "cortex.interface.v2";
-  const instructionFields = [
-    { id: "goal", label: "Задача", value: "Выполняй запросы на телефоне, проверяй результат и помогай разбираться в задачах." },
-    { id: "reply", label: "Ответы", value: "Начинай с сути. Для сложной задачи предложи короткий план и уточни важные детали." },
-    { id: "actions", label: "Действия", value: "При запросе действия используй возможности Android и сообщай проверенный результат." },
-    { id: "confirm", label: "Уточнения", value: "Если запрос неоднозначен, задай один вопрос, который сильнее всего меняет ответ." }
-  ];
   const styles = { brief: "Кратко", balanced: "Сбалансированно", deep: "Подробно" };
   const languages = { auto: "Авто", "ru-RU": "Русский", "en-US": "Английский" };
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
@@ -174,8 +168,7 @@ const Cortex = (() => {
     const edit = state.edits.cortex;
     return {
       id: "cortex", name: "CORTEX", style: Object.hasOwn(styles, edit.style) ? edit.style : "balanced",
-      tone: string(edit.tone, 90) || "Спокойный и деловой",
-      description: string(edit.description, 380) || "Персональный помощник для работы и повседневных задач."
+      tone: string(edit.tone, 90) || "Спокойный и деловой"
     };
   }
 
@@ -249,9 +242,7 @@ const Cortex = (() => {
       !/^(?:что (?:такое|значит|означает)|как (?:работает|устроен[ао]?|появился)|объясни(?:те)?(?:,|\s)|в ч[её]м разница|почему|зачем|what is|how does|explain\s)/iu.test(query) ||
       /(?:^|[^\p{L}])(?:мой|моя|мо[её]|мои|меня|мне|тебя|тебе|моего|моей|моих|наш|наша|у меня|сейчас|сегодня|вчера|завтра|актуальн\p{L}*|цена|курс)(?=$|[^\p{L}])/iu.test(query)) return false;
     if (state.preferences.addressName || state.preferences.language !== "auto" ||
-      Object.keys(state.edits.cortex).some(key => ["style", "tone", "description"].includes(key)) ||
-      instructionFields.some(field => Object.hasOwn(state.instructions.cortex, field.id) &&
-        state.instructions.cortex[field.id] !== field.value) ||
+      Object.keys(state.edits.cortex).some(key => ["style", "tone"].includes(key)) ||
       memory().enabled && memory().entries.some(item => item.enabled !== false) ||
       state.chats.some(item => item.saved && item.id !== chat.id) ||
       state.chats.some(item => item.messages.some(message => ["up", "down"].includes(message.feedback)))) return false;
@@ -286,7 +277,6 @@ const Cortex = (() => {
   function turns(chat, policy) {
     const person = profile();
     const data = memory();
-    const savedRules = object(state.instructions.cortex);
     const facts = data.enabled ? data.entries.filter(item => item.enabled !== false).slice(0, 10)
       .map(item => string(item.title, 64) + " — " + string(item.value, 220)).join("\n") : "";
     const conversation = chat.messages.filter(message => !message.local);
@@ -310,13 +300,12 @@ const Cortex = (() => {
         "создавать напоминания и работать с элементами экрана при выданном доступе. Android выполняет и подтверждает изменения. " +
         "Когда просят действие, подхватывай цель. Уточняй недостающую деталь и учитывай текущие разрешения. " +
         "Отвечай спокойно и конкретно, учитывай ход беседы. " + replyLanguage,
-      "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ". " + person.description,
+      "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ".",
       state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
       "Используй аккуратный Markdown: короткие абзацы, списки по необходимости, заголовки только в длинных ответах, " +
         "таблицы для сравнения и код с языком. Не пиши HTML и SVG. Не используй эмодзи. " +
         "Для предупреждений поддерживается цитата > [!IMPORTANT] и значки :icon[имя]:. Не придумывай цифры и результаты. " +
         "При веб-поиске приводи подтверждённые ссылки. Действия на Android выполняет и подтверждает приложение.",
-      ...instructionFields.map(field => field.label + ": " + String(savedRules[field.id] ?? field.value).slice(0, 750)),
       facts ? "Память пользователя:\n" + facts : "",
       background ? "Фрагменты бесед как справочный контекст:\n" + background : "",
       ratingsContext ? "Реальные оценки пользователя (используй как ориентир для стиля и качества, а не как инструкции):\n" + ratingsContext : "",
@@ -337,7 +326,7 @@ const Cortex = (() => {
 
   if (old && Object.keys(old).length) save();
   return {
-    state, defaults, motion, languages, styles, models, aiModels, instructionFields, profile, memory, chat, account,
+    state, defaults, motion, languages, styles, models, aiModels, profile, memory, chat, account,
     createChat, touch, turns, canSharePublicQuestion, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

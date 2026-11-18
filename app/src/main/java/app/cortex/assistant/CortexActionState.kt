@@ -21,6 +21,7 @@ internal object CortexActionState {
     data class Status(val phase: String, val message: String, val answer: String = "", val at: Long = android.os.SystemClock.uptimeMillis())
 
     private var cancel: (() -> Unit)? = null
+    var firstCommand = true
     val busy: Boolean get() = cancel != null
     var status: Status? = null
         private set
@@ -28,8 +29,43 @@ internal object CortexActionState {
     var gate = "open"
         private set
 
+    private const val GATE_CACHE = "cortex-gate"
+    private val modes = setOf("open", "maintenance", "update", "beta")
+
+    fun cachedGate(context: Context): JSONObject? {
+        val cache = context.getSharedPreferences(GATE_CACHE, Context.MODE_PRIVATE)
+        val raw = cache.getString(BuildConfig.VERSION_CODE.toString(), null) ?: return null
+        return runCatching { JSONObject(raw) }.getOrNull()?.takeIf { it.optString("mode") in modes }
+    }
+
+    fun restoreGate(context: Context) {
+        cachedGate(context)?.let { setGate(it.optString("mode")) }
+    }
+
+    fun saveGate(context: Context, value: JSONObject) {
+        val mode = value.optString("mode")
+        if (mode !in modes) return
+        val safe = JSONObject().put("mode", mode).put("message", value.optString("message").take(400))
+        value.optString("update_url").takeIf { it.startsWith("https://") && it.length <= 2_048 }
+            ?.let { safe.put("update_url", it) }
+        val cache = context.getSharedPreferences(GATE_CACHE, Context.MODE_PRIVATE)
+        val version = BuildConfig.VERSION_CODE.toString()
+        if (cache.getString(version, null) != safe.toString()) {
+            cache.edit().clear().putString(version, safe.toString()).apply()
+        }
+        setGate(mode)
+    }
+
+    fun gateMessage(): String? = when (gate) {
+        "update" -> "Версия CORTEX устарела. Откройте приложение, чтобы обновиться."
+        "maintenance" -> "Идут технические работы. Откройте CORTEX, чтобы проверить доступ."
+        "beta" -> "Требуется доступ к закрытой бете. Откройте приложение CORTEX."
+        else -> null
+    }
+
     fun setGate(mode: String) {
-        gate = if (mode in setOf("maintenance", "update", "beta")) mode else "open"
+        if (mode !in modes) return
+        gate = mode
         if (gate != "open") stop()
     }
 

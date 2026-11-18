@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.12";
+  let version = "1.0.15";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "mic"], ["home", "Кортекс", ""],
     ["scenarios", "Сценарии", "layers"], ["profile", "Профиль", "user"]
@@ -11,7 +11,7 @@ const CortexUI = (() => {
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
-    support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
+    support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", personality: "memory",
     chat: "home", "phone-tools": "settings", schedule: "profile", scenarios: "phone-tools",
     "island-editor": "phone-tools", energy: "settings",
     account: "profile"
@@ -166,7 +166,10 @@ const CortexUI = (() => {
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
       ${replyMark}${webSourceBadges(ctx.pending.text, ctx.pending.webSearching)}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
-    const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
+    const error = ctx.error?.code === "offline" ? `<div class="notice chat-offline" role="alert">
+      <span class="chat-offline-symbol" aria-hidden="true">${icon("alert", 22)}</span><div><strong>Нет подключения к ИИ</strong>
+      <p>Проверьте Wi-Fi или мобильный интернет. Команды телефона доступны без сети.</p>
+      ${button("Повторить", "refresh", "retry", "", "outline")}</div></div>` : ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">
         ${ctx.error.code === "sign_in" && ctx.native ? button("Войти", "user", "go", "profile", "primary") : ""}
         ${button("Повторить", "refresh", "retry")}
@@ -428,8 +431,7 @@ const CortexUI = (() => {
     const data = M.memory();
     return detail("Память и персонализация", "",
       `<section class="panel">${switchRow("Память", "Учитывать сохранённые факты", data.enabled, "memory")}</section>` +
-      group(tile("Стиль ответов", M.styles[M.profile().style], "sliders", "go", "personality") +
-        tile("Инструкции", "", "file", "go", "instructions")) +
+      group(tile("Стиль ответов", M.styles[M.profile().style], "sliders", "go", "personality")) +
       label("Факты") + (data.entries.length ? group(data.entries.map(entry =>
         tile(entry.title, entry.value, "memory", "memory-edit", entry.id)).join("")) :
         '') + button("Добавить факт", "plus", "memory-edit", "", "outline"));
@@ -439,19 +441,8 @@ const CortexUI = (() => {
     return detail("Манера общения", "Как CORTEX отвечает", `<section class="panel stack">
       <h2>Длина ответа</h2>${choices(M.styles, person.style, "reply-style")}
       <div class="readout"><strong>Тон</strong><p>${esc(person.tone)}</p></div>
-      <div class="readout"><strong>Роль</strong><p>${esc(person.description)}</p></div>
       ${button("Изменить", "note", "personality-edit")}
     </section>`);
-  }
-  function instructions(ctx) {
-    const field = M.instructionFields.find(item => item.id === ctx.rule) || M.instructionFields[0];
-    const value = ctx.ruleDraft ?? M.state.instructions.cortex?.[field.id] ?? field.value;
-    return detail("Инструкции", "Правила ответов CORTEX", `<div class="filters">${M.instructionFields.map(item =>
-      pill(item.label, "rule", item.id, item.id === field.id)).join("")}</div>
-      <form class="panel stack" id="rule-form">
-        <label class="field"><span>${esc(field.label)}</span><textarea name="rule" rows="6" maxlength="750">${esc(value)}</textarea></label>
-        <button type="submit" class="action primary">${icon("check", 17)}Сохранить</button>
-      </form>`);
   }
   function permissions(ctx) {
     const a = ctx.permissions;
@@ -539,7 +530,7 @@ const CortexUI = (() => {
 
   function page(route, ctx) {
     const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
-      data, memory, personality, instructions, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
+      data, memory, personality, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
   function navigation() {

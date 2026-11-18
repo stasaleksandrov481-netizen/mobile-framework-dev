@@ -49,6 +49,7 @@ internal class CortexPhoneActions(private val context: Context) {
         fun status(value: String) = JSONObject().put("status", value)
         fun started(intent: Intent) = status(if (launch(intent)) "opened" else "unavailable")
         when (kind) {
+            "media" -> return CortexMedia.execute(context, mode)
             "app" -> {
                 if (normalized(target) in CAMERA_NAMES) return openCamera()
                 val manager = context.packageManager
