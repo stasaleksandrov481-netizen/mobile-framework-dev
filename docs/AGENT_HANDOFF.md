@@ -1,5 +1,13 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-18 UTC · Запрос на публикацию подписанной 1.0.18-beta.1
+
+- Пользователь запросил выгрузку beta APK в GitHub. Исходники и новая версия вошли в main через PR #73, merge `e3fcf94d9dded5e907ab63cf925654fa6e57763b`.
+- После подтверждения в GitHub `app/build.gradle.kts` versionCode=118, versionName=1.0.18-beta.1 и явного beta-триггера `.github/workflows/android-apk.yml` этот коммит запускает подписанную **GitHub prerelease** сборку. Release считается завершённым только после проверки workflow, тегов, SHA256SUMS, сертификата и фактического APK-актива.
+- Baseline rollback: стабильная подписанная v1.0.17. Edge v47 ACTIVE, проверено совпадение всех 11 файлов; лимиты DB 15k/30k/80k/180k/350k daily.
+- Нет проверки на физическом Samsung Galaxy A23; beta должна сообщать об ограничениях Android, экспериментальном управлении экраном, незавершённых сценариях. Не называйте её полностью стабильной.
+
+
 ## 2026-11-18 19:00 UTC · Android beta brain + live quota safeguards
 
 - Branch: `fix/cortex-beta-brain-budget-20261118` based on main `3d8c81ebfe4f35e54988540a214620888bdc3bc3`. Supersedes earlier unmerged PR #71 (do not ship both).
