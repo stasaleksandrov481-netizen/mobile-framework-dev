@@ -1,5 +1,17 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-18 19:00 UTC · Android beta brain + live quota safeguards
+
+- Branch: `fix/cortex-beta-brain-budget-20261118` based on main `3d8c81ebfe4f35e54988540a214620888bdc3bc3`. Supersedes earlier unmerged PR #71 (do not ship both).
+- Task: minimize island and visual-plan delays, preserve safe conversational app referents, and enforce reasonable AI balances.
+- Android paths: `CortexPhoneActions.kt`, `CortexActionEngine.kt`, `CortexLocalCommands.kt`, `CortexTurnContext.kt`, `IslandAssistant.kt`, new/updated tests; WebView `model.js` adds only safe reference context, no UI or permission changes.
+- Edge paths: `handler.ts` 20-second visual plan cap, 5.5-second provider first-token deadline; `visual.ts` stricter short instruction guide and safe exact tool-envelope extraction; new regression tests. Production Edge v46 was checked against main (handler, provider, visual, singleflight, device and settings contents identical); Edge has NOT been deployed from this branch.
+- Production DB **was changed** per user request: `cortex_plans` guest 15k, free 30k, start 80k, pro 180k, ultra 350k daily tokens; read-back and `cortex_ai_usage` guest/free verification succeeded. See `docs/BETA_AI_BUDGET_AND_BRAIN_20261118.md` for original values and rollback. No schema or account override mutation.
+- Testing: source checks and added tests; awaiting GitHub Actions and physical Android/LLM smoke tests. Previous PR #71 failed only an outdated text-based QA expectation. Do not publish or claim signed beta APK until CI and release signer verification succeed.
+- Unresolved: real upstream latency under 500 concurrent installs, OpenRouter 20/min and 1000/day free rate, guest AI login policy, OEM flash callback and Accessibility behavior. No unconditional promises of universal Android access.
+- Next steps: verify CI and beta on Samsung A23, then review and merge PR only if passing; deploy a verified v47 Edge separately after exact file comparison. Existing signed v1.0.17 is the rollback candidate.
+
+
 ## 2026-11-18 UTC · Проверенный production: 6 OTP, Gemini TTS, авторизация
 
 - Коммит `6260e7814cf2660eeb80e032d89556feaa2da2ab` из PR #69 опубликован: исправлено 8 → 6 OTP в React, CSS и проверке формы. Production CSS `.otp-code` проверен на `https://cortexapp.ru/register`: шесть колонок, восемь отсутствуют; страница HTTP 200.
