@@ -1,7 +1,7 @@
-/** The input must accommodate both default six-digit and observed eight-digit email codes. */
-export const EMAIL_OTP_LENGTH = 8;
+/** Keep six fixed OTP slots to match the approved CORTEX registration layout. */
+export const EMAIL_OTP_LENGTH = 6;
 
 export function isEmailOtp(value: string): boolean {
   // The Auth server, not this client-side format check, validates the actual OTP.
-  return /^\d{6}(?:\d{2})?$/.test(value);
+  return /^\d{6}$/.test(value);
 }

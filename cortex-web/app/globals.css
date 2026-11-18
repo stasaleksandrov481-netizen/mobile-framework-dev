@@ -259,7 +259,7 @@ svg { display: block; flex-shrink: 0; }
 .registration-form > input::placeholder { color: #727272; }
 .registration-form > input:focus { border-color: #b1b1b1; background: #1a1a1a; }
 .registration-form > input:read-only { opacity: .68; }
-.otp-code { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: clamp(3px, 1vw, 8px); }
+.otp-code { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: clamp(3px, 1vw, 8px); }
 .otp-code .otp-digit {
   width: 100%; min-width: 0; height: 60px; padding: 0;
   border: 1px solid #444; border-radius: 13px; background: #151515;

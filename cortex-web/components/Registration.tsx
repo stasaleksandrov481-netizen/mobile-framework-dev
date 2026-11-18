@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
-import { isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
+import { isEmailDeliveryRateLimited, isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
 import { useCortexAccount } from "@/lib/use-cortex-account";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { completeVerifiedAccount } from "@/lib/verified-account";
@@ -32,6 +32,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
   const [successKind, setSuccessKind] = useState<SuccessKind>("existing");
   const [resendWait, setResendWait] = useState(0);
   const [confirmationRequested, setConfirmationRequested] = useState(false);
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState(false);
   const { checking: accountChecking, email: activeEmail } = useCortexAccount();
   const authSubmission = useRef(false);
   const resendSubmission = useRef(false);
@@ -130,12 +131,13 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       if (sendError) throw sendError;
       setCode("");
       setResendWait(60);
+      if (mode === "verify") setConfirmationEmailSent(true);
     } catch (failure) {
       if (isRateLimited(failure)) {
         setResendWait(300);
-        setError("Слишком много запросов. Попробуйте повторить через несколько минут.");
+        setError(safeAuthErrorMessage(failure));
       } else {
-        setError("Не удалось отправить новый код. Попробуйте позже.");
+        setError(safeAuthErrorMessage(failure));
       }
     }
     finally { resendSubmission.current = false; setBusy(false); }
@@ -203,12 +205,13 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
           setMode("done");
         } else {
           setResendWait(60);
+          setConfirmationEmailSent(true);
           setMode("verify");
         }
         setPassword("");
       } else if (mode === "verify") {
         if (activeEmail !== email.trim().toLowerCase()) {
-          if (!isEmailOtp(code)) throw new Error("Введите код из письма: 6 или 8 цифр.");
+          if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
           const { error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({
             email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
           }), 15_000);
@@ -229,7 +232,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         setResendWait(60);
         setMode("signin_code_verify");
       } else if (mode === "signin_code_verify") {
-        if (!isEmailOtp(code)) throw new Error("Введите код из письма: 6 или 8 цифр.");
+        if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
         const { error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code, type: "email",
         }), 15_000);
@@ -260,6 +263,9 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       if (isRateLimited(failure)) {
         setResendWait(300);
       }
+      if (mode === "signup" && isEmailDeliveryRateLimited(failure)) {
+        setConfirmationEmailSent(false);
+      }
       setError(safeAuthErrorMessage(failure));
     } finally {
       authSubmission.current = false;
@@ -275,6 +281,19 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     setResendWait(0);
     setConfirmationRequested(false);
     setMode(next);
+  }
+
+  function verifyExistingCode() {
+    const validationError = registrationValidationError({
+      mode: "verify", email, password: "", accepted: false, acceptedTerms: false,
+    });
+    if (validationError) { setError(validationError); return; }
+    setConfirmationEmailSent(false);
+    setCode("");
+    setError("");
+    // A code already received can be checked even if new emails are rate-limited.
+    // Preserve the cooldown so changing screens cannot spam the email provider.
+    setMode("verify");
   }
 
   async function signOut() {
@@ -328,9 +347,9 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             : mode === "recovery"
               ? "Укажите почту, с которой регистрировались. Если аккаунт существует, отправим ссылку для смены пароля."
             : mode === "verify"
-              ? emailOtpReady
-                ? "Мы отправили код подтверждения. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
-                : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
+              ? confirmationEmailSent
+                ? "Проверьте письмо с подтверждением. Если есть код, введите его ниже; если есть ссылка, откройте её."
+                : "Если письмо с кодом уже пришло, введите его ниже. Новый код можно запросить после окончания ограничения на отправку."
             : mode === "signin_code_verify"
               ? "Мы отправили код подтверждения. Введи его из письма, чтобы продолжить."
               : mode === "signin_code"
@@ -399,6 +418,11 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
                 : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
                   : signupEnabled ? <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></> : <span>Новые регистрации пока недоступны.</span>}
           </div>
+          {mode === "signup" && (
+            <button type="button" className="auth-code-switch" disabled={busy} onClick={verifyExistingCode}>
+              У меня уже есть код подтверждения
+            </button>
+          )}
           {emailOtpReady && (mode === "signin" || mode === "signin_code") && (
             <button type="button" className="auth-code-switch" onClick={() => switchMode(mode === "signin" ? "signin_code" : "signin")}>
               {mode === "signin" ? "Войти по коду из почты" : "Войти с паролем"}

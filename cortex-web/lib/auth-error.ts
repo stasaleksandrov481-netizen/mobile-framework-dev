@@ -8,7 +8,18 @@ export function isRateLimited(error: unknown): boolean {
   return status === 429 || /rate limit|too many requests|email rate limit/i.test(message);
 }
 
+/** Supabase email quota is separate from password/OTP attempt limits. */
+export function isEmailDeliveryRateLimited(error: unknown): boolean {
+  const code = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code : undefined;
+  const message = error instanceof Error ? error.message : "";
+  return code === "over_email_send_rate_limit" || /email (send )?rate limit|email rate limit exceeded/i.test(message);
+}
+
 export function safeAuthErrorMessage(error: unknown): string {
+  if (isEmailDeliveryRateLimited(error)) {
+    return "Сервис отправки писем перегружен. Если код уже пришёл, его можно ввести без повторной отправки. Иначе попробуйте запросить письмо через несколько минут.";
+  }
   if (isRateLimited(error)) {
     return "Слишком много запросов. Подождите несколько минут и попробуйте снова.";
   }
@@ -22,7 +33,7 @@ export function safeAuthErrorMessage(error: unknown): string {
   if (/email not confirmed/i.test(message)) return "Сначала подтвердите адрес электронной почты.";
   if (/token has expired|invalid token|otp_expired/i.test(message)) return "Код неверный или уже истёк. Проверьте последнее письмо либо запросите новый код ниже.";
   if (/error sending (confirmation |magic link )?email|failed to send (confirmation |magic link )?email|could not send email|non-local recipient/i.test(message)) {
-    return "Почтовый сервер не смог отправить письмо. Попробуйте позже или напишите на support@cortexapp.ru.";
+    return "Письмо не удалось доставить. Проверьте адрес почты; если он верный, обратитесь на support@cortexapp.ru.";
   }
   if (/password should|password is too|weak_password/i.test(message)) return "Пароль не соответствует требованиям безопасности. Используйте более сложный пароль.";
   if (/invalid email|email address.*invalid/i.test(message)) return "Проверьте правильность электронной почты.";

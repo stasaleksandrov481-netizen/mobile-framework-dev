@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
-import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
+import { isEmailDeliveryRateLimited, isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import { registrationIsOpen } from "../lib/registration-gate.ts";
 import { insertPreregistrationIfMissing } from "../lib/preregistration-write.ts";
@@ -39,12 +39,12 @@ test("Email confirmation never overwrites an existing launch-notification prefer
   assert.equal(inserts, 0);
 });
 
-test("Email OTP input supports both six- and eight-digit Auth templates", () => {
-  assert.equal(EMAIL_OTP_LENGTH, 8);
+test("Email OTP input retains the approved six digit boxes", () => {
+  assert.equal(EMAIL_OTP_LENGTH, 6);
   assert.equal(isEmailOtp("001234"), true);
   assert.equal(isEmailOtp("12345"), false);
-  assert.equal(isEmailOtp("12345678"), true);
-  assert.equal(isEmailOtp("00000000"), true);
+  assert.equal(isEmailOtp("12345678"), false);
+  assert.equal(isEmailOtp("00000000"), false);
   assert.equal(isEmailOtp("1234567"), false);
   assert.equal(isEmailOtp("123456789"), false);
   assert.equal(isEmailOtp("1234ab"), false);
@@ -52,7 +52,9 @@ test("Email OTP input supports both six- and eight-digit Auth templates", () => 
   const form = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
   assert.match(input, /const CODE_LENGTH = EMAIL_OTP_LENGTH/);
   assert.match(form, /isEmailOtp\(code\)/);
-  assert.doesNotMatch(form, /восьмизначн/);
+  assert.doesNotMatch(form, /6 или 8|восьмизначн/);
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(styles, /\.otp-code \{ display: grid; grid-template-columns: repeat\(6,/);
 });
 
 test("Signup always explains invalid email, missing agreement and short password without relying on browser tooltip", () => {
@@ -94,8 +96,16 @@ test("Auth errors are actionable and never expose backend messages", () => {
   assert.match(safeAuthErrorMessage(new Error("Failed to fetch")), /сервером/);
   assert.match(safeAuthErrorMessage(new RegistrationValidationError("Введите адрес электронной почты.")), /Введите адрес/);
   assert.doesNotMatch(safeAuthErrorMessage(new Error("Введите секретное значение внутреннего сервиса")), /секретное/);
-  assert.match(safeAuthErrorMessage(new Error("Error sending confirmation email")), /Почтовый сервер/);
+  assert.match(safeAuthErrorMessage(new Error("Error sending confirmation email")), /Письмо не удалось доставить/);
   assert.match(safeAuthErrorMessage(Object.assign(new Error("rate limit exceeded"), { status: 429 })), /Слишком много запросов/);
+  const mailQuota = Object.assign(new Error("email rate limit exceeded"), { status: 429, code: "over_email_send_rate_limit" });
+  assert.equal(isEmailDeliveryRateLimited(mailQuota), true);
+  assert.equal(isRateLimited(mailQuota), true);
+  assert.match(safeAuthErrorMessage(mailQuota), /код уже пришёл/);
+  assert.equal(isEmailDeliveryRateLimited(Object.assign(new Error("too many"), { status: 429 })), false);
+  const form = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  assert.match(form, /У меня уже есть код подтверждения/);
+  assert.match(form, /setMode\("verify"\)/);
   assert.doesNotMatch(safeAuthErrorMessage(new Error("sensitive database diagnostics")), /sensitive/);
 });
 
@@ -272,7 +282,7 @@ test("Auth errors cannot leak raw database, SMTP or account-enumeration details"
   assert.match(safeAuthErrorMessage(new Error("CORTEX_REQUEST_TIMEOUT")), /слишком долго/);
   assert.match(safeAuthErrorMessage(new Error("Invalid login credentials")), /восстановлением доступа/);
   assert.match(safeAuthErrorMessage(new Error("Token has expired")), /запросите новый код/);
-  assert.match(safeAuthErrorMessage(new Error('gomail: could not send email: 550 non-local recipient verification failed')), /Почтовый сервер/);
+  assert.match(safeAuthErrorMessage(new Error('gomail: could not send email: 550 non-local recipient verification failed')), /Письмо не удалось доставить/);
 });
 
 test("Co-operators load from server config, seller is operator B, and incomplete data fails closed", () => {
