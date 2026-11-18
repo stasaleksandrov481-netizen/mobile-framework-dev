@@ -170,6 +170,9 @@ svg { display: block; flex-shrink: 0; }
 .button-soon { margin-left: 4px; color: #939393; font-size: 11px; font-weight: 700; }
 .bonus-note { max-width: 470px; margin: 25px auto 0; color: #858585; font-size: 12px; line-height: 1.7; }
 .bonus-note strong { color: #dadada; font-weight: 680; }
+.beta-disclosure { max-width: 610px; margin: 22px auto 0; padding: 17px 10px 0; border-top: 1px solid #303030; color: #9b9b9b; font-size: 12px; line-height: 1.75; }
+.beta-disclosure strong { color: #ededed; font-weight: 690; }
+.beta-disclosure a { color: #ddd; text-decoration: underline; text-underline-offset: 3px; }
 
 .site-footer {
   display: flex;
