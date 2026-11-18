@@ -1,4 +1,4 @@
-export type RegistrationMode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify";
+export type RegistrationMode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "recovery";
 
 /** Only messages created by local validation may be displayed verbatim. */
 export class RegistrationValidationError extends Error {
