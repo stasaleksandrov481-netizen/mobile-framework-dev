@@ -31,13 +31,21 @@ internal data class ConversationRequest(
         private val chatName = Regex("""(?:чат|переписк\p{L}*|диалог|личку|chat)\s+(?:с\s+|with\s+)?(.+?)(?=\s*(?:[,;:]|\s+(?:и\s+)?(?:напиши|отправь|введи|набери|подготовь)\b)|$)""", RegexOption.IGNORE_CASE)
         private val explanatory = Regex("""^(?:как|почему|объясни|подскажи как|how|why|explain)\b""")
         private val to = Regex("""\b(?:напиши|отправь)\s+(?:(?:сообщение|текст)\s+)?(?:контакту\s+|пользователю\s+)?(.+?)(?=\s*(?:\b(?:в|in)\s+|[:«"]))""", RegexOption.IGNORE_CASE)
-        private val composing = Regex("""(?<![\p{L}\p{N}_])(?:напиши|отправь|скинь|набери|подготовь|введи|send|write)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
+        private val composing = Regex("""(?<![\p{L}\p{N}_])(?:напиши|отправь|скинь|передай|набери|подготовь|введи|send|write)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
         private val messageMarker = Regex("""\b(?:напиши|отправь|набери|подготовь|введи|send|write)\s*(?:сообщение|текст)?\s*[:—]?\s*(.*)""", RegexOption.IGNORE_CASE)
         private val draft = Regex("""(?<![\p{L}\p{N}_])(?:черновик|не\s+отправляй|без\s+отправки|draft)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
         private val genericRecipient = Regex("""^(?:друг\p{L}*|подруг\p{L}*|контакт\p{L}*|человек\p{L}*|собеседник\p{L}*|кому нибудь|с кем нибудь|friend|contact)$""")
 
         private val knownApp = Regex("""(?<![\p{L}\p{N}_])(?:в|через)\s+(телеграмме?|телеграме?|телеге|телегу|тг|telegram|whatsapp|ватсапе?|вотсапе?|вк|вконтакте|максе?|discord|signal|viber)(?=$|[\s,;:.!?])""", RegexOption.IGNORE_CASE)
-        private val shortWrite = Regex("""^(?:пожалуйста,?\s+)?(?:напиши|отправь|скинь)\s+(?:сообщение\s+)?(?:контакту\s+)?(.+)$""", RegexOption.IGNORE_CASE)
+        private val shortWrite = Regex("""^(?:(?:можешь(?:\s+мне)?|пожалуйста|давай|надо)[, ]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение\s+)?(?:(?:контакту|пользователю)\s+)?(.+)$""", RegexOption.IGNORE_CASE)
+        private val address = Regex("""^(@[a-zA-Z0-9_.]{3,64})\s*(?:[:—,]\s*|\s+)(.+)$""")
+        private val named = Regex("""^(.{1,90}?)\s*[:—]\s*(.+)$""")
+        private val messageIntent = Regex("""(?iu)^(?:(?:можешь|пожалуйста|давай)[,\s]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение\b|контакту\b|пользователю\b|@[a-zA-Z0-9_]|.+\s+(?:в|через)\s+(?:телеграм\p{L}*|тг|whatsapp|ватсап\p{L}*|мессенджер\p{L}*))""")
+
+        fun wantsMessage(raw: String): Boolean {
+            val text = CortexHotword.command(raw) ?: raw.trim()
+            return messageIntent.containsMatchIn(text)
+        }
         private val immediateMessage = Regex("""^(@[\w.]{3,64}|[\p{L}\p{N}._-]{1,60})[\s,]+((?:как\s+(?:дела|ты|сам(?:а)?)|привет|здравствуй|доброе\s+утро|спасибо|я\s+|мы\s+|ты\s+|вы\s+|давай\s+|буду\s+|до\s+встречи|что\s+|когда\s+|где\s+|жду)[\s\S]*)$""", RegexOption.IGNORE_CASE)
 
         private fun messengerName(value: String): String? {
@@ -58,10 +66,10 @@ internal data class ConversationRequest(
 
         private fun simpleRequest(command: String, app: String, send: Boolean): ConversationRequest? {
             val tail = shortWrite.matchEntire(command)?.groupValues?.get(1)?.trim().orEmpty()
-            val straight = immediateMessage.matchEntire(tail)
+            val straight = address.matchEntire(tail) ?: named.matchEntire(tail) ?: immediateMessage.matchEntire(tail)
             if (straight != null) {
                 val recipient = recipientName(straight.groupValues[1])
-                if (recipient.isNotBlank()) return ConversationRequest(app, recipient, straight.groupValues[2].take(2_000), send)
+                if (recipient.isNotBlank()) return ConversationRequest(app, recipient, unquote(straight.groupValues[2].trim()).take(2_000), send)
             }
             val quote = quoted.find(tail)?.takeIf { it.range.first > 0 } ?: return null
             val recipient = recipientName(tail.take(quote.range.first).trimEnd(' ', ':', ','))
@@ -75,7 +83,7 @@ internal data class ConversationRequest(
             val unquoted = command.replace(quoted) { " ".repeat(it.value.length) }
             if (explanatory.containsMatchIn(VisualLabels.normalize(unquoted)) || !composing.containsMatchIn(unquoted)) return null
             val chat = chatName.find(command)
-            val hasMessage = Regex("""(?<![\p{L}\p{N}_])(?:сообщение|черновик|напиши|отправь|скинь|message)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
+            val hasMessage = Regex("""(?<![\p{L}\p{N}_])(?:сообщение|черновик|напиши|отправь|скинь|передай|message)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
                 .containsMatchIn(command)
             if (chat == null && !hasMessage) return null
             val draftOnly = draft.containsMatchIn(unquoted)
@@ -86,10 +94,14 @@ internal data class ConversationRequest(
                 .firstOrNull { (_, name) -> name != null }
             val app = appMatch?.second.orEmpty()
             if (chat == null) {
-                val simple = if (appMatch == null) command else command.removeRange(appMatch.first.range).trim(' ', ',', ';', ':')
+                var simple = if (appMatch == null) command else command.removeRange(appMatch.first.range).trim(' ', ',', ';', ':')
+                simple = simple.replace(Regex("(?i)^и\\s+"), "")
+                val draftSuffix = draft.find(simple.replace(quoted) { " ".repeat(it.value.length) })
+                if (draftSuffix != null && simple.substring(draftSuffix.range.last + 1).trim().isEmpty())
+                    simple = simple.take(draftSuffix.range.first).trimEnd(' ', ',', ';')
                 simpleRequest(simple, app, !draftOnly)?.let { return it }
             }
-            if (app.isBlank()) return null
+            if (app.isBlank() && chat == null && !wantsMessage(command)) return null
             val recipient = recipientName(chat?.groupValues?.get(1) ?: to.find(command)?.groupValues?.get(1).orEmpty())
             val tail = messageMarker.findAll(command).lastOrNull()?.groupValues?.get(1).orEmpty()
             val quote = quoted.find(tail)?.groupValues?.drop(1)?.firstOrNull(String::isNotBlank)

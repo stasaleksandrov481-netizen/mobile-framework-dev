@@ -32,6 +32,9 @@ internal class VisualNavigation(context: Context, private val service: CortexScr
         apps.singleOrNull { normalized == VisualLabels.normalize(it.label) }?.let { return it }
         val alias = APP_NAMES[normalized]
         if (alias != null) apps.singleOrNull { VisualLabels.normalize(it.label) == alias }?.let { return it }
+        CortexPhoneActions(context).resolveApp(alias ?: target)?.let { resolved ->
+            return VisualApp(resolved.name, resolved.pkg)
+        }
         val ranked = apps.map { it to VisualLabels.score(it.label, target) }.filter { it.second >= 60 }
             .sortedByDescending { it.second }
         if (ranked.isNotEmpty() && ranked.drop(1).none { it.second >= ranked.first().second - 5 }) return ranked.first().first
@@ -49,7 +52,7 @@ internal class VisualNavigation(context: Context, private val service: CortexScr
                     .takeIf { VisualLabels.normalize(app.label) in SETTINGS_NAMES }
             if (intent != null) {
                 report("Открываю «${app.label}»…")
-                if (launch(intent)) return await(3_500L) { it.pkg == app.pkg } != null
+                if (launch(intent)) return await(APP_START_MS) { it.pkg == app.pkg && it.tree.isNotEmpty() } != null
             }
         }
         if (home.isEmpty()) return false
@@ -243,6 +246,22 @@ internal class VisualNavigation(context: Context, private val service: CortexScr
         return null
     }
 
+    suspend fun writeText(frame: VisualFrame, text: String, field: (VisualFrame) -> VisualNode?): VisualFrame? {
+        var nextWrite = 0L
+        return await(4_500L) { current ->
+            if (current.pkg != frame.pkg || current.window != frame.window || current.secure || current.hasPrivateFields) return@await false
+            val editor = field(current) ?: return@await false
+            if (service.fieldMatches(current, editor, text)) return@await true
+            val now = SystemClock.uptimeMillis()
+            if (now >= nextWrite) {
+                val accepted = service.setText(current, editor, text)
+                if (!accepted && !editor.focused) service.focusField(current, editor)
+                nextWrite = now + if (accepted) 800L else 350L
+            }
+            false
+        }
+    }
+
     suspend fun after(before: VisualFrame, scrolled: Boolean = false): VisualFrame? {
         val beforeStructure = before.structure()
         return await {
@@ -252,6 +271,7 @@ internal class VisualNavigation(context: Context, private val service: CortexScr
     }
 
     companion object {
+        const val APP_START_MS = 12_000L
         private val SETTINGS_NAMES = setOf("настройки", "настройках", "settings")
         private val ALL_APPS = setOf("all apps", "apps", "app drawer", "все приложения", "приложения", "меню приложений")
         private val CLOCK = Regex("""\d{1,2}[:.]\d{2}(?:\s*[AaPp][Mm])?""")

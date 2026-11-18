@@ -69,8 +69,13 @@ internal class CortexPhoneActions(private val context: Context) {
             }
             "open_web" -> {
                 val url = CortexSafeUrl.parse(target) ?: return status("invalid")
-                return started(Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())).addCategory(Intent.CATEGORY_BROWSABLE))
-                    .put("host", url.host.orEmpty())
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())).addCategory(Intent.CATEGORY_BROWSABLE)
+                val browser = command.optString("browser")
+                if (browser.isNotBlank()) {
+                    val installed = resolveApp(browser) ?: return status("not_installed").put("name", browser)
+                    intent.setPackage(installed.pkg)
+                }
+                return started(intent).put("host", url.host.orEmpty())
             }
             "play_store" -> {
                 val query = command.optString("query").trim().take(100)
@@ -329,7 +334,8 @@ internal class CortexPhoneActions(private val context: Context) {
         val expected = result.optString("package")
         if (kind in setOf("app", "close_app") && result.optString("status") == "opened" &&
             expected.isNotBlank() && CortexScreenService.connected != null) {
-            awaitState(active, attempts = 6, interval = 105L, condition = {
+            // Return on the first observed foreground change, including cold starts.
+            awaitState(active, attempts = if (kind == "app") 60 else 12, interval = 180L, condition = {
                 val foreground = CortexScreenService.connected?.activePackage()
                 foreground != null && if (kind == "close_app") foreground != expected else foreground == expected
             }) { confirmed -> done(result.put("verified", confirmed)) }
@@ -441,6 +447,7 @@ internal class CortexPhoneActions(private val context: Context) {
             "org.telegram.messenger" to TELEGRAM_NAMES,
             "org.telegram.messenger.web" to TELEGRAM_NAMES,
             "org.thunderdog.challegram" to listOf("telegram x", "телеграм x"),
+            "com.wildberries.ru" to listOf("wildberries", "вб", "вайлдберриз"),
             "com.zhiliaoapp.musically" to listOf("tiktok", "тик ток", "тикток", "тиктоке", "тт"),
             "com.instagram.android" to listOf("instagram", "инстаграм", "инстаграме"),
             "com.google.android.youtube" to listOf("youtube", "ютуб", "ютубе"),

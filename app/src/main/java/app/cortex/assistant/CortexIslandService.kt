@@ -465,7 +465,6 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         view.cancelPlacementWait()
         val generation = ++layoutGeneration
         opening = open
-        view.conversation.media(if (open && CortexActionState.gate == "open") CortexMedia.player(this) else null)
         moving = true
         if (!open) {
             keyboardFocus = false
@@ -484,6 +483,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                                 if (island === view && generation == layoutGeneration && !exiting) {
                                     moving = false
                                     placeIsland(view)
+                                    val player = if (open && CortexActionState.gate == "open" && CortexSchedule.screenReady(this))
+                                        CortexMedia.player(this) else null
+                                    view.conversation.media(player)
                                     if (!open) {
                                         if (task?.let { it.phase != "executing" && SystemClock.uptimeMillis() - it.at >= RESULT_MS } == true) task = null
                                         render()
@@ -507,7 +509,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         val box = if (Build.VERSION.SDK_INT >= 33) geometry.window(true) else touchBox
         // Android 13+ keeps the surface fixed; older versions resize around its center.
         // The artwork uses screen coordinates in both cases.
-        val x = (box.exactCenterX() - geometry.screen.bounds.exactCenterX()).roundToInt()
+        val x = if (Build.VERSION.SDK_INT >= 33) box.left - geometry.screen.bounds.left
+            else (box.exactCenterX() - geometry.screen.bounds.exactCenterX()).roundToInt()
         val y = box.top - geometry.screen.bounds.top
         val flags = windowFlags(keyboardFocus)
         val changed = x != params.x || y != params.y || box.width() != params.width ||
@@ -538,7 +541,6 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         ui.removeCallbacks(clearTask)
         reply = ""
         updateStatus("thinking", "Думаю…")
-        setExpanded(true)
         val streamed = StringBuilder()
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
             modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
@@ -597,7 +599,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             windowFlags(false),
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = if (Build.VERSION.SDK_INT >= 33) Gravity.TOP or Gravity.LEFT
+                else Gravity.TOP or Gravity.CENTER_HORIZONTAL
             alpha = windowAlpha(false)
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
             if (Build.VERSION.SDK_INT >= 30) {

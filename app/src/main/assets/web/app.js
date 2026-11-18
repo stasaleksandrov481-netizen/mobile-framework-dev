@@ -1008,6 +1008,10 @@
     const request = chat.messages.at(-1)?.text || "";
     const native = await nativeAction(job, request);
     if (native || pending !== job) return native || {};
+    // A plain chat completion receives no Android action result.
+    const deviceRequest = /^(?:(?:кортекс|пожалуйста|можешь|давай)[,\s]+)*(?:отправь|перешли|передай|опубликуй|выложи|закажи|нажми|открой|пройди|напиши\s+@)/iu.test(request);
+    if (deviceRequest && !job.explain && !job.screen) return { local: true,
+      text: "Уточните приложение и действие. Пока ни одного шага Android не подтверждено." };
     if (Api.android && navigator.onLine === false) throw Api.failure("offline");
     const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
     const deviceContext = {
@@ -1040,7 +1044,7 @@
         if (activeChat(job)) render({ bottom: true });
       },
       onDelta(delta) {
-        if (pending !== job) return;
+        if (pending !== job || deviceRequest) return;
         job.action = "";
         job.text += delta;
         if (!job.streamPainted && job.text.trim() && appVisible() && activeChat(job)) { drawDelta(job); return; }
@@ -1049,7 +1053,10 @@
       }
     });
     job.action = "";
-    return { text: typeof result.text === "string" ? result.text : "" };
+    const response = typeof result.text === "string" ? result.text : "";
+    const claim = /(?<![\p{L}\p{N}_])(?:отправил|переслал|отправлено|доставлен[аоы]?|выложил|опубликовал|опубликовано|купил|заказал|прошёл)(?![\p{L}\p{N}_])/iu;
+    return { text: deviceRequest && claim.test(response)
+      ? "Android пока не подтвердил действие." : response };
   }
 
   async function answer(chat, text, { retry = false, from, voiceTurn, explain = false, includeScreen = true, force = false } = {}) {

@@ -28,7 +28,7 @@ test("island customization controls rendering and first-step feedback", () => {
   assert.match(engine, /if \(CortexActionState\.firstCommand\) \{\s+CortexActionState\.firstCommand = false\s+delay\(1_000L\)/);
   assert.match(engine, /direct != null && reply == null -> \{\s*firstStep\(::report\)\s*executeSystem/);
   assert.match(engine, /!visualAllowed ->/);
-  assert.match(native("CortexPhoneActions.kt"), /attempts = 6, interval = 105L/);
+  assert.match(native("CortexPhoneActions.kt"), /attempts = if \(kind == "app"\) 60 else 12, interval = 180L/);
 });
 
 test("Android Assistant invocation opens the island without loading MainActivity or waking the microphone", () => {
@@ -60,7 +60,8 @@ test("window placement is observed before morphs and pending transitions are can
 
 test("the shrinking overlay stays centred instead of snapping to a left-gravity anchor", () => {
   const service = native("CortexIslandService.kt");
-  assert.match(service, /gravity = Gravity\.TOP or Gravity\.CENTER_HORIZONTAL/);
+  assert.match(service, /else Gravity\.TOP or Gravity\.CENTER_HORIZONTAL/);
+  assert.match(service, /if \(Build\.VERSION\.SDK_INT >= 33\) box\.left - geometry\.screen\.bounds\.left/);
   assert.match(service, /box\.exactCenterX\(\) - geometry\.screen\.bounds\.exactCenterX\(\)/);
   assert.doesNotMatch(service, /val x = box\.left - geometry\.screen\.bounds\.left/);
   // For a symmetric expand/collapse, the requested overlay centre never moves
@@ -100,4 +101,14 @@ test("Android 13+ keeps the compositor bounds fixed while the touchable region c
   assert.match(service, /maximumObscuringOpacityForTouch/);
   assert.match(service, /alpha = windowAlpha\(false\)/);
   assert.match(island, /surface\.setTouchableRegion\(touchRegion\)/);
+});
+
+test("the island changes opacity with neither shell geometry nor the logo moving horizontally", () => {
+  const surface = native("LiquidIslandView.kt");
+  assert.match(surface, /body\.set\(panel\)/);
+  assert.match(surface, /compactBody\.set\(compact\)/);
+  assert.match(surface, /drawShell\(canvas, body, panelAlpha/);
+  assert.match(surface, /drawShell\(canvas, compactBody, compactAlpha/);
+  assert.match(surface, /val logoX = compactBody\.centerX\(\)/);
+  assert.doesNotMatch(surface, /mix\(compact\.left|mix\(compact\.right|clipConversation\(/);
 });

@@ -2,6 +2,8 @@ package app.cortex.assistant
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.graphics.Rect
 import android.os.Build
 import android.os.PowerManager
@@ -79,21 +81,32 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val resumeText = VisualRequest.isResume(text)
         val network = NetworkRequest.parse(text)
         val command = VisualRequest.goal(text)
+        val resolver = phone.commandAppResolver()
         val conversation = explicitConversation ?: if (network == null && !resumeText) {
-            val resolve = phone.commandAppResolver()
-            ConversationRequest.parse(command) { resolve(it) != null }
+            ConversationRequest.parse(command) { resolver(it) != null }
         } else null
-        val action = conversation != null || VisualRequest.isAction(text)
+        val search = if (network == null && !resumeText && conversation == null)
+            AppSearchRequest.parse(command) { resolver(it) != null } else null
+        val schoolSite = isSchoolSite(command) && !SCHOOL_EXPLANATION.containsMatchIn(command) &&
+            (VisualRequest.isAction(text) || SCHOOL_ACTION.containsMatchIn(command))
+        val action = conversation != null || search != null || schoolSite ||
+            ConversationRequest.wantsMessage(command) || VisualRequest.isAction(text)
         val scenario = explicitScenario ?: CortexScenarios.find(context, text)
         if (!allowPhone) {
             if (!action && scenario == null && network == null && !force) return false
             finished(Result("Управление телефоном выключено. Его можно включить в разделе «Вызов».", false))
             return true
         }
-        val direct = if (!resumeText && network == null) parseSystem(command) else null
+        val direct = when {
+            schoolSite && SCHOOL_OPEN.containsMatchIn(command) && !SCHOOL_TASK.containsMatchIn(command) ->
+                listOf(schoolUrl(command))
+            schoolSite || search != null || conversation != null -> null
+            !resumeText && network == null -> parseSystem(command)
+            else -> null
+        }
         val reply = saved?.takeIf { !resumeText && it.source == source && it.question.isNotBlank() &&
             SystemClock.uptimeMillis() - it.pausedAt < 180_000L && text.length <= 2_000 &&
-            (text.startsWith('«') || text.startsWith('"') ||
+            (it.schoolSite && schoolBrowser(text).isNotBlank() || text.startsWith('«') || text.startsWith('"') ||
                 (!action && network == null && !text.endsWith('?')) ||
                 it.conversation?.let { pending -> pending.app.isBlank() && pending.withAnswer(text).app.isNotBlank() } == true) }
         if (!force && !resumeText && reply == null && scenario == null && network == null && direct == null && !action) return false
@@ -109,7 +122,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null
         } else null
         val task = state?.copy(plans = 0, failures = linkedSetOf(), progress = CortexPlanTracker())
-            ?: Task(command, profile, source, conversation = conversation, scheduled = scheduled)
+            ?: Task(command, profile, source, conversation = conversation, search = search, schoolSite = schoolSite, scheduled = scheduled)
         if (reply != null) {
             task.conversation = task.conversation?.withAnswer(text)
             if (task.conversation == null) {
@@ -391,6 +404,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     ): Result {
         val navigation = VisualNavigation(context, service)
         val conversation = task.conversation
+        task.search?.let { request ->
+            firstStep(report)
+            beforeScreen()
+            return ScreenSearch(service, navigation).find(request, report)
+        }
         if (conversation != null) {
             task.conversation = conversation
             task.question = conversation.question
@@ -399,12 +417,38 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             beforeScreen()
             return ConversationNavigation(service, navigation, ::confirm).run(conversation, report)
         }
-        firstStep(report)
-        if (task.completed == 0 && task.queue.isEmpty() && task.plans == 0 && task.lastIssue.isBlank() && !task.local) {
-            if (isSchoolSite(task.request) && !browserSpecified(task.request)) {
-                task.question = "В каком браузере открыт ваш аккаунт Учи.ру?"
+        if (ConversationRequest.wantsMessage(task.request)) {
+            task.question = "Кому, в каком мессенджере и какой текст написать?"
+            return Result(task.question, false, true)
+        }
+        var preparedScreen: VisualFrame? = null
+        if (task.schoolSite && !task.siteOpened) {
+            val browser = schoolBrowser(task.request)
+            if (browser.isBlank() && !task.request.contains("браузер по умолчанию", ignoreCase = true)) {
+                task.question = "В каком браузере открыть Учи.ру? Например, в Chrome."
                 return Result(task.question, false, true)
             }
+            val app = browser.takeIf(String::isNotBlank)?.let(navigation::resolve)
+            if (browser.isNotBlank() && app == null) return Result("Браузер «$browser» не найден.", false)
+            firstStep(report)
+            beforeScreen()
+            report("Открываю Учи.ру…")
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(SCHOOL_URL))
+            app?.let { intent.setPackage(it.pkg) }
+            if (!navigation.launch(intent)) return Result("Android не открыл Учи.ру в выбранном браузере.", false)
+            preparedScreen = navigation.await(VisualNavigation.APP_START_MS) { current ->
+                val expected = app?.pkg
+                (expected == null && current.pkg != context.packageName && current.pkg !in navigation.home ||
+                    expected != null && current.pkg == expected) &&
+                    current.tree.any { it.label.contains("учи.ру", true) || it.label.contains("uchi.ru", true) ||
+                        it.description.contains("uchi.ru", true) }
+            } ?: return Result("Передал адрес Учи.ру в браузер. Страница ещё не подтвердила загрузку.", false, true)
+            task.siteOpened = true
+            task.lastIssue = READ_SCREEN
+            task.verified.addLast("OPEN_SITE: uchi.ru")
+        }
+        firstStep(report)
+        if (task.completed == 0 && task.queue.isEmpty() && task.plans == 0 && task.lastIssue.isBlank() && !task.local) {
             val local = VisualRequest.local(task.request) { navigation.resolve(it) != null }
             if (local != null) {
                 task.local = true
@@ -423,7 +467,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             }
             if (task.queue.isEmpty()) {
                 if (task.completed > 0 && feedback.isBlank()) {
-                    if (!task.modelUsed) return Result(task.answer.ifBlank { "Задача выполнена." }, true)
+                    if (!task.modelUsed) return Result("Команды выполнены. Подтверждённых шагов Android: ${task.completed}.", true)
                     feedback = VERIFIED_STAGE
                     task.lastIssue = feedback
                 }
@@ -432,8 +476,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 val explicitReading = VisualRequest.readsScreen(task.request)
                 val needsScreen = feedback == READ_SCREEN || task.plans > 0 && feedback.isNotBlank() ||
                     VisualRequest.needsVisibleScreen(task.request) && !VisualRequest.opensFirst(task.request)
-                val frame = if (needsScreen) service.frame()?.takeUnless { it.pkg == context.packageName }
+                val frame = if (needsScreen) (preparedScreen ?: service.frame())?.takeUnless { it.pkg == context.packageName }
                     ?: navigation.await(550L) { it.pkg != context.packageName } else null
+                preparedScreen = null
                 if (frame?.secure == true || frame?.hasPrivateFields == true || service.locked()) return manual()
                 val useFrame = needsScreen && frame != null && frame.pkg != context.packageName &&
                     frame.pkg !in navigation.home && !frame.hasPrivateFields
@@ -457,21 +502,27 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 task.modelUsed = true
                 val result = plan(task, navigation, service, screen, feedback, explicitReading, report)
                 val plan = result.first ?: return Result(
-                    if (feedback.isNotBlank() && feedback != VERIFIED_STAGE && feedback != READ_SCREEN) "$feedback ${result.second}"
-                    else result.second, false, true)
+                    when {
+                        task.siteOpened -> "Учи.ру открыт в браузере. ${result.second}"
+                        feedback.isNotBlank() && feedback != VERIFIED_STAGE && feedback != READ_SCREEN -> "$feedback ${result.second}"
+                        else -> result.second
+                    }, false, true)
                 if (plan.steps.isEmpty()) {
                     if (plan.question.isNotBlank()) {
-                        task.question = plan.question
-                        return Result(plan.question, false, true)
+                        task.question = plan.question.takeUnless(PhoneActionEvidence::containsClaim)
+                            ?: "Уточните, какой результат нужно получить на этом экране."
+                        return Result(task.question, false, true)
                     }
-                    if (plan.done && task.completed > 0 && (feedback == VERIFIED_STAGE || feedback == READ_SCREEN) && screen != null) {
-                        return Result(plan.answer.ifBlank { "Задача выполнена." }, true)
+                    val answer = plan.answer.takeUnless(PhoneActionEvidence::containsClaim).orEmpty()
+                    if (explicitReading && screen != null && answer.isNotBlank()) return Result(answer, true)
+                    val details = task.verified.lastOrNull()?.let { step ->
+                        if (step.startsWith("OPEN: ")) "Открыто приложение «" + step.removePrefix("OPEN: ") + "»."
+                        else if (step == "OPEN_SITE: uchi.ru") "Учи.ру открыт в браузере."
+                        else "Подтверждённых шагов Android: ${task.completed}."
                     }
-                    if (plan.done && task.completed > 0 && screen == null) {
-                        return Result("Не вижу итоговый экран, поэтому не могу подтвердить завершение. Откройте результат и продолжите.", false, true)
-                    }
-                    return Result(plan.answer.ifBlank { "Нужен следующий шаг на экране." }, false,
-                        task.completed > 0 && feedback != READ_SCREEN)
+                    val hint = if (!plan.done && answer.isNotBlank() && task.completed == 0) answer
+                        else "Конечный результат пока не подтверждён."
+                    return Result(listOfNotNull(details, hint).joinToString(" "), false, task.verified.isNotEmpty())
                 }
                 val first = plan.steps.first()
                 val reference = first.target.takeIf { it.startsWith('#') }
@@ -488,25 +539,25 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 }
                 task.boundScreen = screen?.takeIf { first.action in SCREEN_STEPS }
                 task.queue.addAll(plan.steps)
-                task.answer = plan.answer
-                task.question = plan.question
+                task.question = plan.question.takeUnless(PhoneActionEvidence::containsClaim).orEmpty()
                 task.lastIssue = ""
                 feedback = ""
             }
             val step = task.queue.first()
             val signature = step.copy(expect = "", confirm = false)
             val frame = service.frame()
-            val binding = task.boundScreen
+            var binding = task.boundScreen
             task.boundScreen = null
             if ((binding == null && step.target.startsWith('#')) ||
                 (binding != null && (frame?.pkg != binding.pkg || frame.window != binding.window ||
-                    frame.structure() != binding.structure()))) {
+                    (step.target.startsWith('#') && frame.structure() != binding.structure())))) {
                 task.deferred = task.queue.drop(1)
                 task.queue.clear()
                 feedback = "Экран изменился, пока модель строила план. Проверь текущие элементы."
                 task.lastIssue = feedback
                 continue
             }
+            if (binding != null && !step.target.startsWith('#')) binding = frame
             val attempt = Attempt(frame?.pkg, frame?.window, frame?.structure(), signature)
             if (attempt in task.failures) {
                 task.deferred = task.queue.drop(1)
@@ -756,9 +807,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             return StepOutcome(false, "Поле содержит недопустимые символы.")
         }
         report("Вставляю текст…")
-        if (!service.setText(before, node, step.value)) return StepOutcome(false, "Android не разрешил ввод в это поле.")
-        report("Проверяю введённый текст…")
-        val verified = navigation.await { it.pkg == before.pkg && service.fieldMatches(before, node, step.value) } != null
+        val verified = navigation.writeText(before, step.value) { current ->
+            current.tree.singleOrNull { it.editable && it.enabled && it.path == node.path &&
+                it.resource == node.resource && it.role == node.role }
+        } != null
         return StepOutcome(verified, "Текст в поле не совпал с запросом.")
     }
 
@@ -885,8 +937,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         // a verified multi-step task. Only retry transient failures, never
         // provider quotas, authorization, or malformed plans.
         var result: JSONObject? = null
+        val planTimeout = if (task.schoolSite) 18_000L else 48_000L
         for (attempt in 0..1) {
-            result = withTimeoutOrNull<JSONObject>(48_000L) {
+            result = withTimeoutOrNull<JSONObject>(planTimeout) {
                 var id: String? = null
                 try {
                     suspendCancellableCoroutine { pending ->
@@ -897,6 +950,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 }
             }
             if (attempt == 0 && (result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS)) {
+                if (task.schoolSite) break
                 report("Восстанавливаю соединение с ИИ…")
                 delay(850L)
                 continue
@@ -955,10 +1009,12 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var local: Boolean = false,
         var pausedAt: Long = 0L,
         var conversation: ConversationRequest? = null,
+        val search: AppSearchRequest? = null,
+        val schoolSite: Boolean = false,
+        var siteOpened: Boolean = false,
         var plans: Int = 0,
         var lastIssue: String = "",
         var question: String = "",
-        var answer: String = "",
         var modelUsed: Boolean = false,
         var progress: CortexPlanTracker = CortexPlanTracker(),
         var deferred: List<VisualStep> = emptyList(),
@@ -999,6 +1055,25 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun browserSpecified(text: String) = BROWSER.containsMatchIn(text)
         val SCHOOL_SITE = Regex("""учи[. ]?ру|uchi\.ru""", RegexOption.IGNORE_CASE)
         fun isSchoolSite(text: String) = SCHOOL_SITE.containsMatchIn(text)
+        private const val SCHOOL_URL = "https://uchi.ru/"
+        private val SCHOOL_OPEN = Regex("""(?iu)(?:открой|открыть|зайди|перейди|запусти)""")
+        private val SCHOOL_TASK = Regex("""(?iu)(?:пройд(?:и|ем)|пройти|реши|решить|выполни|сделай|задани|урок|тест)""")
+        private val SCHOOL_ACTION = Regex("""(?iu)(?:открой|зайди|перейди|пройди|реши|помоги)""")
+        private val SCHOOL_EXPLANATION = Regex("""(?iu)^(?:как|что такое|почему|объясни) """)
+        private val browserNames = mapOf(
+            "Chrome" to Regex("""(?iu)(?:chrome|хром[ае]?)"""),
+            "Firefox" to Regex("""(?iu)(?:firefox|файрфокс[ае]?)"""),
+            "Яндекс Браузер" to Regex("""(?iu)(?:yandex|яндекс[ае]?)"""),
+            "Samsung Internet" to Regex("""(?iu)(?:samsung internet|самсунг интернет)"""),
+            "Opera" to Regex("""(?iu)(?:opera|опер[ае])"""),
+            "Edge" to Regex("""(?iu)(?:edge|эдж[ае]?)"""),
+            "Brave" to Regex("""(?iu)(?:brave|брейв[ае]?)""")
+        )
+        fun schoolBrowser(text: String): String =
+            browserNames.entries.lastOrNull { (_, pattern) -> pattern.containsMatchIn(text) }?.key.orEmpty()
+
+        private fun schoolUrl(raw: String) = JSONObject().put("kind", "open_web")
+            .put("target", SCHOOL_URL).put("browser", schoolBrowser(raw))
         val PLANNER = """
             Составь проверяемый план действий CORTEX на Android. Выход только JSON по схеме. Обычный предел 5 шагов.
             Сначала внутренне разбей задачу на цель, необходимые условия, следующий безопасный этап и способ проверки.
@@ -1010,7 +1085,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             Для URL открой браузер, набери адрес и отправь ввод. Если шаг зависит от неизвестного экрана, запроси read.
             Используй verified_steps и previous_issue, сверяй состояние после переходов. Не повторяй уже подтверждённые
             эффекты и не выдумывай кнопки, пакеты приложений, разрешения и результат.
-            Если цель уже достигнута или все шаги её закроют, укажи done. При нехватке данных задай один конкретный question.
+            Указывай done только после проверки конечного состояния на данном экране. Открытие приложения и поиск сами по себе не подтверждают отправку, публикацию или выполнение остальных шагов. При нехватке данных задай один конкретный question.
             Пиши question и answer на языке пользователя. Если в запросе или предыдущих репликах есть русский текст,
             пиши уточнение и ответ по-русски. Подписи элементов Android сохраняй в исходном виде.
             answer — краткий ответ без заявлений об успехе до проверки Android. Для диагностик укажи проверяемый следующий шаг.

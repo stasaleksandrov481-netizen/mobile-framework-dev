@@ -44,6 +44,10 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress) { result ->
                 if (turn == generation) finished(result.text, result.ok)
             }) return
+        if (ConversationRequest.wantsMessage(text) || VisualRequest.isAction(text)) {
+            finished("Уточните приложение и действие. Пока ни одного шага Android не подтверждено.", false)
+            return
+        }
         val facts = if (unlocked) memory.listFacts() else emptyList()
         val messages = JSONArray().put(message("system",
             CortexDeviceContext.IDENTITY + " Отвечай естественно, точно, на языке пользователя, без шаблонных вступлений и повторов. " +
@@ -74,7 +78,6 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
                 else -> {
                     val plain = result.optString("text").trim()
                     when {
-                        tools && ACTION_CLAIM.containsMatchIn(plain) -> finish("Android пока не подтвердил действие.", false)
                         plain.isBlank() -> finish("Модель вернула пустой ответ.", false)
                         else -> finish(plain, true)
                     }
@@ -114,7 +117,4 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         }
     }
 
-    private companion object {
-        val ACTION_CLAIM = Regex("""(?iu)^(?:готово[,!.]?\s*)?(?:открыл|включил|выключил|запустил|установил|поставил|заблокировал)(?:\s|[.!]|$)""")
-    }
 }

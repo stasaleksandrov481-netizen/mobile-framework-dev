@@ -117,4 +117,39 @@ class VisualPlanTest {
         assertNull(ConversationRequest.parse("напиши статью о погоде", installed))
     }
 
+    @Test fun understandsUnquotedTextAfterAnExplicitUsername() {
+        val command = requireNotNull(ConversationRequest.parse("передай @example_user в тг буду в восемь", installed))
+        assertEquals("Telegram", command.app)
+        assertEquals("@example_user", command.recipient)
+        assertEquals("буду в восемь", command.message)
+    }
+
+    @Test fun chatRowsKeepTitleSeparateFromPreviewAndGlobalResults() {
+        val title = ConversationMatch.title("Рыбка Тимофей", "Рыбка Тимофей", listOf("Рыбка", "Тимофей"))
+        assertEquals("Рыбка", title)
+        assertEquals(100, ConversationMatch.score(title, listOf("Рыбка", "Тимофей"), "рыбка"))
+        assertEquals(0, ConversationMatch.score("Медиа", listOf("Медиа", "Это рыбка"), "рыбка"))
+        assertTrue(ConversationMatch.boundary("Сообщения", true))
+        assertTrue(ConversationMatch.boundary("Глобальный поиск", false))
+        assertFalse(ConversationMatch.boundary("Глобальный поиск", true))
+        assertEquals(100, ConversationMatch.score("Имя", listOf("Имя", "@example_user, 13 подписчиков"), "@example_user"))
+    }
+
+    @Test fun shoppingVideoAndInstalledAppSearchDoNotNeedAPlanFromTheModel() {
+        assertEquals(AppSearchRequest("TikTok", "прогулка по городу"),
+            AppSearchRequest.parse("открой тик ток и найди прогулка по городу", installed))
+        assertEquals(AppSearchRequest("Wildberries", "белые кеды"),
+            AppSearchRequest.parse("найди белые кеды на вб", installed))
+        assertEquals(AppSearchRequest("Settings", "яркость"),
+            AppSearchRequest.parse("запусти Settings, найди яркость", installed))
+        assertNull(AppSearchRequest.parse("открой вб и найди кеды, потом купи их", installed))
+        assertEquals("Chrome", CortexActionEngine.schoolBrowser("в хроме"))
+    }
+
+    @Test fun modelClaimsAreRecognizedEvenAfterAnIntroOrInPassiveVoice() {
+        assertTrue(PhoneActionEvidence.containsClaim("Понял, отправил сообщение. Текст доставлен."))
+        assertTrue(PhoneActionEvidence.containsClaim("Обновление опубликовано."))
+        assertFalse(PhoneActionEvidence.containsClaim("Я не отправил сообщение."))
+        assertFalse(PhoneActionEvidence.containsClaim("Кому отправить сообщение?"))
+    }
 }
