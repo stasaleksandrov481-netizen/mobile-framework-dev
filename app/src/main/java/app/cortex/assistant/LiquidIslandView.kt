@@ -12,6 +12,8 @@ import android.graphics.PathMeasure
 import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Region
+import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -35,9 +37,11 @@ internal class LiquidIslandView(
 ) : FrameLayout(context) {
     private val density = resources.displayMetrics.density
     private val body = RectF()
-    private val contentClip = Rect()
-    private val expandedClip = android.graphics.Path()
+    private val compactBody = RectF()
     private val box = Rect()
+    private val touchBox = Rect()
+    private val appliedTouchRegion = Rect()
+    private val touchRegion = Region()
     private val location = IntArray(2)
     private val laidOutAt = IntArray(2)
     private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -46,6 +50,13 @@ internal class LiquidIslandView(
     private val traceMeasure = PathMeasure()
     private val traceBounds = RectF()
     private val signal = IslandSignal(density)
+    private val glass = IslandGlass(density)
+    private val mascot = IslandMascot(density)
+    private val power by lazy { context.getSystemService(android.os.PowerManager::class.java) }
+    private val mascotClock = IslandMascotClock(SystemClock.uptimeMillis())
+    private val mascotClip = Path()
+    private var mascotWakeAt = 0L
+    private val wakeMascot = Runnable { mascotWakeAt = 0L; invalidate() }
     private var placement: IslandPlacement? = null
     private var animator: ValueAnimator? = null
     private var expansion = 0f
@@ -59,7 +70,6 @@ internal class LiquidIslandView(
     private var audioFrameAt = 0L
     private var press = false
     private var activeStop = false
-    private var powerDown = false
     private var pendingPlacementListener: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingPlacementTimeout: Runnable? = null
     var haptics = true
@@ -85,7 +95,11 @@ internal class LiquidIslandView(
         setContents()
     }
 
-    fun place(value: IslandPlacement, frame: Rect) {
+    fun place(value: IslandPlacement, frame: Rect, touchFrame: Rect) {
+        if (touchFrame != touchBox) {
+            touchBox.set(touchFrame)
+            updateTouchRegion()
+        }
         if (value === placement && frame == box) return
         placement = value
         box.set(frame)
@@ -128,9 +142,8 @@ internal class LiquidIslandView(
 
     fun windowContains(point: PointF): Boolean {
         if (!isAttachedToWindow) return false
-        getLocationOnScreen(location)
-        return point.x >= location[0] && point.x < location[0] + width &&
-            point.y >= location[1] && point.y < location[1] + height
+        return point.x >= touchBox.left && point.x < touchBox.right &&
+            point.y >= touchBox.top && point.y < touchBox.bottom
     }
 
     fun reduceMotion(reduced: Boolean) {
@@ -192,7 +205,6 @@ internal class LiquidIslandView(
         val end = if (open) 1f else 0f
         val duration = ((if (style.motion == "soft") 280 else if (open) 360 else 320) * abs(start - end))
             .toLong().coerceAtLeast(42L)
-        powerDown = false
         animate(duration, if (open) OPEN_CURVE else CLOSE_CURVE, {
             expansion = mix(start, end, it)
             disappearance = mix(faded, 0f, it)
@@ -202,7 +214,6 @@ internal class LiquidIslandView(
     fun disappear(power: Boolean, done: () -> Unit) {
         val start = expansion
         val faded = disappearance
-        powerDown = power
         animate(if (power) 560L else 330L, CLOSE_CURVE, { t ->
             expansion = start * (1f - ease(.04f, .76f, t))
             disappearance = mix(faded, 1f, t)
@@ -242,13 +253,10 @@ internal class LiquidIslandView(
     }
 
     private fun setContents() {
-        // Fade controls before the shrinking shell can clip and drag them sideways.
-        val appear = ease(.59f, .97f, expansion) * (1f - ease(0f, .29f, disappearance))
+        val appear = ease(.34f, .96f, expansion) * (1f - ease(0f, .65f, disappearance))
         conversation.alpha = appear
-        conversation.reveal(appear)
         conversation.visibility = if (appear > .03f) VISIBLE else INVISIBLE
         val interactive = appear > .9f && disappearance == 0f
-        conversation.clipBounds = if (interactive) null else clipConversation()
         conversation.importantForAccessibility =
             if (interactive) IMPORTANT_FOR_ACCESSIBILITY_AUTO else IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         stop.visibility = if (activeStop && expansion < .025f && disappearance == 0f) VISIBLE else INVISIBLE
@@ -256,26 +264,12 @@ internal class LiquidIslandView(
         invalidate()
     }
 
-    private fun clipConversation(): Rect? {
-        val geometry = placement ?: return null
-        val panel = geometry.panel
-        val width = panel.width().roundToInt()
-        val height = panel.height().roundToInt()
-        contentClip.set(
-            (mix(geometry.compact.left, panel.left, expansion) - panel.left).roundToInt().coerceIn(0, width),
-            (mix(geometry.compact.top, panel.top, expansion) - panel.top).roundToInt().coerceIn(0, height),
-            (mix(geometry.compact.right, panel.right, expansion) - panel.left).roundToInt().coerceIn(0, width),
-            (mix(geometry.compact.bottom, panel.bottom, expansion) - panel.top).roundToInt().coerceIn(0, height)
-        )
-        return contentClip
-    }
-
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val geometry = placement ?: return
         // WindowManager positions overlays asynchronously. Actual screen coordinates
         // are authoritative; the requested frame may already have changed while the
         // window itself is still at the old position.
-        getLocationOnScreen(location)
+        readOrigin()
         laidOutAt[0] = location[0]
         laidOutAt[1] = location[1]
         conversation.translationX = 0f
@@ -291,62 +285,102 @@ internal class LiquidIslandView(
             (compact.right - location[0]).roundToInt(), (compact.bottom - location[1]).roundToInt())
     }
 
+    // Keep the surface size and position stable while the capsule morphs.
+    // Only the part of the surface that contains the island handles touch.
+    private fun updateTouchRegion() {
+        if (Build.VERSION.SDK_INT < 33 || !isAttachedToWindow || touchBox.isEmpty) return
+        val surface = rootSurfaceControl ?: return
+        getLocationOnScreen(location)
+        val left = touchBox.left - location[0]
+        val top = touchBox.top - location[1]
+        val right = touchBox.right - location[0]
+        val bottom = touchBox.bottom - location[1]
+        if (appliedTouchRegion.left == left && appliedTouchRegion.top == top &&
+            appliedTouchRegion.right == right && appliedTouchRegion.bottom == bottom) return
+        appliedTouchRegion.set(left, top, right, bottom)
+        touchRegion.set(appliedTouchRegion)
+        surface.setTouchableRegion(touchRegion)
+    }
+
+    private fun readOrigin() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            // Keep drawing and child layout in one stable local coordinate system.
+            location[0] = box.left
+            location[1] = box.top
+        } else getLocationOnScreen(location)
+    }
+
+    private fun drawShell(canvas: Canvas, shape: RectF, visibility: Float, radius: Float, panel: Boolean) {
+        if (visibility <= .01f) return
+        if (style.glass) {
+            glass.draw(canvas, shape, radius, visibility, style, panel)
+            return
+        }
+        ink.style = Paint.Style.FILL
+        ink.color = style.background
+        ink.alpha = (255 * visibility * style.opacity).roundToInt()
+        canvas.drawRoundRect(shape, radius, radius, ink)
+        if (style.borderWidth > 0f) {
+            ink.style = Paint.Style.STROKE
+            ink.strokeWidth = style.borderWidth * density
+            ink.color = style.border
+            ink.alpha = (48 * visibility).roundToInt()
+            canvas.drawRoundRect(shape, radius, radius, ink)
+        }
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        updateTouchRegion()
         val geometry = placement ?: return
         val now = SystemClock.uptimeMillis()
         val moving = motion && isShown && windowVisibility == VISIBLE
         val time = if (moving) (now % 240_000L) / 1000f else 0f
         val compact = geometry.compact
         val panel = geometry.panel
-        val t = expansion
-        val fade = 1f - ease(.25f, 1f, disappearance)
-        val scale = 1f - (if (powerDown) .87f else .19f) * ease(.31f, 1f, disappearance)
-        getLocationOnScreen(location)
-        // A position-only WindowManager update does not always re-layout children.
-        // Compensate in BOTH axes until it does, so they stay pinned on screen.
-        val shiftX = (laidOutAt[0] - location[0]).toFloat()
-        val shiftY = (laidOutAt[1] - location[1]).toFloat()
-        if (conversation.translationX != shiftX || conversation.translationY != shiftY) {
-            conversation.translationX = shiftX
-            conversation.translationY = shiftY
-            stop.translationX = shiftX
-            stop.translationY = shiftY
+        val fade = 1f - ease(0f, 1f, disappearance)
+        val panelAlpha = ease(.18f, .89f, expansion) * fade
+        val compactAlpha = (1f - ease(.09f, .66f, expansion)) * fade
+        readOrigin()
+        if (Build.VERSION.SDK_INT < 33) {
+            val shiftX = (laidOutAt[0] - location[0]).toFloat()
+            val shiftY = (laidOutAt[1] - location[1]).toFloat()
+            if (conversation.translationX != shiftX || conversation.translationY != shiftY) {
+                conversation.translationX = shiftX
+                conversation.translationY = shiftY
+                stop.translationX = shiftX
+                stop.translationY = shiftY
+            }
         }
-        val x = geometry.anchorX - location[0]
-        val y = geometry.anchorY - location[1]
-        body.set(
-            x + (mix(compact.left, panel.left, t) - geometry.anchorX) * scale,
-            y + (mix(compact.top, panel.top, t) - geometry.anchorY) * scale,
-            x + (mix(compact.right, panel.right, t) - geometry.anchorX) * scale,
-            y + (mix(compact.bottom, panel.bottom, t) - geometry.anchorY) * scale
-        )
-        val radius = minOf(style.corner * density * scale, body.height() / 2f)
-        ink.style = Paint.Style.FILL
-        ink.color = style.background
-        ink.alpha = (255 * fade * style.opacity).roundToInt()
-        canvas.drawRoundRect(body, radius, radius, ink)
-        ink.style = Paint.Style.FILL
-        if (press) {
+        body.set(panel)
+        body.offset(-location[0].toFloat(), -location[1].toFloat())
+        compactBody.set(compact)
+        compactBody.offset(-location[0].toFloat(), -location[1].toFloat())
+        drawShell(canvas, body, panelAlpha, minOf(style.corner * density, body.height() / 2f), panel = true)
+        val radius = minOf(style.corner * density, compactBody.height() / 2f)
+        drawShell(canvas, compactBody, compactAlpha, radius, panel = false)
+        if (press && compactAlpha > .01f) {
+            ink.style = Paint.Style.FILL
             ink.color = Color.WHITE
-            ink.alpha = (25 * fade).roundToInt()
-            canvas.drawRoundRect(body, radius, radius, ink)
+            ink.alpha = (20 * compactAlpha).roundToInt()
+            canvas.drawRoundRect(compactBody, radius, radius, ink)
         }
-        if (style.borderWidth > 0f) {
-            ink.style = Paint.Style.STROKE
-            ink.strokeWidth = style.borderWidth * density
-            ink.color = style.border
-            ink.alpha = (mix(34f, 48f, t) * fade).roundToInt().coerceIn(0, 255)
-            canvas.drawRoundRect(body, radius, radius, ink)
-        }
-        val compactAlpha = (1f - ease(.02f, .44f, t)) * (1f - ease(0f, .76f, disappearance))
         if (style.progress && compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
-        if (compactAlpha > .02f) {
+        val decoration = mascotFrame(now, moving)
+        if (decoration != null && compactAlpha > .02f) {
+            mascotClip.rewind()
+            mascotClip.addRoundRect(compactBody, radius, radius, Path.Direction.CW)
+            val save = canvas.save()
+            canvas.clipPath(mascotClip)
+            mascot.draw(canvas, compactBody, radius, decoration, style, compactAlpha)
+            canvas.restoreToCount(save)
+            postInvalidateDelayed(32L)
+        } else if (compactAlpha > .02f) {
             val showStatus = style.status && phase == "executing"
-            val cy = body.centerY() - if (showStatus) 5f * density else 0f
+            val cy = compactBody.centerY() - if (showStatus) 5f * density else 0f
             val active = style.progress && isActivePhase()
             val pulse = if (moving) (sin(time * if (active) 5f else 1.75f) + 1f) * .5f else .5f
-            val logoX = body.centerX() - if (activeStop) dp(7).toFloat() else 0f
+            val logoX = compactBody.centerX() - if (activeStop) dp(7).toFloat() else 0f
             val voice = if (phase == "listening") level * exp((levelAt - now) / 240f) else 0f
             val logoScale = .95f + .10f * pulse + .14f * voice
             canvas.save()
@@ -360,12 +394,12 @@ internal class LiquidIslandView(
                 ink.alpha = (232 * compactAlpha).roundToInt()
                 ink.textSize = 8.5f * density
                 ink.textAlign = Paint.Align.CENTER
-                canvas.drawText("Выполняю", body.centerX(), body.bottom - 4 * density, ink)
+                canvas.drawText("Выполняю", compactBody.centerX(), compactBody.bottom - 4 * density, ink)
                 ink.textAlign = Paint.Align.LEFT
             }
             if (activeStop) {
                 // A real stop control remains available during a long action.
-                val stopX = body.right - dp(13)
+                val stopX = compactBody.right - dp(13)
                 val r = 2.7f * density
                 ink.style = Paint.Style.FILL
                 ink.color = style.accent
@@ -373,8 +407,31 @@ internal class LiquidIslandView(
                 canvas.drawRoundRect(stopX - r, cy - r, stopX + r, cy + r, density, density, ink)
             }
         }
-        if (moving && compactAlpha > .02f && disappearance == 0f) {
-            postInvalidateDelayed(if (isActivePhase()) 48L else 85L)
+        if (moving && compactAlpha > .02f && disappearance == 0f && isActivePhase()) {
+            postInvalidateDelayed(48L)
+        }
+    }
+
+    private fun mascotFrame(now: Long, visible: Boolean): IslandMascotClock.Frame? {
+        val eligible = visible && style.mascot && phase == "idle" && !press && !activeStop &&
+            expansion == 0f && disappearance == 0f && animator == null && power.isInteractive
+        val frame = mascotClock.frame(now, eligible)
+        val wakeAt = if (eligible && frame == null) mascotClock.nextAt else 0L
+        if (wakeAt != mascotWakeAt) {
+            removeCallbacks(wakeMascot)
+            mascotWakeAt = wakeAt
+            if (wakeAt > now) postDelayed(wakeMascot, wakeAt - now)
+        }
+        return frame
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) invalidate()
+        else {
+            removeCallbacks(wakeMascot)
+            mascotWakeAt = 0L
+            mascotClock.frame(SystemClock.uptimeMillis(), false)
         }
     }
 
@@ -382,8 +439,10 @@ internal class LiquidIslandView(
         ink.style = Paint.Style.FILL
         ink.color = style.faceColor
         ink.alpha = (255 * alpha).roundToInt()
-        canvas.drawCircle(x, y, 7 * density, ink)
-        ink.color = style.background
+        canvas.drawRoundRect(x - 7.7f * density, y - 7.4f * density, x + 7.7f * density, y + 7.4f * density,
+            5.5f * density, 5.5f * density, ink)
+        ink.color = if (androidx.core.graphics.ColorUtils.calculateLuminance(style.faceColor) > .42)
+            0xFF172331.toInt() else Color.WHITE
         ink.alpha = (255 * alpha).roundToInt()
         canvas.drawCircle(x - 2.25f * density, y - 1.3f * density, density, ink)
         canvas.drawCircle(x + 2.25f * density, y - 1.3f * density, density, ink)
@@ -398,9 +457,9 @@ internal class LiquidIslandView(
      * Reduce Motion disables it entirely, including when Voice is active.
      */
     private fun drawTrace(canvas: Canvas, now: Long, radius: Float, alpha: Float) {
-        if (!motion || !style.progress || !isActivePhase() || body.width() < 18f * density) return
+        if (!motion || !style.progress || !isActivePhase() || compactBody.width() < 18f * density) return
         val inset = 1.8f * density
-        traceBounds.set(body.left + inset, body.top + inset, body.right - inset, body.bottom - inset)
+        traceBounds.set(compactBody.left + inset, compactBody.top + inset, compactBody.right - inset, compactBody.bottom - inset)
         traceOutline.rewind()
         val arc = (radius - inset).coerceAtLeast(0f)
         traceOutline.addRoundRect(traceBounds, arc, arc, Path.Direction.CW)
@@ -431,18 +490,6 @@ internal class LiquidIslandView(
 
     private fun isActivePhase() = phase == "listening" || phase == "thinking" || phase == "executing"
 
-    override fun dispatchDraw(canvas: Canvas) {
-        if (expansion < 1f || disappearance > 0f) {
-            val radius = minOf(21 * density, body.height() / 2f)
-            expandedClip.rewind()
-            expandedClip.addRoundRect(body, radius, radius, android.graphics.Path.Direction.CW)
-            val save = canvas.save()
-            canvas.clipPath(expandedClip)
-            super.dispatchDraw(canvas)
-            canvas.restoreToCount(save)
-        } else super.dispatchDraw(canvas)
-    }
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_OUTSIDE -> {
@@ -450,7 +497,7 @@ internal class LiquidIslandView(
                 return true
             }
             MotionEvent.ACTION_DOWN -> {
-                if (disappearance > 0f || expansion > .25f || !body.contains(event.x, event.y)) return false
+                if (disappearance > 0f || expansion > .25f || !compactBody.contains(event.x, event.y)) return false
                 press = true
                 if (haptics) performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 invalidate()
@@ -474,6 +521,9 @@ internal class LiquidIslandView(
     override fun onDetachedFromWindow() {
         cancelPlacementWait()
         cancelAnimation()
+        appliedTouchRegion.setEmpty()
+        removeCallbacks(wakeMascot)
+        mascotWakeAt = 0L
         super.onDetachedFromWindow()
     }
 

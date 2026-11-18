@@ -17,7 +17,7 @@
   const device = window.CortexDevice;
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
-  const drafts = new Map(), errors = new Map(), ruleDrafts = new Map(), actionReplies = new Map();
+  const drafts = new Map(), errors = new Map(), actionReplies = new Map();
   const supportStore = () => "cortex.support.chat.v1:" + (S.account?.id || "guest");
   const loadSupport = () => {
     try {
@@ -35,8 +35,8 @@
   let phoneInfo = {};
   let deviceSnapshot = null;
   let androidCompatibility = null;
-  const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
-  let route = "home", chatId = "", rule = "goal";
+  const permissions = { microphone: false, camera: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  let route = "home", chatId = "";
   let accountMode = "password", accountEmail = "";
   let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
   let connectionLoad, subscriptionLoad;
@@ -91,7 +91,7 @@
   function syncIslandOptions() {
     return sendDevice("island-options", { profile: S.preferences.model, modelId: S.preferences.aiModel, phoneActions: S.preferences.phoneActions,
       visualAutomation: S.preferences.visualAutomation, visualLaunch: S.preferences.visualLaunch,
-      reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
+      reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy, voiceReplies: S.preferences.voiceReplies,
       addressName: S.preferences.addressName, appearance: Planner.style() });
   }
 
@@ -259,7 +259,7 @@
       native: Boolean(device), chat: current(), messageEnter,
       pending: route === "chat" && pending?.chatId === chatId ? pending : null,
       error: route === "chat" ? errors.get(chatId) : null,
-      rule, ruleDraft: ruleDrafts.get(rule), accountMode, email: accountEmail,
+      accountMode, email: accountEmail,
       resendWait: Math.max(0, Math.ceil((emailResendUntil - Date.now()) / 1000))
     });
     if (route === "support") {
@@ -711,7 +711,6 @@
       subscriptionEpoch++;
       drafts.clear();
       errors.clear();
-      ruleDrafts.clear();
       screenContext = null;
       refreshScreen();
       Planner.accountChanged();
@@ -1009,11 +1008,16 @@
     const request = chat.messages.at(-1)?.text || "";
     const native = await nativeAction(job, request);
     if (native || pending !== job) return native || {};
+    // A plain chat completion receives no Android action result.
+    const deviceRequest = /^(?:(?:кортекс|пожалуйста|можешь|давай)[,\s]+)*(?:отправь|перешли|передай|опубликуй|выложи|закажи|нажми|открой|пройди|напиши\s+@)/iu.test(request);
+    if (deviceRequest && !job.explain && !job.screen) return { local: true,
+      text: "Уточните приложение и действие. Пока ни одного шага Android не подтверждено." };
+    if (Api.android && navigator.onLine === false) throw Api.failure("offline");
     const screenPolicy = job.screen ? " Пользователь приложил текст экрана как данные: " + JSON.stringify(job.screen) : "";
     const deviceContext = {
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
-      screen_control: Boolean(device && S.preferences.phoneActions && S.preferences.visualAutomation && permissions.screenAutomation),
+      screen_control: Boolean(device && S.preferences.visualAutomation && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
       ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
         deviceSnapshot ? { state: deviceSnapshot } : {})
@@ -1040,7 +1044,7 @@
         if (activeChat(job)) render({ bottom: true });
       },
       onDelta(delta) {
-        if (pending !== job) return;
+        if (pending !== job || deviceRequest) return;
         job.action = "";
         job.text += delta;
         if (!job.streamPainted && job.text.trim() && appVisible() && activeChat(job)) { drawDelta(job); return; }
@@ -1049,7 +1053,10 @@
       }
     });
     job.action = "";
-    return { text: typeof result.text === "string" ? result.text : "" };
+    const response = typeof result.text === "string" ? result.text : "";
+    const claim = /(?<![\p{L}\p{N}_])(?:отправил|переслал|отправлено|доставлен[аоы]?|выложил|опубликовал|опубликовано|купил|заказал|прошёл)(?![\p{L}\p{N}_])/iu;
+    return { text: deviceRequest && claim.test(response)
+      ? "Android пока не подтвердил действие." : response };
   }
 
   async function answer(chat, text, { retry = false, from, voiceTurn, explain = false, includeScreen = true, force = false } = {}) {
@@ -1395,6 +1402,7 @@
 
   function voiceReplyReady(job, answer) {
     clearTimeout(job.timer);
+    if (!S.preferences.voiceReplies) { voiceSpoken(job, false); return; }
     job.speechId = M.id("speech");
     if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
       voiceStatus("speaking", "Озвучиваю ответ…");
@@ -1472,6 +1480,8 @@
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
+    if (message.type === "voice-output" && message.id?.startsWith("manual-") && message.ok !== true &&
+        S.preferences.voiceReplies) flash("Android не смог воспроизвести голос. Проверьте синтез речи и громкость.");
     if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
       voiceSpoken(voice, message.ok === true);
       void refreshConnection();
@@ -1573,7 +1583,11 @@
     S.preferences[key] = value;
     saved();
     appearance();
-    if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
+    if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics", "voiceReplies"].includes(key)) syncIslandOptions();
+    if (key === "voiceReplies" && !value) {
+      sendDevice("voice-stop");
+      if (voice?.speechId) voiceSpoken(voice, false);
+    }
     render();
   }
 
@@ -1670,8 +1684,8 @@
       localStorage.removeItem(supportStore());
       sendDevice("private-data-clear");
       if (pending) stopAnswer(false);
-      drafts.clear(); errors.clear(); ruleDrafts.clear();
-      chatId = ""; rule = "goal";
+      drafts.clear(); errors.clear();
+      chatId = "";
       syncIslandOptions(); appearance(); render(); flash("Локальные данные сброшены");
     }),
     stop: () => stopAnswer(),
@@ -1680,6 +1694,20 @@
       if (last?.role === "user") void answer(chat, last.text, { retry: true, explain: errors.get(chat.id)?.explain });
     },
     copy(index) { return copyText(current()?.messages[Number(index)]?.text); },
+    "voice-preview"() {
+      if (voice) closeVoice();
+      if (S.preferences.voiceReplies && !sendDevice("voice-speak", {
+        id: "manual-" + M.id("speech"), text: "Привет, я Кортекс. Голосовые ответы включены."
+      })) flash("Озвучка доступна в приложении Android.");
+    },
+    "speak-answer"(index) {
+      const answer = current()?.messages[Number(index)];
+      if (answer?.role !== "assistant" || answer.ephemeral || !S.preferences.voiceReplies) return;
+      if (voice) closeVoice();
+      if (!sendDevice("voice-speak", { id: "manual-" + M.id("speech"), text: answer.text.slice(0, 550) })) {
+        flash("Озвучка доступна в приложении Android.");
+      }
+    },
     regenerate,
     "feedback-up": index => rateAnswer(index, "up"),
     "feedback-down": index => rateAnswer(index, "down"),
@@ -1722,6 +1750,7 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "camera-permission": () => sendDevice("camera-permission"),
     "notification-listener-permission": () => sendDevice("notification-listener-permission"),
     "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
       if (!sendDevice("notification-journal-clear")) flash("Очистка доступна только в приложении Android.");
@@ -1778,8 +1807,7 @@
     }),
     "personality-edit"() {
       const person = M.profile();
-      editor("Манера общения", field("tone", "Тон", person.tone) +
-        field("description", "Роль", person.description, { max: 380, rows: 3 }), values => {
+      editor("Манера общения", field("tone", "Тон", person.tone, { max: 90 }), values => {
         Object.assign(S.edits.cortex, values); saved("Манера общения сохранена"); closeSheet(); render();
       });
     },
@@ -1787,10 +1815,6 @@
       if (!Object.hasOwn(M.styles, value)) return;
       S.edits.cortex.style = value;
       saved(); render();
-    },
-    rule(value) {
-      if (!M.instructionFields.some(item => item.id === value)) return;
-      rule = value; render();
     },
     quality(value) { if (Object.hasOwn(M.motion, value)) preference("quality", value); },
     language(value) { if (Object.hasOwn(M.languages, value)) preference("language", value); },
@@ -1853,10 +1877,6 @@
       return;
     }
     if (form.id === "composer") submitMessage(data.message, form.querySelector(".send-button"));
-    if (form.id === "rule-form") {
-      const rules = S.instructions.cortex ||= {};
-      rules[rule] = data.rule; ruleDrafts.delete(rule); saved("Инструкция сохранена");
-    }
     if (form.id === "editor" && activeSheet?.submit) {
       const error = form.querySelector(".form-error");
       const submit = form.querySelector('[type="submit"]');
@@ -1890,7 +1910,6 @@
       clearTimeout(historySearchTimer);
       historySearchTimer = setTimeout(historyItems, 160);
     }
-    if (input.name === "rule") ruleDrafts.set(rule, input.value);
   });
   function visibleViewportHeight() {
     return Math.round(Math.min(innerHeight, window.visualViewport?.height || innerHeight));

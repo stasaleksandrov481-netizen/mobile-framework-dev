@@ -3,7 +3,7 @@
 const CortexUI = (() => {
   const M = Cortex;
   const icon = CortexIcons;
-  let version = "1.0.12";
+  let version = "1.0.15";
   const tabs = [
     ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "mic"], ["home", "Кортекс", ""],
     ["scenarios", "Сценарии", "layers"], ["profile", "Профиль", "user"]
@@ -11,7 +11,7 @@ const CortexUI = (() => {
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
-    support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
+    support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", personality: "memory",
     chat: "home", "phone-tools": "settings", schedule: "profile", scenarios: "phone-tools",
     "island-editor": "phone-tools", energy: "settings",
     account: "profile"
@@ -158,6 +158,7 @@ const CortexUI = (() => {
         ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
+        ${M.state.preferences.voiceReplies && !message.ephemeral ? iconButton("play", "Озвучить ответ", "speak-answer", index) : ""}
           ${iconButton("refresh", "Перегенерировать", "regenerate", index)}
           ${iconButton("thumb-up", "Полезный ответ", "feedback-up", index, message.feedback === "up" ? "feedback-selected" : "")}
           ${iconButton("thumb-down", "Неудачный ответ", "feedback-down", index, message.feedback === "down" ? "feedback-selected" : "")}
@@ -166,7 +167,10 @@ const CortexUI = (() => {
     const pending = ctx.pending ? `<article class="message assistant pending${ctx.pending.text ? " has-reply" : ""}" aria-label="Ответ CORTEX">
       ${replyMark}${webSourceBadges(ctx.pending.text, ctx.pending.webSearching)}<div class="message-body markdown stream-text" data-stream>${ctx.pending.text ? CortexMarkdown.renderStream(ctx.pending.text) :
       (ctx.pending.action || ctx.pending.waiting ? actionProgress(ctx.pending) : thinking())}</div></article>` : "";
-    const error = ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
+    const error = ctx.error?.code === "offline" ? `<div class="notice chat-offline" role="alert">
+      <span class="chat-offline-symbol" aria-hidden="true">${icon("alert", 22)}</span><div><strong>Нет подключения к ИИ</strong>
+      <p>Проверьте Wi-Fi или мобильный интернет. Команды телефона доступны без сети.</p>
+      ${button("Повторить", "refresh", "retry", "", "outline")}</div></div>` : ctx.error ? `<div class="notice error" role="alert">${icon("alert", 19)}<div><p>${esc(ctx.error.message)}</p>
       <div class="actions">
         ${ctx.error.code === "sign_in" && ctx.native ? button("Войти", "user", "go", "profile", "primary") : ""}
         ${button("Повторить", "refresh", "retry")}
@@ -364,12 +368,14 @@ const CortexUI = (() => {
       ${group((perm.assistantSupported ? tile("Цифровой помощник Android",
         perm.assistant ? "CORTEX выбран · открывает островок" : "Выбрать CORTEX для системного жеста",
         "focus", "assistant-permission") : "") + voiceRow +
-        switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue"))}
+        switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue") +
+        switchRow("Озвучивать ответы", "Голосовой режим и кнопка воспроизведения в чате", p.voiceReplies, "voiceReplies") +
+        (p.voiceReplies ? tile("Проверить голос", "", "play", "voice-preview") : ""))}
       <h2 class="group-label">Управление телефоном</h2>
-      ${group(switchRow("Команды телефона", "Открытие приложений, системные действия и сценарии", p.phoneActions, "phoneActions") +
+      ${group(switchRow("Команды телефона", "Фонарик, громкость и запуск приложений через Android", p.phoneActions, "phoneActions") +
         `<label class="switch-row call-beta-row">
           <span class="tile-copy"><strong>Визуальное управление <span class="call-beta-badge">БЕТА</span></strong>
-          <small>Работа с элементами экрана по запросу</small></span>
+          <small>Нажатия, свайпы и чтение экрана по запросу</small></span>
           <input type="checkbox" data-visual-beta aria-label="Визуальное управление (бета)" ${p.visualAutomation ? "checked" : ""}>
         </label>` +
         switchRow("Показывать, как открываются приложения", "Для сценариев и визуальных команд", p.visualLaunch, "visualLaunch"))}
@@ -428,8 +434,7 @@ const CortexUI = (() => {
     const data = M.memory();
     return detail("Память и персонализация", "",
       `<section class="panel">${switchRow("Память", "Учитывать сохранённые факты", data.enabled, "memory")}</section>` +
-      group(tile("Стиль ответов", M.styles[M.profile().style], "sliders", "go", "personality") +
-        tile("Инструкции", "", "file", "go", "instructions")) +
+      group(tile("Стиль ответов", M.styles[M.profile().style], "sliders", "go", "personality")) +
       label("Факты") + (data.entries.length ? group(data.entries.map(entry =>
         tile(entry.title, entry.value, "memory", "memory-edit", entry.id)).join("")) :
         '') + button("Добавить факт", "plus", "memory-edit", "", "outline"));
@@ -439,19 +444,8 @@ const CortexUI = (() => {
     return detail("Манера общения", "Как CORTEX отвечает", `<section class="panel stack">
       <h2>Длина ответа</h2>${choices(M.styles, person.style, "reply-style")}
       <div class="readout"><strong>Тон</strong><p>${esc(person.tone)}</p></div>
-      <div class="readout"><strong>Роль</strong><p>${esc(person.description)}</p></div>
       ${button("Изменить", "note", "personality-edit")}
     </section>`);
-  }
-  function instructions(ctx) {
-    const field = M.instructionFields.find(item => item.id === ctx.rule) || M.instructionFields[0];
-    const value = ctx.ruleDraft ?? M.state.instructions.cortex?.[field.id] ?? field.value;
-    return detail("Инструкции", "Правила ответов CORTEX", `<div class="filters">${M.instructionFields.map(item =>
-      pill(item.label, "rule", item.id, item.id === field.id)).join("")}</div>
-      <form class="panel stack" id="rule-form">
-        <label class="field"><span>${esc(field.label)}</span><textarea name="rule" rows="6" maxlength="750">${esc(value)}</textarea></label>
-        <button type="submit" class="action primary">${icon("check", 17)}Сохранить</button>
-      </form>`);
   }
   function permissions(ctx) {
     const a = ctx.permissions;
@@ -476,9 +470,10 @@ const CortexUI = (() => {
     return detail("Доступы Android", "Давайте только те разрешения, которые нужны вам", `<section class="access-list">
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
       ${item("focus", "Поверх приложений", "Показывать островок поверх других окон. Не даёт доступа к содержимому экрана.", a.overlay, "overlay-permission")}
+      ${item("focus", "Фонарик", "Доступ к вспышке через Android. CORTEX только переключает вспышку.", a.camera, "camera-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
-      ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
+      ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
       </section>
       ${compatibilityPanel}
@@ -539,7 +534,7 @@ const CortexUI = (() => {
 
   function page(route, ctx) {
     const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
-      data, memory, personality, instructions, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
+      data, memory, personality, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
   function navigation() {

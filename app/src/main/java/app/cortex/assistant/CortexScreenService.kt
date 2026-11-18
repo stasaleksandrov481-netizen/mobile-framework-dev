@@ -120,7 +120,8 @@ class CortexScreenService : AccessibilityService() {
                     val raw = Rect().apply { node.getBoundsInScreen(this) }
                     val editable = node.isEditable
                     val text = if (editable) VisualLabels.clean(node.hintText) else VisualLabels.clean(node.text)
-                    val description = VisualLabels.clean(node.contentDescription)
+                    val rawDescription = node.contentDescription
+                    val description = VisualLabels.clean(rawDescription)
                     val scrollable = node.isScrollable || node.supports(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) ||
                         node.supports(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                     val checkable = if (node.isCheckable) node.isChecked else null
@@ -132,7 +133,9 @@ class CortexScreenService : AccessibilityService() {
                             enabled = node.isEnabled, description = description,
                             state = if (Build.VERSION.SDK_INT >= 30) VisualLabels.clean(node.stateDescription) else "",
                             scrollAxis = if (scrollable) node.scrollAxis() else null,
-                            longClickable = node.isLongClickable)
+                            longClickable = node.isLongClickable,
+                            descriptionLines = rawDescription?.lineSequence()?.take(6)?.map { VisualLabels.clean(it, 130) }
+                                ?.filter { it.isNotBlank() }?.toList().orEmpty())
                     }
                 }
                 for (index in 0 until minOf(node.childCount, 100)) {
@@ -181,6 +184,10 @@ class CortexScreenService : AccessibilityService() {
 
     internal fun longClick(frame: VisualFrame, node: VisualNode): Boolean =
         onNode(frame, node) { current -> current.isLongClickable && current.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) }
+
+    internal fun focusField(frame: VisualFrame, node: VisualNode): Boolean = onNode(frame, node) {
+        it.isEditable && it.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+    }
 
     internal fun setText(frame: VisualFrame, node: VisualNode, value: String): Boolean = onNode(frame, node) { current ->
         current.isEditable && current.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {

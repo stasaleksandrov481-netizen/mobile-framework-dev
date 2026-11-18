@@ -83,7 +83,8 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                             .putBoolean("visualAutomation", objectValue.optBoolean("visualAutomation"))
                             .putBoolean("visualLaunch", objectValue.optBoolean("visualLaunch"))
                             .putBoolean("reduceMotion", objectValue.optBoolean("reduceMotion"))
-                            .putBoolean("haptics", objectValue.optBoolean("haptics", true)).apply()
+                            .putBoolean("haptics", objectValue.optBoolean("haptics", true))
+                            .putBoolean("voiceReplies", objectValue.optBoolean("voiceReplies", true)).apply()
                         CortexRuntime.wakeHook?.invoke()
                         if (!prefs.getBoolean(CortexIslandService.WAKE_PAUSED, false) &&
                             prefs.getString("mode", "off") != "off" && Settings.canDrawOverlays(activity)) {

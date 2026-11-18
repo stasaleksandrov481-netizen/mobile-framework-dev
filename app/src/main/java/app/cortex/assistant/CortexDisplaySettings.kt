@@ -37,7 +37,7 @@ internal object CortexDisplaySettings {
     private val applyLabels = setOf("применить", "apply")
 
     suspend fun set(
-        context: Context, value: Int, report: (String) -> Unit
+        context: Context, value: Int, report: (String) -> Unit, allowVisual: Boolean = false
     ): CortexActionEngine.Result {
         fun result(text: String, ok: Boolean = false) = CortexActionEngine.Result(text, ok)
         if (!CortexSchedule.screenReady(context)) return result("Разблокируйте телефон, чтобы изменить частоту экрана.")
@@ -54,7 +54,8 @@ internal object CortexDisplaySettings {
         report("Открываю настройки дисплея…")
         if (runCatching { context.startActivity(intent) }.isFailure) return result("Android не открыл настройки дисплея.")
         val manual = "Откройте «Настройки» → «Дисплей». Выберите «Частота обновления» или «Плавность движений», затем $value Гц."
-        val service = CortexScreenService.connected ?: return result(manual)
+        val service = CortexScreenService.connected.takeIf { allowVisual }
+            ?: return result("Настройки дисплея открыты. Выберите $value Гц в разделе отображения.")
         if (expected == null) return result(manual)
 
         val navigation = VisualNavigation(context, service)

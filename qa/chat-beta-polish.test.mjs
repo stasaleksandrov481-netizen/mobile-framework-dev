@@ -140,3 +140,16 @@ test("public question coalescing never drops personalised chat context", () => {
   chat.messages.push({ role: "assistant", text: "Пример ответа" }, { role: "user", text: "Что такое кэш?" });
   assert.equal(model.canSharePublicQuestion(chat, chat.messages.at(-1).text), false);
 });
+
+test("legacy role and instructions stay out of replies and offline AI has a dedicated message", () => {
+  const { model, ui } = fixture({
+    edits: { cortex: { tone: "Спокойный", description: "OLD_ROLE" } },
+    instructions: { cortex: { goal: "OLD_RULE" } }
+  });
+  const chat = model.createChat();
+  chat.messages.push({ role: "user", text: "Привет!" });
+  assert.doesNotMatch(JSON.stringify(model.turns(chat, "")), /OLD_ROLE|OLD_RULE/);
+  assert.doesNotMatch(ui.page("memory", {}), /data-value="instructions"/);
+  assert.doesNotMatch(ui.page("personality", {}), />Роль</);
+  assert.match(ui.page("chat", { chat, error: { code: "offline" } }), /Нет подключения к ИИ/);
+});

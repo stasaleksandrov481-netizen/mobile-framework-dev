@@ -7,9 +7,9 @@ const CortexIslandCommands = (() => {
   const noun = /(?:^|[^а-яё])(?:островок|островка|островке|островку|островком|капсула|капсулу|капсулы|капсуле)(?:$|[^а-яё])/u;
   const imperative = /^(?:кортекс[, ]*)?(?:пожалуйста[, ]*)?(?:уменьши|увеличь|сделай|сдвинь|подвинь|перемести|верни|сбрось|восстанови|включи|выключи|покажи|скрой|убери|добавь|поставь|настрой|измени)(?![а-яё])/u;
   const defaults = Object.freeze({
-    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
+    background: "#34465a", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
     opacity: 100, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22,
-    borderWidth: .45, motion: "liquid", face: false, status: true, progress: true, results: true,
+    borderWidth: .45, motion: "liquid", face: true, status: true, progress: true, results: true, glass: true, mascot: true,
   });
 
   function parse(text, previous = defaults, mode = "wake") {

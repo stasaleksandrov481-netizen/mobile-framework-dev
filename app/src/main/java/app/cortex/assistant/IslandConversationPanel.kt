@@ -51,6 +51,7 @@ internal class IslandConversationPanel(
     private val widgets = LinearLayout(context)
     private var appearance = IslandAppearance.parse()
     private var reminderActions: ((String) -> Unit)? = null
+    private var player: CortexMedia.Player? = null
     private var busy = false
     private var answer = ""
     private var motion = ValueAnimator.areAnimatorsEnabled()
@@ -282,9 +283,40 @@ internal class IslandConversationPanel(
         renderWidgets()
     }
 
+    fun media(value: CortexMedia.Player?) {
+        if (player == value) return
+        player = value
+        renderWidgets()
+    }
+
     private fun renderWidgets() {
         widgets.removeAllViews()
         val reminder = reminderActions
+        val media = player
+        if (reminder == null && media != null) {
+            widgets.visibility = VISIBLE
+            widgets.gravity = Gravity.CENTER_VERTICAL
+            val title = label(11.5f, appearance.text).apply {
+                text = media.title
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }
+            widgets.addView(title, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            fun transport(icon: String, name: String, command: String) {
+                widgets.addView(Glyph(icon, name).apply {
+                    isEnabled = !busy
+                    setOnClickListener { sendMessage(command) }
+                }, LayoutParams(dp(42), dp(44)))
+            }
+            transport("previous", "Предыдущий трек", "предыдущий трек")
+            when (media.playing) {
+                true -> transport("pause", "Пауза", "пауза")
+                false -> transport("play", "Продолжить", "продолжи музыку")
+                null -> transport("play", "Воспроизведение или пауза", "плей пауза")
+            }
+            transport("next", "Следующий трек", "следующий трек")
+            return
+        }
         // Only task-specific actions belong in the island. General phone facts and
         // canned prompts belong to the full app, never to this compact surface.
         val options = if (reminder != null) listOf("Готово" to "done", "Отложить" to "snooze", "Открыть" to "open")
@@ -463,6 +495,23 @@ internal class IslandConversationPanel(
                     symbol.moveTo(-1.1f, -4.4f)
                     symbol.lineTo(4.4f, -4.4f)
                     symbol.lineTo(4.4f, 1.1f)
+                }
+                "play", "next", "previous" -> {
+                    val direction = if (kind == "previous") -1f else 1f
+                    symbol.moveTo(-3.5f * direction, -5f)
+                    symbol.lineTo(4f * direction, 0f)
+                    symbol.lineTo(-3.5f * direction, 5f)
+                    symbol.close()
+                    if (kind != "play") {
+                        symbol.moveTo(6f * direction, -5f)
+                        symbol.lineTo(6f * direction, 5f)
+                    }
+                }
+                "pause" -> {
+                    symbol.moveTo(-2.4f, -5f)
+                    symbol.lineTo(-2.4f, 5f)
+                    symbol.moveTo(2.4f, -5f)
+                    symbol.lineTo(2.4f, 5f)
                 }
                 "stop" -> {
                     pen.style = Paint.Style.FILL

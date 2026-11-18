@@ -23,14 +23,16 @@ const CortexPlanner = (() => {
   };
   const directions = { down: "Вниз", up: "Вверх", left: "Влево", right: "Вправо" };
   const islandDefaults = {
-    background: "#000000", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
+    background: "#34465a", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff",
     opacity: 100, size: 100, widthScale: 100, heightScale: 100, offsetX: 0, offsetY: 0, corner: 22, borderWidth: .45, motion: "liquid",
-    face: false, status: true, progress: true, results: true
+    face: true, status: true, progress: true, results: true, glass: true, mascot: true
   };
   const islandPresets = {
-    "Монохром": islandDefaults,
-    "Графит": { ...islandDefaults, background: "#1d1d1d", border: "#686868", opacity: 94, motion: "soft" },
-    "Светлый": { ...islandDefaults, background: "#e7e7e7", text: "#161616", border: "#555555", accent: "#363636", faceColor: "#777777" }
+    "Холодное стекло": islandDefaults,
+    "Серебро": { ...islandDefaults, background: "#585f68", faceColor: "#eaf6ff" },
+    "Дымчатое": { ...islandDefaults, background: "#342845", faceColor: "#f4ebff" },
+    "Графит": { ...islandDefaults, background: "#1d1d1d", border: "#686868", opacity: 94, motion: "soft", glass: false },
+    "Светлый": { ...islandDefaults, background: "#e7e7e7", text: "#ffffff", border: "#ffffff", accent: "#ffffff", faceColor: "#ffffff" }
   };
   const powers = {
     economy: ["Экономный", "Голосовой вызов и фоновый островок выключены. Диктовка и расписание работают."],
@@ -43,7 +45,7 @@ const CortexPlanner = (() => {
   let scheduleReady = false, scenarioReady = false;
   let scenarioProgress = "";
   let expandedStep = "", pickerBranch = "", gesture;
-  const colorNames = { background: "Фон", text: "Текст", border: "Граница", accent: "Прогресс", faceColor: "Смайлик" };
+  const colorNames = { background: "Оттенок стекла", text: "Текст", border: "Граница", accent: "Прогресс", faceColor: "Смайлик" };
   let formOperation = "";
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const format = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
@@ -289,7 +291,7 @@ const CortexPlanner = (() => {
     const size = Math.max(80, Math.min(125, data.size));
     return `<span class="plan-camera"></span>
       <div class="plan-island-wrap" style="transform:translate(${clamp(data.offsetX, -75, 75) / 2}px,${clamp(data.offsetY, 0, 80) / 3}px)">
-        <div class="plan-island-sample" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
+        <div class="plan-island-sample ${data.glass ? "plan-liquid-glass" : ""}" style="--island-bg:${data.background};--island-text:${data.text};--island-style-border:${data.border};
           --island-accent:${data.accent};--island-opacity:${clamp(data.opacity, 40, 100)}%;
           --island-width:${72 * size * clamp(data.widthScale, 80, 125) / 10000}px;--island-height:${36 * size * clamp(data.heightScale, 90, 125) / 10000}px;
           --island-radius:${clamp(data.corner, 12, 32)}px;--island-weight:${clamp(data.borderWidth, 0, 3)}px">
@@ -318,6 +320,9 @@ const CortexPlanner = (() => {
         ${slider("corner", "Скругление", 12, 32)}${slider("borderWidth", "Толщина границы", 0, 3, .1)}
         ${slider("opacity", "Непрозрачность", 40, 100)}
         ${label("Анимация", `<select data-style="motion">${options({ liquid: "Плавная", soft: "Короткая", none: "Мгновенная" }, data.motion)}</select>`)}</div></details>
+      <section class="panel stack"><h2>Стекло и персонаж</h2>
+        ${widget("glass", "Жидкое стекло")}
+        ${widget("mascot", "Сценки персонажа")}<p class="quiet-copy">На свёрнутом островке, с паузой минимум три минуты.</p></section>
       <details class="panel island-custom-group"><summary>Цвета</summary><div class="plan-color-grid">${Object.entries(colorNames).map(([key, title]) =>
         `<button type="button" class="plan-swatch" data-plan="palette" data-value="${key}">
           <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></details>

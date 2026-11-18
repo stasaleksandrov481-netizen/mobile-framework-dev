@@ -95,4 +95,88 @@ class VisualPlanTest {
         assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
             "", "com.example:id/btnOpen", "Button"))
     }
+    @Test fun colloquialMessageRetainsRecipientAndTextAcrossMessengerClarification() {
+        val pending = requireNotNull(ConversationRequest.parse("напиши рыбке как дела", installed))
+        assertEquals("рыбке", pending.recipient)
+        assertEquals("как дела", pending.message)
+        assertTrue(pending.app.isBlank())
+        assertTrue(pending.question.startsWith("В каком мессенджере"))
+        val answer = pending.withAnswer("давай в телеграме")
+        assertEquals("Telegram", answer.app)
+        assertEquals("рыбке", answer.recipient)
+        assertEquals("как дела", answer.message)
+        assertTrue(answer.send)
+        assertTrue(answer.question.isBlank())
+    }
+
+    @Test fun sameSentenceMessengerAndMessageStaySeparate() {
+        val request = requireNotNull(ConversationRequest.parse("напиши рыбке в тг как дела", installed))
+        assertEquals("Telegram", request.app)
+        assertEquals("рыбке", request.recipient)
+        assertEquals("как дела", request.message)
+        assertNull(ConversationRequest.parse("напиши статью о погоде", installed))
+    }
+
+    @Test fun understandsUnquotedTextAfterAnExplicitUsername() {
+        val command = requireNotNull(ConversationRequest.parse("передай @example_user в тг буду в восемь", installed))
+        assertEquals("Telegram", command.app)
+        assertEquals("@example_user", command.recipient)
+        assertEquals("буду в восемь", command.message)
+    }
+
+    @Test fun chatRowsKeepTitleSeparateFromPreviewAndGlobalResults() {
+        val title = ConversationMatch.title("Рыбка Тимофей", "Рыбка Тимофей", listOf("Рыбка", "Тимофей"))
+        assertEquals("Рыбка", title)
+        assertEquals(100, ConversationMatch.score(title, listOf("Рыбка", "Тимофей"), "рыбка"))
+        assertEquals(0, ConversationMatch.score("Медиа", listOf("Медиа", "Это рыбка"), "рыбка"))
+        assertTrue(ConversationMatch.boundary("Сообщения", true))
+        assertTrue(ConversationMatch.boundary("Глобальный поиск", false))
+        assertFalse(ConversationMatch.boundary("Глобальный поиск", true))
+        assertEquals(100, ConversationMatch.score("Имя", listOf("Имя", "@example_user, 13 подписчиков"), "@example_user"))
+    }
+
+    @Test fun shoppingVideoAndInstalledAppSearchDoNotNeedAPlanFromTheModel() {
+        assertEquals(AppSearchRequest("TikTok", "прогулка по городу"),
+            AppSearchRequest.parse("открой тик ток и найди прогулка по городу", installed))
+        assertEquals(AppSearchRequest("Wildberries", "белые кеды"),
+            AppSearchRequest.parse("найди белые кеды на вб", installed))
+        assertEquals(AppSearchRequest("Settings", "яркость"),
+            AppSearchRequest.parse("запусти Settings, найди яркость", installed))
+        assertNull(AppSearchRequest.parse("открой вб и найди кеды, потом купи их", installed))
+        assertEquals("Chrome", CortexActionEngine.schoolBrowser("в хроме"))
+    }
+
+    @Test fun modelClaimsAreRecognizedEvenAfterAnIntroOrInPassiveVoice() {
+        assertTrue(PhoneActionEvidence.containsClaim("Понял, отправил сообщение. Текст доставлен."))
+        assertTrue(PhoneActionEvidence.containsClaim("Обновление опубликовано."))
+        assertFalse(PhoneActionEvidence.containsClaim("Я не отправил сообщение."))
+        assertFalse(PhoneActionEvidence.containsClaim("Кому отправить сообщение?"))
+    }
+    @Test fun mascotWaitsThreeMinutesAfterCompletionAndInterruption() {
+        val mascot = IslandMascotClock(10L)
+        assertNull(mascot.frame(180_009L, eligible = true))
+        val walk = requireNotNull(mascot.frame(180_010L, eligible = true))
+        assertEquals(IslandScene.WALK, walk.scene)
+        assertNull(mascot.frame(181_000L, eligible = false))
+        assertNull(mascot.frame(360_999L, eligible = true))
+        assertEquals(IslandScene.BOUNCE, mascot.frame(361_000L, eligible = true)?.scene)
+        assertNull(mascot.frame(363_700L, eligible = true))
+        assertNull(mascot.frame(543_699L, eligible = true))
+        assertEquals(IslandScene.THINK, mascot.frame(543_700L, eligible = true)?.scene)
+    }
+
+    @Test fun torchAndShadeSwitchesBecomeBoundedAndroidCommands() {
+        val chain = requireNotNull(CortexLocalCommands.parse(
+            "открой шторку и включи фонарик", { null }
+        ))
+        assertEquals(listOf("shade", "torch"), chain.map { it.getString("kind") })
+        assertEquals("on", chain[1].getString("mode"))
+        val switch = requireNotNull(CortexLocalCommands.parse("в шторке отключи Bluetooth", { null })).single()
+        assertEquals("system_toggle", switch.getString("kind"))
+        assertEquals("bluetooth", switch.getString("target"))
+        assertEquals("off", switch.getString("mode"))
+        assertEquals(false, CortexSystemTiles.state(null, "Bluetooth, Выкл."))
+        assertEquals(true, CortexSystemTiles.state(true, "Режим полёта"))
+        assertNull(CortexSystemTiles.state(null, "Bluetooth доступен"))
+    }
 }

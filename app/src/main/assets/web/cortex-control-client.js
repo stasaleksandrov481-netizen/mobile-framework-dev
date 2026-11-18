@@ -17,17 +17,20 @@ window.CortexControl = (() => {
     '<button type="button" data-gate-retry>Проверить снова</button><button type="button" data-gate-login hidden>Войти в профиль</button></div></div>';
   document.body.append(layer);
   const update = layer.querySelector("[data-gate-update]");
-  let gate = { mode: "open" }, checking = false, again = false;
+  let gate = { mode: "open" }, checking = false, again = false, verified = false;
+  const guarded = ["#screen", ".navigation", ".composition"];
   function applyGate(value, canSignIn) {
     if (!["open", "maintenance", "update", "beta"].includes(value?.mode)) return;
     gate = value;
     layer.hidden = gate.mode === "open";
-    send("gate-state", { mode: gate.mode });
+    for (const selector of guarded) {
+      for (const element of document.querySelectorAll(selector)) element.inert = !layer.hidden;
+    }
     if (layer.hidden) return;
-    const titles = { maintenance: "Скоро вернёмся", update: "Обновите CORTEX", beta: "Закрытая бета" };
+    const titles = { maintenance: "CORTEX на техработах", update: "Ваш CORTEX устарел", beta: "Закрытая бета" };
     const descriptions = {
       maintenance: "Мы обслуживаем CORTEX. Попробуйте проверить доступ чуть позже.",
-      update: "Установите свежую версию, чтобы продолжить.",
+      update: "Установите новую версию голосового помощника, чтобы продолжить.",
       beta: "Войдите в аккаунт, допущенный к закрытому тестированию."
     };
     layer.querySelector("h1").textContent = titles[gate.mode];
@@ -42,13 +45,28 @@ window.CortexControl = (() => {
     if (!visible()) return;
     if (checking) { again = true; return; }
     checking = true;
-    try { const status = await api.request("status"); applyGate(status.gate, status.email_login === true || status.email_auth === true); }
+    try {
+      const status = await api.request("status");
+      if (status.gate) {
+        verified = true;
+        applyGate(status.gate, status.email_login === true || status.email_auth === true);
+      }
+    }
     catch { /* Keep the last verified state until the connection returns. */ }
     finally {
       checking = false;
       if (again) { again = false; void check(); }
     }
   }
+  window.addEventListener("cortex-native", event => {
+    if (verified) return;
+    try {
+      const eventData = JSON.parse(event.data);
+      if (eventData.type === "gate-cache") applyGate(eventData.gate, false);
+    } catch { /* Other native messages are irrelevant to the gate. */ }
+  });
+  send("gate-cache");
+  window.addEventListener("online", check);
   layer.querySelector("[data-gate-retry]").addEventListener("click", check);
   layer.querySelector("[data-gate-login]").addEventListener("click", () => window.cortexAdminLogin?.());
   update.addEventListener("click", () => {
@@ -219,6 +237,7 @@ window.CortexControl = (() => {
     lastHeartbeat = 0;
     refresh();
   });
+  void check();
   setTimeout(refresh, 1100);
   setInterval(refresh, 45_000);
 

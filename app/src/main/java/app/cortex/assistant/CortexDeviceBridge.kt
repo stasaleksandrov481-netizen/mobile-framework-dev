@@ -112,6 +112,7 @@ internal class CortexDeviceBridge(
                     }, 504)
                 }.onFailure { scenarioStatus("Android не открыл сохранение файла.", false, "file") }
             }
+            "camera-permission" -> requestPermission(Manifest.permission.CAMERA)
             "microphone-permission" -> requestPermission(Manifest.permission.RECORD_AUDIO)
             "tap" -> vibrate()
             "conversation-clear" -> {
@@ -142,7 +143,7 @@ internal class CortexDeviceBridge(
                 emit(JSONObject().put("type", "visual-privacy").put("enabled", options.getBoolean("visual-model-consent", false)))
             }
             "action-history" -> emit(JSONObject().put("type", "action-history").put("entries", CortexActionState.history(context)))
-            "gate-state" -> CortexActionState.setGate(body.optString("mode"))
+            "gate-cache" -> emit(JSONObject().put("type", "gate-cache").put("gate", CortexActionState.cachedGate(context)))
             "support-notify-config" -> CortexSupportNotification.configure(context, body.optBoolean("enabled"))
             "support-notification" -> body.optJSONArray("ids")?.let {
                 CortexSupportNotification.update(context, it, body.optBoolean("seen"))
@@ -276,6 +277,7 @@ internal class CortexDeviceBridge(
             .put("phoneModel", Build.MODEL)
             .put("androidRelease", Build.VERSION.RELEASE)
             .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+            .put("camera", activity.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
             .put("notificationAccess", CortexNotificationJournal.accessGranted(context))
             .put("deviceSnapshot", runCatching { CortexDeviceSnapshot.info(context) }.getOrNull())

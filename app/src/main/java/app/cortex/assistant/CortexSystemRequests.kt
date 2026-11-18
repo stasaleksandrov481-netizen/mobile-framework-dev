@@ -70,10 +70,10 @@ internal object CortexSystemRequests {
             when (label) {
                 in brightness -> return command("brightness", "mode" to if (enabled) "auto" else "manual")
                 in rotation -> return command("rotate", "mode" to if (enabled) "on" else "off")
-                in sections.getValue("wifi") -> return command("panel", "target" to "wifi")
+                in sections.getValue("wifi") -> return command("system_toggle", "target" to "wifi", "mode" to if (enabled) "on" else "off")
             }
             sections.entries.firstOrNull { it.key in switchPages && label in it.value }?.let {
-                return command("settings", "target" to it.key, "switch" to true)
+                return command("system_toggle", "target" to it.key, "mode" to if (enabled) "on" else "off")
             }
         }
         (nestedSettings.matchEntire(text) ?: settings.matchEntire(text))?.groupValues?.get(1)?.let { label ->

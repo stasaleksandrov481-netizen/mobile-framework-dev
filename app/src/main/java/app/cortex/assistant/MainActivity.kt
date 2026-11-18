@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CortexActionState.restoreGate(this)
         pendingSchedule = intent.getStringExtra(CortexSchedule.EXTRA_TASK)
         CortexSchedule.initialize(applicationContext)
         if (cleanupStarted.compareAndSet(false, true)) {

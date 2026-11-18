@@ -8,6 +8,7 @@
   padding: 24px;
   background: #000;
 }
+.cortex-guard[hidden] { display: none; }
 .cortex-guard-card {
   width: min(100%, 390px);
   display: grid;
@@ -38,6 +39,14 @@
   transform: rotate(-34deg) scaleY(.6);
 }
 .cortex-guard-halo img { position: relative; width: 46px; }
+.cortex-guard[data-mode="update"] .cortex-guard-halo { box-shadow: 0 0 42px #ffffff17; }
+.cortex-guard[data-mode="maintenance"] .cortex-guard-halo { border-color: #dbb36d83; background: #dbb36d13; }
+@media (prefers-reduced-motion: no-preference) {
+  .cortex-guard:not([hidden]) .cortex-guard-card { animation: gate-appear .36s ease-out both; }
+}
+@keyframes gate-appear {
+  from { opacity: 0; transform: scale(.97) translateY(8px); }
+}
 .cortex-guard h1 { font-size: clamp(1.68rem, 7vw, 2.45rem); line-height: 1.08; letter-spacing: -.05em; }
 .cortex-guard-copy { max-width: 34ch; color: rgb(255 255 255 / .78); line-height: 1.55; }
 .cortex-guard-actions { width: 100%; display: grid; gap: 7px; margin-top: 8px; }

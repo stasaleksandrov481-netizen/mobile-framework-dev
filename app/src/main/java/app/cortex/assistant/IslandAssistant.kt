@@ -12,6 +12,14 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
     private val memory = CortexPrivateMemory(context)
     private var request: String? = null
     private var generation = 0L
+    private var lastGateCheck: Long? = null
+
+    fun refreshGate() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (lastGateCheck?.let { now - it < 30_000L } == true) return
+        lastGateCheck = now
+        gateway.status()
+    }
 
     fun send(
         text: String, profile: String, modelId: String? = null, beforeScreen: () -> Unit,
@@ -19,6 +27,8 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         finished: (String, Boolean) -> Unit
     ) {
         if (request != null) return
+        refreshGate()
+        CortexActionState.gateMessage()?.let { finished(it, false); return }
         val turn = ++generation
         val tools = toolsAllowed()
         val unlocked = !context.getSystemService(KeyguardManager::class.java).isDeviceLocked
@@ -34,6 +44,10 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress) { result ->
                 if (turn == generation) finished(result.text, result.ok)
             }) return
+        if (ConversationRequest.wantsMessage(text) || VisualRequest.isAction(text)) {
+            finished("Уточните приложение и действие. Пока ни одного шага Android не подтверждено.", false)
+            return
+        }
         val facts = if (unlocked) memory.listFacts() else emptyList()
         val messages = JSONArray().put(message("system",
             CortexDeviceContext.IDENTITY + " Отвечай естественно, точно, на языке пользователя, без шаблонных вступлений и повторов. " +
@@ -64,7 +78,6 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
                 else -> {
                     val plain = result.optString("text").trim()
                     when {
-                        tools && ACTION_CLAIM.containsMatchIn(plain) -> finish("Android пока не подтвердил действие.", false)
                         plain.isBlank() -> finish("Модель вернула пустой ответ.", false)
                         else -> finish(plain, true)
                     }
@@ -99,12 +112,9 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
             "update" -> "Для продолжения обновите CORTEX."
             "sign_in" -> "Для ИИ нужен вход в профиль CORTEX."
             "timeout" -> "Ответ занял слишком много времени."
-            "offline" -> "Связь с сервером потеряна. Проверьте интернет."
+            "offline" -> "Нет связи с ИИ. Проверьте интернет. Команды телефона работают на устройстве."
             else -> "ИИ временно недоступен. Попробуйте ещё раз."
         }
     }
 
-    private companion object {
-        val ACTION_CLAIM = Regex("""(?iu)^(?:готово[,!.]?\s*)?(?:открыл|включил|выключил|запустил|установил|поставил|заблокировал)(?:\s|[.!]|$)""")
-    }
 }

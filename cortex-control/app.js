@@ -270,6 +270,18 @@ async function maintenance() {
     "Применить"));
 }
 
+// These Android version codes are part of published build history.
+function releaseCode(name, versions) {
+  const clean = name.trim().replace(/^v/i, "");
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(clean)) return null;
+  const candidates = new Set(versions.filter(item =>
+    item.version_name.trim().replace(/^v/i, "") === clean).map(item => Number(item.version_code)));
+  const known = /^1\.0\.(?:[4-9]|1[0-5])$/.test(clean) ? 100 + Number(clean.split(".")[2]) : null;
+  if (known !== null) candidates.add(known);
+  const code = candidates.size === 1 ? [...candidates][0] : null;
+  return Number.isInteger(code) && code > 0 && code < 2_100_000_000 ? code : null;
+}
+
 async function updates() {
   const [config, versions] = await Promise.all([
     controlConfig(), db.from("cortex_release_versions").select("version_code,version_name,access,notes").order("version_code", { ascending: false }).limit(50).then(data)
@@ -277,9 +289,14 @@ async function updates() {
   const list = (versions || []).map(version => '<li><div><strong>' + escape(version.version_name) + '</strong> · ' +
     escape(version.version_code) + '<p>' + escape(version.notes) + '</p></div>' +
     button(version.access === "blocked" ? "Разрешить" : "Заблокировать", version.access === "blocked" ? "allow-version" : "block-version", version.version_code) + '</li>').join("");
+  const cutoffCode = Number(config.min_version_code) - 1;
+  const previous = (versions || []).find(item => item.version_code === cutoffCode);
+  const cutoff = previous?.version_name || (cutoffCode >= 104 && cutoffCode <= 115 ? "1.0." + (cutoffCode - 100) : "");
   return card("Обязательное обновление", form("update-policy",
-    '<label class="check"><input type="checkbox" name="enabled"' + checked(config.block_old_versions) + '>Требовать новую версию</label>' +
-    field("code", "Минимальный код версии", "number", config.min_version_code, 'min="1" max="2100000000" required') +
+    '<label class="check"><input type="checkbox" name="enabled"' + checked(config.block_old_versions) + '>Блокировать старые версии</label>' +
+    field("cutoff", "Запретить до версии включительно", "text", cutoff, 'placeholder="1.0.13" maxlength="24"') +
+    '<p>Например, 1.0.13 заблокирует эту версию и все предыдущие. Для остальных версий добавьте запись о сборке в список ниже.</p>' +
+    (config.block_old_versions && !cutoff ? '<p>Текущий порог задан кодом Android ' + escape(config.min_version_code) + '.</p>' : "") +
     field("url", "Ссылка на обновление", "url", config.update_url || "", 'placeholder="https://"'), "Сохранить")) +
     card("Версии", '<ul class="record-list">' + list + '</ul>' + form("release",
       field("name", "Название версии", "text", "", 'maxlength="24" required') +
@@ -523,10 +540,22 @@ app.addEventListener("submit", async event => {
         if (formData.has("enabled") && !confirm("Включить технические работы для пользователей?")) return;
         await saveConfig({ maintenance_enabled: formData.has("enabled"), maintenance_message: read("message") });
         break;
-      case "update-policy":
-        if ((formData.has("enabled") || read("url")) && !/^https:\/\//.test(read("url"))) throw new Error("Укажите HTTPS-ссылку на обновление.");
-        await saveConfig({ block_old_versions: formData.has("enabled"), min_version_code: Number(read("code")), update_url: read("url") });
+      case "update-policy": {
+        const enabled = formData.has("enabled");
+        const url = read("url");
+        if ((enabled || url) && !/^https:\/\//.test(url)) throw new Error("Укажите HTTPS-ссылку на обновление.");
+        const cutoff = read("cutoff").replace(/^v/i, "");
+        let code = null;
+        if (enabled || cutoff) {
+          const releases = cutoff ? data(await db.from("cortex_release_versions")
+            .select("version_code,version_name").in("version_name", [cutoff, "v" + cutoff]).limit(20)) : [];
+          code = releaseCode(cutoff, releases || []);
+          if (code === null) throw new Error("Введите известный номер версии, например 1.0.13. Новую версию сначала добавьте в список сборок.");
+        }
+        if (enabled && !confirm("Заблокировать версию " + cutoff + " и все предыдущие?")) return;
+        await saveConfig({ block_old_versions: enabled, ...(code === null ? {} : { min_version_code: code + 1 }), update_url: url });
         break;
+      }
       case "release":
         data(await db.from("cortex_release_versions").insert({
           version_code: Number(read("code")), version_name: read("name"), notes: read("notes"), access: "allowed"

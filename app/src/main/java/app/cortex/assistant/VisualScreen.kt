@@ -24,7 +24,8 @@ internal data class VisualNode(
     val description: String = "",
     val state: String = "",
     val scrollAxis: VisualScrollAxis? = null,
-    val longClickable: Boolean = false
+    val longClickable: Boolean = false,
+    val descriptionLines: List<String> = emptyList()
 )
 
 internal data class VisualFrame(

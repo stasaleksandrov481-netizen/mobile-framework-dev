@@ -8,7 +8,7 @@ internal object CortexLocalCommands {
     private val verbs = "включи(?:ть)?|выключи(?:ть)?|отключи(?:ть)?|погаси(?:ть)?|открой|открыть|закрой|закрыть|" +
         "запусти(?:ть)?|сверни|свернуть|заблокируй|заблокировать|сфоткай|сфоткайся|сфотографируй|сфотографировать|" +
         "сделай|установи|поставь|убери|прибавь|убавь|уменьши|увеличь|переключи|проверь|покажи|" +
-        "найди|поищи|заведи|скопируй|сними"
+        "найди|поищи|заведи|скопируй|сними|продолжи|возобнови|приостанови|пропусти"
     private val separator = Regex("""\s*(?:[,;\n]+\s*(?:и\s+)?(?:потом\s+|затем\s+|после этого\s+)?|\s+(?:и\s+)?(?:потом|затем|после этого)\s+|\s+и\s+(?=(?:$verbs)\b))\s*""", RegexOption.IGNORE_CASE)
     private val unpunctuated = Regex("""\s+(?=(?:$verbs)\b)""", RegexOption.IGNORE_CASE)
     private val prefix = Regex("""^(?:(?:можешь(?:\s+мне)?|не мог бы ты|бро|давай|нужно|надо|пожалуйста)[,\s]+)+""", RegexOption.IGNORE_CASE)
@@ -37,6 +37,8 @@ internal object CortexLocalCommands {
     private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|подскажи как)\s""")
     private val cameraNames = setOf("камера", "камеру", "фотокамеру", "camera")
     private val spaces = Regex("""\s+""")
+    private val shadeQualifier = Regex("""^(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек) +| +(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек)$""")
+    private val torch = Regex("""(?:(включи|зажги|вруби|выключи|отключи|погаси|потуши|выруби|переключи) )?(фонарик|фонарь|вспышку)(?: (?:на телефоне|на камере))?""")
 
     fun parse(raw: String, resolveApp: (String) -> String?): List<JSONObject>? {
         val original = (CortexHotword.command(raw) ?: raw).trim().trimEnd('.', '!', '?').replaceFirst(prefix, "").trim()
@@ -87,7 +89,16 @@ internal object CortexLocalCommands {
                 "$1 яркость")
         val first = words.substringBefore(' ')
         val plain = (infinitives[first] ?: first) + words.substring(first.length)
-        CortexSystemRequests.parse(plain)?.let { return it }
+        val action = plain.replace(shadeQualifier, "").trim()
+        torch.matchEntire(action)?.let {
+            val mode = when (it.groupValues[1]) {
+                "выключи", "отключи", "погаси", "потуши", "выруби" -> "off"
+                "переключи", "" -> "toggle"
+                else -> "on"
+            }
+            return command("torch", "mode" to mode)
+        }
+        CortexSystemRequests.parse(action)?.let { return it }
         timer.matchEntire(plain)?.let { match ->
             val amount = match.groupValues[1].toInt()
             val unit = match.groupValues[2]
@@ -107,9 +118,21 @@ internal object CortexLocalCommands {
             return resolveApp(name)?.let { command("app_info", "target" to it) }
         }
         return when (plain) {
-            "включи фонарик", "зажги фонарик" -> command("torch", "mode" to "on")
-            "выключи фонарик", "погаси фонарик", "отключи фонарик" -> command("torch", "mode" to "off")
-            "переключи фонарик" -> command("torch", "mode" to "toggle")
+            "пауза", "музыку на паузу", "на паузу", "поставь на паузу", "поставь музыку на паузу",
+            "останови музыку", "выключи музыку", "приостанови музыку", "пауза музыки", "пауза видео",
+            "поставь видео на паузу", "приостанови воспроизведение", "пауза воспроизведения" -> command("media", "mode" to "pause")
+            "играй дальше", "продолжи музыку", "продолжи видео", "продолжи воспроизведение", "сними с паузы",
+            "возобнови музыку", "возобнови воспроизведение", "плей", "включи музыку", "запусти музыку" -> command("media", "mode" to "play")
+            "следующий трек", "следующая песня", "следующую песню", "включи следующую песню",
+            "переключи трек", "пропусти трек", "переключи на следующий трек", "переключи музыку",
+            "переключи песню", "дальше трек" -> command("media", "mode" to "next")
+            "предыдущий трек", "предыдущая песня", "предыдущую песню", "переключи на предыдущий трек",
+            "включи предыдущую песню", "верни прошлый трек" -> command("media", "mode" to "previous")
+            "плей пауза", "переключи воспроизведение" -> command("media", "mode" to "toggle")
+            "открой шторку", "разверни шторку", "покажи шторку", "открой быстрые настройки", "открой панель быстрых настроек" ->
+                command("shade", "target" to "quick_settings")
+            "открой шторку уведомлений", "покажи шторку уведомлений", "открой панель уведомлений" ->
+                command("shade", "target" to "notifications")
             "убери громкость", "выключи звук", "отключи звук", "убери звук", "поставь без звука" ->
                 command("volume", "mode" to "mute", "stream" to "media")
             "прибавь громкость", "увеличь громкость", "прибавь звук", "сделай погромче" -> command("volume", "mode" to "up")

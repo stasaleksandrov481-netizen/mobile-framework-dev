@@ -111,7 +111,12 @@ internal class PhoneNetwork(private val context: Context) {
                     if (accepted && awaitRadio(wifiGoal)) changes += if (wifiGoal) "Включил Wi-Fi." else "Выключил Wi-Fi."
                     else limits += "Android не разрешил переключить Wi-Fi."
                 }
-                navigation == null -> limits += "Android запрещает приложениям менять Wi-Fi напрямую. Разрешите «CORTEX — управление экраном» для переключения в быстрой панели."
+                navigation == null -> {
+                    beforeScreen()
+                    if (settings != null && launchSettings(Settings.ACTION_WIFI_SETTINGS, settings))
+                        limits += "Открыл настройки Wi-Fi. Android требует сменить переключатель там."
+                    else limits += "Android не разрешил переключить Wi-Fi через системный API."
+                }
                 else -> {
                     beforeScreen()
                     report(if (wifiGoal) "Переключаю Wi-Fi…" else "Выключаю Wi-Fi…")
