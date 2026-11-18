@@ -12,6 +12,7 @@ import { useCortexAccount } from "@/lib/use-cortex-account";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { completeVerifiedAccount } from "@/lib/verified-account";
 import { isEmailOtp } from "@/lib/email-otp";
+import { RegistrationValidationError, registrationValidationError } from "@/lib/registration-validation";
 
 type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
 type SuccessKind = "signup" | "signin" | "existing";
@@ -141,15 +142,20 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || authSubmission.current || resendSubmission.current) return;
+    if (mode === "signup" && resendWait > 0) {
+      setError(`Повторная попытка будет доступна через ${resendWait} с. Не отправляйте запросы подряд.`);
+      return;
+    }
     authSubmission.current = true;
     setBusy(true);
     setError("");
     try {
+      if (mode !== "done") {
+        const validationError = registrationValidationError({ mode, email, password, accepted, acceptedTerms });
+        if (validationError) throw new RegistrationValidationError(validationError);
+      }
       if (mode === "signup") {
         if (!signupEnabled) throw new Error("Регистрация временно закрыта.");
-        if (!accepted) throw new Error("Примите условия обработки данных.");
-        if (!acceptedTerms) throw new Error("Примите пользовательское соглашение.");
-        if (password.length < 10) throw new Error("Пароль должен содержать минимум 10 символов.");
         const { data, error: signupError } = await settleWithTimeout(cortexAuth.auth.signUp({
           email: email.trim().toLowerCase(),
           password,
@@ -291,7 +297,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
               : "Войди в свой аккаунт CORTEX."}</p>
           {!signupEnabled && mode === "signin" && <p className="auth-closed-note">Регистрация новых аккаунтов пока закрыта. Если аккаунт уже есть, войди по почте и паролю.</p>}
 
-          <form onSubmit={submit} className="registration-form">
+          <form onSubmit={submit} noValidate className="registration-form">
             <label htmlFor="registration-email">Электронная почта</label>
             <input id="registration-email" autoComplete="email" type="email" inputMode="email"
               value={email} onChange={(event) => setEmail(event.target.value)} required maxLength={254}
@@ -338,9 +344,9 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             )}
             {mode === "signup" && <p className="auth-legal-note">О раннем доступе и бонусах: <Link href="/terms" target="_blank" rel="noopener noreferrer">условия программы</Link>.</p>}
 
-            {error && <p role="alert" className="form-error">{error}</p>}
-            <button className="button button--primary auth-submit" type="submit" disabled={busy}>
-              <span>{busy ? "Подождите..." : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : "Войти"}</span>
+            {error && <p role="alert" aria-live="assertive" className="form-error">{error}</p>}
+            <button className="button button--primary auth-submit" type="submit" disabled={busy || (mode === "signup" && resendWait > 0)}>
+              <span>{busy ? "Подождите..." : mode === "signup" && resendWait > 0 ? `Повторить через ${resendWait} с` : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : "Войти"}</span>
               {!busy && <UiIcon name="arrow-right" size={18} />}
             </button>
           </form>
