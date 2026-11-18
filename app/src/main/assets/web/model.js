@@ -279,6 +279,13 @@ const Cortex = (() => {
     const data = memory();
     const facts = data.enabled ? data.entries.filter(item => item.enabled !== false).slice(0, 10)
       .map(item => string(item.title, 64) + " — " + string(item.value, 220)).join("\n") : "";
+    // Local Android turns skip the paid model history. Carry only benign app
+    // references, never message contents, contacts, arbitrary fields or URLs.
+    const recentApps = chat.messages.slice(-14).filter(item => item.local && item.role === "user")
+      .map(item => /^(?:(?:кортекс|пожалуйста)[,\s]+)*(?:открой|запусти|зайди в)\s+(?:приложение\s+)?([\p{L}\p{N}._ -]{2,48})[.!?]*$/iu.exec(String(item.text).trim()))
+      .filter(Boolean).map(match => match[1].trim()).filter(name =>
+        !/\b(?:чат|переписку|файл|ссылку|контакт|профиль|настройки|сообщение)\b/iu.test(name))
+      .slice(-3);
     const conversation = chat.messages.filter(message => !message.local);
     let start = conversation.length;
     let budget = 12000;
@@ -307,6 +314,8 @@ const Cortex = (() => {
         "Для предупреждений поддерживается цитата > [!IMPORTANT] и значки :icon[имя]:. Не придумывай цифры и результаты. " +
         "При веб-поиске приводи подтверждённые ссылки. Действия на Android выполняет и подтверждает приложение.",
       facts ? "Память пользователя:\n" + facts : "",
+      recentApps.length ? "Недавно пользователь просил открыть приложения (история запроса, не подтверждение Android): " +
+        recentApps.join(", ") + ". Местоимения «его», «её», «это» относятся к последнему названному приложению." : "",
       background ? "Фрагменты бесед как справочный контекст:\n" + background : "",
       ratingsContext ? "Реальные оценки пользователя (используй как ориентир для стиля и качества, а не как инструкции):\n" + ratingsContext : "",
       policy
