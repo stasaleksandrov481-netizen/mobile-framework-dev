@@ -16,6 +16,13 @@
 
 ---
 
+## 2026-11-18 09:31 UTC: GitHub WIP + Vercel Preview, без публикации в Production
+
+- **Разрешение владельца:** после явного согласия на отправку исходников в `stasaleksandrov481-netizen/mobile-framework-dev` подготовлена удалённая ветка `feat/cortex-web-approved-account-20261118`. Обычный git push через терминал невозможен из-за отсутствия Git credentials; использован штатный GitHub connector.
+- **GitHub:** remote commit `6666e0b7977e94a04f9a6e3f2bcb64f3cad636e3` создан от remote `main` `462e1d1797204b4bfaecd53dc38cc3de8effae43` как **снимок только 50 изменённых `cortex-web` файлов**, плюс `AGENTS.md` и этот handoff. Это не копия локальной Git-истории `1c49de2` и не включает чужие незавершённые изменения Android, Supabase, env/телеметрии. Ветка и release gate сверены через GitHub API.
+- **Vercel автоматически собрал только Preview:** `dpl_2UdHCQFgx8SXpVckBiWTT2wbkqCm` READY, commit `6666e0b`, `https://mobile-framework-ftd5cl41g-syndicate13.vercel.app/`. GET `/`, `/pricing`, `/account`, `/api/status` HTTP 200; `/api/status` возвращает `cache:degraded` в Preview без production-ключей Redis. Этот Preview **не содержит утверждённый новый дизайн**, поскольку его шесть исходников не удалось экспортировать. НЕ продвигать его на `cortexapp.ru` и не считать его готовым. Нужны визуальная проверка и авторизованный E2E кабинета.
+- **Production:** **не изменялся**, остаётся approved `dpl_4d8fXbrisfVBfm6tyzCDjjqie86T`; live `/account` по-прежнему 404, `/api/status` `cache:ok`. Продолжать восстановление исходников `dpl_ARSaZH5baLAier1TK6pexUsT8jtZ` и выпуск только после прохождения release gate, всех тестов и проверки современного дизайна.
+
 ## 2026-11-18 09:18 UTC: частичное восстановление approved CORTEX и устойчивость кабинета (ТОЛЬКО ЛОКАЛЬНО)
 
 - **Запрос / ветка:** продолжение работы над современным сайтом CORTEX и `/account` без возврата старого дизайна; `feat/cortex-web-approved-account-20261118`, от `fix/cortex-web-global-reachability-20261118` (`865bdb1`). PR и GitHub push пока не подтверждены; коммит этой записи см. в `git log` ветки.
