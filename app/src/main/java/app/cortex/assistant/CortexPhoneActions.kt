@@ -304,7 +304,12 @@ internal class CortexPhoneActions(private val context: Context) {
         val exact = apps.filter { normalized(it.name) == clean }
         if (exact.size == 1) return exact[0]
         for ((pkg, names) in ALIASES) {
-            if (clean in names) apps.firstOrNull { it.pkg == pkg }?.let { return it }
+            if (clean in names) {
+                apps.firstOrNull { it.pkg == pkg }?.let { return it }
+                // Handle a very first voice command before the background app index is ready.
+                if (apps.isEmpty() && context.packageManager.getLaunchIntentForPackage(pkg) != null)
+                    return App(pkg, target)
+            }
         }
         return when (clean) {
             in CAMERA_NAMES -> cameraApp(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
