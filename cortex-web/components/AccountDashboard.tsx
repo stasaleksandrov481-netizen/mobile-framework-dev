@@ -305,13 +305,14 @@ export function AccountDashboard() {
             <div className="account-overview-grid">
               <section className="account-panel account-token-panel" aria-label="Баланс ИИ-токенов">
                 <div className="account-panel-overline"><span>ИИ-ТОКЕНЫ</span><span className="account-panel-indicator">{quota?.plan?.toUpperCase() || "FREE"}</span></div>
-                {loadingData ? <div className="account-big-number account-big-number--loading">…</div> : quota ? <>
+                {/* Keep the last verified balance visible during refreshes. */}
+                {quota ? <>
                   <div className="account-big-number">{quota.unlimited ? "∞" : numberFormat.format(quota.remaining ?? 0)}</div>
                   <p className="account-muted">{quota.unlimited ? "Доступно без дневного лимита" : "Доступно для ИИ-запросов сейчас"}</p>
                   {!quota.unlimited && <div className="account-token-progress" role="progressbar" aria-label="Использовано токенов сегодня" aria-valuemin={0} aria-valuemax={Math.max(1, quota.daily_limit)} aria-valuenow={Math.min(quota.daily_limit, Math.max(0, quota.used))}><span style={{ width: `${Math.min(100, Math.max(0, quota.used / Math.max(1, quota.daily_limit) * 100))}%` }} /></div>}
                   <div className={`account-token-caption${quota.unlimited ? " account-token-caption--unlimited" : ""}`}><span>Потрачено сегодня: {numberFormat.format(quota.used)}</span><span>Лимит: {quota.unlimited ? "∞" : numberFormat.format(quota.daily_limit)}</span></div>
                   <div className="account-reset-label">Обновление лимита: {resetLabel(quota.reset_at)}</div>
-                </> : <><div className="account-big-number">—</div><p className="account-muted">Данные о доступных токенах пока не получены.</p></>}
+                </> : loadingData ? <div className="account-big-number account-big-number--loading" role="status">…</div> : <><div className="account-big-number">—</div><p className="account-muted">Данные о доступных токенах пока не получены.</p></>}
                 <div className="account-card-footnote">Дневной лимит и бонусные токены учитываются отдельно. <Link href="/pricing">Как работают лимиты <UiIcon name="arrow-up-right" size={13} /></Link></div>
               </section>
 
@@ -321,7 +322,7 @@ export function AccountDashboard() {
                 <div className="account-bonus-number">{loadingData && !reservation ? "…" : reservation ? `${granted ? "" : "+"}${numberFormat.format(granted ? remainingBonus : reserved)}` : "—"}</div>
                 <p className="account-muted">{granted ? "Осталось бонусных ИИ-токенов" : "Бонусных ИИ-токенов зарезервировано"}</p>
                 <div className="account-bonus-divider" />
-                <p className="account-bonus-note">{!reservation && !loadingData ? "Для этого аккаунта подтверждённый бонус пока не найден." : granted ? "Бонус начислен. Его остаток уже учтён в общем доступном балансе." : untilRelease ? "Будут доступны после запуска открытой беты 20 ноября." : "Бонус станет доступен после подтверждения аккаунта в приложении."}</p>
+                <p className="account-bonus-note">{!reservation && loadingData ? "Загружаем бонусы аккаунта…" : !reservation ? "Для этого аккаунта подтверждённый бонус пока не найден." : granted ? "Бонус начислен. Его остаток уже учтён в общем доступном балансе." : untilRelease ? "Будут доступны после запуска открытой беты 20 ноября." : "Бонус станет доступен после подтверждения аккаунта в приложении."}</p>
               </section>
             </div>
 
