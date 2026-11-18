@@ -66,6 +66,32 @@ test("payment status is scoped to the account and webhook writes exclude test mo
   assert.equal((await request(handler, { id: providerId }, {}, { webhook: "1" })).code, 503);
 });
 
+test("test-mode payment simulation needs the server gateway and separate sandbox key", async () => {
+  let settled = 0;
+  const handler = createBillingHandler({ ...env, CORTEX_BILLING_MODE: "test" }, async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path === "/rest/v1/cortex_payments") return Response.json([
+      { id, subject, mode: "test", plan: "pro", amount: 39900, provider_id: providerId, state: "pending" }
+    ]);
+    assert.equal(path, "/rest/v1/rpc/cortex_billing_payment");
+    const payload = JSON.parse(options.body);
+    assert.equal(payload.p_state, "confirmed");
+    assert.equal(payload.p_mode, "test");
+    settled++;
+    return Response.json({ id, subject, mode: "test", state: "confirmed", plan: "pro", amount: 39900 });
+  });
+  const body = { operation: "simulate", subject, id, state: "confirmed" };
+  assert.equal((await request(handler, body, { authorization: "Bearer wrong" })).code, 401);
+  assert.equal((await request(handler, body, { authorization: "Bearer edge" })).code, 400);
+  assert.equal(settled, 0);
+  const result = await request(handler, body,
+    { authorization: "Bearer edge", "x-cortex-billing-test-key": "sandbox" });
+  assert.equal(result.code, 200);
+  assert.equal(result.json.state, "confirmed");
+  assert.equal(result.json.test, true);
+  assert.equal(settled, 1);
+});
+
 test("checkout rejects missing or invalid account email before reserving an order", async () => {
   const handler = createBillingHandler({ ...env, CORTEX_BILLING_MODE: "live" }, () => assert.fail("network call"));
   for (const email of [undefined, {}, "no-at.example", "buyer@example..com", "buyer@example.com\n", "a".repeat(65) + "@example.com"]) {

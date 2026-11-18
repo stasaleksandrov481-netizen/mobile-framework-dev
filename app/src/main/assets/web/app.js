@@ -33,6 +33,7 @@
   const connection = { email: false, emailRegistration: false, profiles: false, checked: false, visualPrivacy: false,
     status: Api.available ? "loading" : "preview" };
   let wakeState = "", islandCamera = "drop", androidVersionCode = 0;
+  let chunkedChatExport = false, activeChatExport = null;
   let phoneInfo = {};
   let deviceSnapshot = null;
   let androidCompatibility = null;
@@ -1259,14 +1260,51 @@
       }, { extra: entry ? button("Удалить", "trash", "memory-delete", entry.id, "danger") : "" });
   }
 
+  function sendChatExportChunk() {
+    const job = activeChatExport;
+    if (!job) return;
+    if (job.offset === job.text.length) {
+      if (!sendDevice("export-end", { id: job.id })) {
+        activeChatExport = null;
+        flash("Не удалось завершить экспорт чатов.");
+      }
+      return;
+    }
+    let end = Math.min(job.text.length, job.offset + 65_536);
+    // A UTF-16 surrogate pair must never be split between UTF-8 chunks.
+    const last = job.text.charCodeAt(end - 1);
+    if (end < job.text.length && last >= 0xD800 && last <= 0xDBFF) end--;
+    const chunk = job.text.slice(job.offset, end);
+    if (!sendDevice("export-chunk", { id: job.id, index: job.index, text: chunk })) {
+      activeChatExport = null;
+      flash("Не удалось передать часть истории Android.");
+      return;
+    }
+    job.offset = end;
+    job.index++;
+  }
+
   function exportChats() {
     const chats = S.chats.filter(chat => chat.saved && chat.messages.some(message => !message.ephemeral))
       .map(chat => ({ ...chat, messages: chat.messages.filter(message => !message.ephemeral) }));
     if (!chats.length) { flash("Сохранённых чатов пока нет."); return; }
     const text = JSON.stringify({ cortex: U.version, exported: new Date().toISOString(), chats }, null, 2);
     if (device) {
-      if (text.length > 1_850_000) { flash("История слишком велика для одного файла."); return; }
-      if (!sendDevice("export", { text })) flash("Не удалось открыть сохранение файла.");
+      if (activeChatExport) { flash("Сначала завершите текущий экспорт."); return; }
+      if (chunkedChatExport) {
+        if (text.length > 67_108_864) { flash("История превышает предел экспорта 64 МБ."); return; }
+        const id = crypto.randomUUID();
+        activeChatExport = { id, text, offset: 0, index: 0 };
+        if (!sendDevice("export-begin", { id, length: text.length })) {
+          activeChatExport = null;
+          flash("Не удалось открыть сохранение файла.");
+        }
+      } else {
+        // Backward compatibility: older installed APKs accept one small JSON
+        // message. Never silently truncate a larger conversation archive.
+        if (text.length > 1_850_000) { flash("Для экспорта большой истории обновите CORTEX."); return; }
+        if (!sendDevice("export", { text })) flash("Не удалось открыть сохранение файла.");
+      }
       return;
     }
     const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -1540,6 +1578,7 @@
     if (message.type === "permissions") {
       if (typeof message.versionName === "string") U.setVersion(message.versionName);
       if (Number.isInteger(message.versionCode)) androidVersionCode = message.versionCode;
+      chunkedChatExport = message.chunkedChatExport === true;
       if (device && typeof message.phoneModel === "string") phoneInfo = {
         manufacturer: message.manufacturer, model: message.phoneModel, android_version: message.androidRelease
       };
@@ -1587,7 +1626,14 @@
       else flash("Не удалось подготовить скриншот.");
     }
     if (message.type === "assistant-permission" && !message.ok) flash("Не удалось открыть выбор помощника Android.");
-    if (message.type === "export" && !message.cancelled) flash(message.ok ? "Чаты экспортированы" : "Не удалось сохранить файл");
+    if (message.type === "export-ready" && message.id === activeChatExport?.id) sendChatExportChunk();
+    if (message.type === "export-next" && message.id === activeChatExport?.id &&
+        message.index === activeChatExport.index) sendChatExportChunk();
+    if (message.type === "export") {
+      if (activeChatExport && message.id !== activeChatExport.id) return;
+      activeChatExport = null;
+      if (!message.cancelled) flash(message.ok ? "Чаты экспортированы" : "Не удалось сохранить файл");
+    }
   }
   if (device) device.onmessage = deviceEvent;
   if (window.CortexIslandControl) window.CortexIslandControl.onmessage = deviceEvent;

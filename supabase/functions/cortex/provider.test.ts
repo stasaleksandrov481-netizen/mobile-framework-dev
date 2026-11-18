@@ -121,7 +121,7 @@ test("paid settlement prefers OpenRouter generation cost over estimates or strea
 
 test("explicit model IDs use an audited server-side allowlist", () => {
   const messages = [{ role: "user", content: "Привет" }];
-  assert.equal(SELECTABLE_MODELS.size, 19);
+  assert.equal(SELECTABLE_MODELS.size, 21);
   for (const model_id of SELECTABLE_MODELS) {
     assert.equal(chatInput({ messages, model_id }).modelId, model_id);
   }

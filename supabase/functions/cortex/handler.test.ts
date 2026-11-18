@@ -210,7 +210,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         assert.equal(paid, true);
         assert.equal(body.p_subject, accountId);
         assert.ok(MODEL_PRICE_CEILINGS[body.p_model] || body.p_model === "google/gemini-3.8-flash-lite-tts");
-        assert.equal(body.p_advanced, body.p_model !== "google/gemini-3.8-flash-lite-tts");
+        assert.equal(body.p_advanced, !["google/gemini-3.8-flash-lite-tts", "google/gemini-3.1-flash-lite"].includes(body.p_model));
         paidHolds.push(body);
         const attempt = crypto.randomUUID();
         attempts.set(attempt, accountId);
@@ -411,13 +411,14 @@ test("uses a stable guest ID and rejects the next AI call at the daily limit", a
   assert.equal(models.length, attempts);
 });
 
-test("paid assistant prefers Haiku 5.5 while free guests stay on free models", async () => {
-  const { call, models, requests } = fixture(false, undefined, 15000, 50, true, true);
+test("paid assistant prefers affordable Gemini and preserves free model routing", async () => {
+  const { call, models, requests, paidHolds } = fixture(false, undefined, 15000, 50, true, true);
   const paidHeaders = { Authorization: "Bearer " + "T".repeat(43) };
   const paidResponse = await call("chat", chatPayload("Привет", false), paidHeaders);
   assert.equal(paidResponse.status, 200);
   assert.match(await paidResponse.text(), /data: \[DONE\]/);
-  assert.equal(models[0], "anthropic/claude-haiku-5.5");
+  assert.equal(models[0], "google/gemini-3.1-flash-lite");
+  assert.equal(paidHolds[0].p_advanced, false);
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_reserve"));
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_paid_finish"));
 
@@ -425,6 +426,32 @@ test("paid assistant prefers Haiku 5.5 while free guests stay on free models", a
   assert.equal(guestResponse.status, 200);
   assert.match(await guestResponse.text(), /data: \[DONE\]/);
   assert.match(models.at(-1)!, /:free$/);
+});
+
+test("paid deep conversations select Gemini 3.5 Flash Lite within the advanced allowance", async () => {
+  const { call, models, paidHolds } = fixture(false, undefined, 15000, 50, true, true);
+  const authorization = { Authorization: "Bearer " + "T".repeat(43) };
+  const response = await call("chat", { ...chatPayload("Разбери задачу", false), profile: "deep" }, authorization);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /data: \[DONE\]/);
+  assert.equal(models[0], "google/gemini-3.5-flash-lite");
+  assert.equal(paidHolds[0].p_advanced, true);
+});
+
+test("web search reserves money-safe limits and discloses when a search budget is exhausted", async () => {
+  const normal = fixture();
+  const response = await normal.call("chat", { ...chatPayload("Что нового сегодня?", false), web_search: true });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /web_ready/);
+  assert.ok(normal.reservations.some(batch => batch.some(rule =>
+    rule.bucket === "web-search:free:all:day" && rule.maximum === 100)));
+
+  const limited = fixture(false, undefined, 15000, 50, true, false, 0, "web-search:free:all:day");
+  const unavailable = await limited.call("chat", { ...chatPayload("Какие новости?", false), web_search: true });
+  assert.equal(unavailable.status, 200);
+  const streamed = await unavailable.text();
+  assert.doesNotMatch(streamed, /web_ready/);
+  assert.match(streamed, /data: \[DONE\]/);
 });
 
 test("explicit model routing uses provider price limits and never upgrades a free selection", async () => {
@@ -512,10 +539,14 @@ test("speech is server-authenticated, throttled and returns only validated PCM",
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_reserve"));
   assert.ok(!reservations.some(limits => limits.some(limit =>
-    limit.bucket.startsWith("speech:") && limit.bucket !== "speech:all" && limit.seconds === 86_400)),
+    limit.bucket.startsWith("speech:") && limit.bucket !== "speech:all:day" && limit.seconds === 86_400)),
   "personal speech usage should be bounded by tokens, not an extra daily request count");
-  assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all" &&
+  assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all:day" &&
     limit.seconds === 86_400 && limit.maximum === 500)));
+  assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all:minute" &&
+    limit.seconds === 60 && limit.maximum === 80)));
+  assert.ok(reservations.every(limits => new Set(limits.map(limit => limit.bucket)).size === limits.length),
+    "minute/day counters must never share a bucket name, including at midnight UTC");
 });
 
 test("Gemini streams PCM through OpenRouter and applies account voice settings", async () => {
@@ -631,6 +662,25 @@ test("email signup and password reset verify the code before issuing or revoking
   assert.deepEqual(reset, { state: "password_changed" });
   assert.ok(requests.includes("DELETE /rest/v1/cortex_sessions"));
   assert.ok(requests.includes("POST /auth/v1/logout"));
+});
+
+test("email sending has shared hourly and daily caps that survive account, install and IP rotation", async () => {
+  const { call, reservations } = fixture();
+  const response = await call("auth/signup", { email: "fresh@example.test", password: "safe test password 2026" });
+  assert.equal(response.status, 200);
+  const rules = reservations.find(limits => limits.some(limit => limit.bucket === "email:send:all:day"));
+  assert.ok(rules);
+  assert.ok(rules.some(limit => limit.bucket === "email:send:all:hour" &&
+    limit.seconds === 3600 && limit.maximum === 600));
+  assert.ok(rules.some(limit => limit.bucket === "email:send:all:day" &&
+    limit.seconds === 86_400 && limit.maximum === 3000));
+
+  const denied = fixture(false, undefined, 15_000, 50, true, false, 0, "email:send:all:day");
+  const blocked = await denied.call("auth/recover", { email: "different@example.test" },
+    { "x-cortex-install": otherInstall, "x-forwarded-for": "203.0.113.250" });
+  assert.equal(blocked.status, 429);
+  assert.ok(!denied.requests.includes("POST /auth/v1/recover"), "no SMTP request after a shared daily cap");
+  assert.ok(denied.reservations.some(limits => limits.some(limit => limit.bucket === "email:send:all:day")));
 });
 
 test("global free provider budget includes model retries", async () => {
