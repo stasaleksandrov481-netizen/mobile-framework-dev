@@ -37,6 +37,8 @@ internal object CortexLocalCommands {
     private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|подскажи как)\s""")
     private val cameraNames = setOf("камера", "камеру", "фотокамеру", "camera")
     private val spaces = Regex("""\s+""")
+    private val shadeQualifier = Regex("""^(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек) +| +(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек)$""")
+    private val torch = Regex("""(?:(включи|зажги|вруби|выключи|отключи|погаси|потуши|выруби|переключи) )?(фонарик|фонарь|вспышку)(?: (?:на телефоне|на камере))?""")
 
     fun parse(raw: String, resolveApp: (String) -> String?): List<JSONObject>? {
         val original = (CortexHotword.command(raw) ?: raw).trim().trimEnd('.', '!', '?').replaceFirst(prefix, "").trim()
@@ -87,7 +89,16 @@ internal object CortexLocalCommands {
                 "$1 яркость")
         val first = words.substringBefore(' ')
         val plain = (infinitives[first] ?: first) + words.substring(first.length)
-        CortexSystemRequests.parse(plain)?.let { return it }
+        val action = plain.replace(shadeQualifier, "").trim()
+        torch.matchEntire(action)?.let {
+            val mode = when (it.groupValues[1]) {
+                "выключи", "отключи", "погаси", "потуши", "выруби" -> "off"
+                "переключи", "" -> "toggle"
+                else -> "on"
+            }
+            return command("torch", "mode" to mode)
+        }
+        CortexSystemRequests.parse(action)?.let { return it }
         timer.matchEntire(plain)?.let { match ->
             val amount = match.groupValues[1].toInt()
             val unit = match.groupValues[2]
@@ -118,9 +129,10 @@ internal object CortexLocalCommands {
             "предыдущий трек", "предыдущая песня", "предыдущую песню", "переключи на предыдущий трек",
             "включи предыдущую песню", "верни прошлый трек" -> command("media", "mode" to "previous")
             "плей пауза", "переключи воспроизведение" -> command("media", "mode" to "toggle")
-            "включи фонарик", "зажги фонарик" -> command("torch", "mode" to "on")
-            "выключи фонарик", "погаси фонарик", "отключи фонарик" -> command("torch", "mode" to "off")
-            "переключи фонарик" -> command("torch", "mode" to "toggle")
+            "открой шторку", "разверни шторку", "покажи шторку", "открой быстрые настройки", "открой панель быстрых настроек" ->
+                command("shade", "target" to "quick_settings")
+            "открой шторку уведомлений", "покажи шторку уведомлений", "открой панель уведомлений" ->
+                command("shade", "target" to "notifications")
             "убери громкость", "выключи звук", "отключи звук", "убери звук", "поставь без звука" ->
                 command("volume", "mode" to "mute", "stream" to "media")
             "прибавь громкость", "увеличь громкость", "прибавь звук", "сделай погромче" -> command("volume", "mode" to "up")

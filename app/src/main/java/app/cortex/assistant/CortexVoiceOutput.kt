@@ -1,6 +1,7 @@
 package app.cortex.assistant
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -16,6 +17,10 @@ import java.util.Locale
 internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private val applicationContext = context.applicationContext
     private val bridge = CortexServerBridge(applicationContext)
+    private val options = applicationContext.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
+    private val speechSetting = SharedPreferences.OnSharedPreferenceChangeListener { prefs, name ->
+        if (name == "voiceReplies" && !prefs.getBoolean(name, true)) stop()
+    }
     private val handler = Handler(Looper.getMainLooper())
     private var request: String? = null
     private var track: AudioTrack? = null
@@ -23,11 +28,18 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private var localTurn: Int? = null
     private var generation = 0
 
+    init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
+
     @Synchronized fun speak(text: String, complete: (Boolean) -> Unit) {
         stop()
+        if (!options.getBoolean("voiceReplies", true)) { handler.post { complete(false) }; return }
         val turn = generation
         val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
         if (normalized.isBlank()) { handler.post { complete(false) }; return }
+        if (BuildConfig.DEBUG) {
+            useAndroidVoice(turn, normalized, complete)
+            return
+        }
         request = bridge.speech(normalized) { response ->
             synchronized(this) {
                 if (turn != generation || request == null) return@speech
@@ -191,6 +203,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     }
 
     override fun close() {
+        options.unregisterOnSharedPreferenceChangeListener(speechSetting)
         stop()
         bridge.close()
     }

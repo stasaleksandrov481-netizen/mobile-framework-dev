@@ -30,7 +30,7 @@ const Cortex = (() => {
   ];
   const defaults = {
     quality: "balanced", reduceMotion: false, rememberSaved: true,
-    language: "auto", haptics: true, voiceContinue: true,
+    language: "auto", haptics: true, voiceContinue: true, voiceReplies: true,
     phoneActions: true, visualAutomation: false, visualBetaSeen: false, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
     overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };

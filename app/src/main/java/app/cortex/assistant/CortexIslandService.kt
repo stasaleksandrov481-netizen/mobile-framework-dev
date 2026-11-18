@@ -570,7 +570,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                         }, 400L)
                     }
                 }
-                if (fromVoice && !poweringOff && reply.isNotBlank()) voiceOutput.speak(reply) { /* Speech is optional. */ }
+                if (fromVoice && !poweringOff && reply.isNotBlank() && preferences.getBoolean("voiceReplies", true))
+                    voiceOutput.speak(reply) { /* The answer stays visible if Android cannot play audio. */ }
             })
     }
 

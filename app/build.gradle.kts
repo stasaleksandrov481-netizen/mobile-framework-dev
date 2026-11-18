@@ -57,8 +57,8 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 116
-        versionName = "1.0.16"
+        versionCode = 117
+        versionName = "1.0.17"
         buildConfigField("String", "CORTEX_WEB_UPDATE_ROOT", quotedBuildValue(webUpdateRoot))
         buildConfigField("String", "CORTEX_WEB_UPDATE_PUBLIC_KEY", quotedBuildValue(webUpdatePublicKey))
         buildConfigField("String", "CORTEX_RELEASE_SIGNER_SHA256", quotedBuildValue(expectedSignerSha256))

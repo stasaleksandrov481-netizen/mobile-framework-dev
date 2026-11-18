@@ -2708,3 +2708,19 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
 .cortex-quota-card progress { width: 100%; height: 5px; accent-color: #fff; }
 .cortex-quota-card progress::-webkit-progress-bar { background: #ffffff22; border-radius: 8px; }
 .cortex-quota-card progress::-webkit-progress-value { background: #f2f2f2; border-radius: 8px; }
+
+/* The editor shows the same tint and edge treatment as the native island. */
+.plan-island-preview {
+  background: radial-gradient(ellipse at 26% 14%, #647e9e54, transparent 45%),
+    radial-gradient(ellipse at 81% 83%, #6552784f, transparent 48%), #0e131b;
+}
+.plan-island-sample.plan-liquid-glass {
+  background: linear-gradient(128deg, #ffffff35 0%, #ffffff0d 25%, transparent 46%, #b4ddff1f 100%),
+    linear-gradient(138deg, color-mix(in srgb, var(--island-bg) var(--island-opacity), #fff 15%),
+      color-mix(in srgb, var(--island-bg) 58%, #050912) 62%,
+      color-mix(in srgb, var(--island-bg) 74%, #8dabc9));
+  border-color: #f0f8ff83;
+  box-shadow: inset 0 1px 1px #f5faff83, inset 0 -1px 2px #b7d6fc46,
+    inset 0 0 0 2px #ffffff0b, 0 6px 21px #0007;
+  backdrop-filter: blur(7px);
+}

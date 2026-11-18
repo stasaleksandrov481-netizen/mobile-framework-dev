@@ -99,6 +99,23 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Verify release build and cache dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/cortex-gradle.log"
+          for attempt in 1 2 3; do
+            if gradle --no-daemon :app:assembleRelease 2>&1 | tee "$log"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]] || ! grep -Eiq 'Received status code (429|502|503|504)|Read timed out|Connection reset' "$log"; then
+              exit 1
+            fi
+            delay=$((attempt * 25))
+            echo "::warning::Dependency host temporarily unavailable. Retrying Gradle in ${delay}s."
+            sleep "$delay"
+          done
+
       - name: Sign the CORTEX update
         if: github.event_name == 'workflow_dispatch' && inputs.publish
         id: signing
@@ -134,7 +151,8 @@ jobs:
           trap 'rm -f "$CORTEX_KEYSTORE_FILE"' EXIT
           printf '%s' "$CORTEX_KEYSTORE_B64" | base64 --decode > "$CORTEX_KEYSTORE_FILE"
           unset CORTEX_KEYSTORE_B64
-          gradle --no-daemon :app:assembleRelease
+          # The unsigned release build above has already resolved its lint and build dependencies.
+          gradle --no-daemon --offline :app:assembleRelease
           apk=app/build/outputs/apk/release/app-release.apk
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           # Keep the signing certificate used by the published 1.0.11 APK.

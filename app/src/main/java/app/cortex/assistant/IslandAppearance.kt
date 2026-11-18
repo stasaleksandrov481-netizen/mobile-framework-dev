@@ -8,7 +8,7 @@ internal data class IslandAppearance(
     val background: Int, val text: Int, val border: Int, val accent: Int, val faceColor: Int,
     val opacity: Float, val size: Float, val widthScale: Float, val heightScale: Float, val offsetX: Float, val offsetY: Float, val corner: Float,
     val borderWidth: Float, val motion: String, val face: Boolean, val status: Boolean,
-    val progress: Boolean, val results: Boolean
+    val progress: Boolean, val results: Boolean, val glass: Boolean, val mascot: Boolean
 ) {
     companion object {
         fun read(preferences: SharedPreferences) = parse(
@@ -27,7 +27,7 @@ internal data class IslandAppearance(
             val legacyDefault = settings.optString("background").equals("#080808", true)
             val legacyOpacity = settings.optDouble("opacity", 96.0)
             return IslandAppearance(
-                if (legacyDefault) Color.BLACK else color("background", "#000000"), color("text", "#FFFFFF"), color("border", "#FFFFFF"),
+                if (legacyDefault) Color.parseColor("#34465A") else color("background", "#34465A"), color("text", "#FFFFFF"), color("border", "#FFFFFF"),
                 color("accent", "#FFFFFF"), color("faceColor", "#E5E5E5"),
                 if (legacyDefault && legacyOpacity in 96.0..100.0) 1f
                     else number("opacity", 100.0, 40.0, 100.0) / 100,
@@ -37,8 +37,9 @@ internal data class IslandAppearance(
                 number("offsetY", 0.0, 0.0, 80.0), number("corner", 22.0, 12.0, 32.0),
                 number("borderWidth", .45, 0.0, 3.0),
                 settings.optString("motion").takeIf { it in setOf("liquid", "soft", "none") } ?: "liquid",
-                settings.optBoolean("face", false), settings.optBoolean("status", true),
-                settings.optBoolean("progress", true), settings.optBoolean("results", true)
+                settings.optBoolean("face", true), settings.optBoolean("status", true),
+                settings.optBoolean("progress", true), settings.optBoolean("results", true),
+                settings.optBoolean("glass", true), settings.optBoolean("mascot", true)
             )
         }
     }

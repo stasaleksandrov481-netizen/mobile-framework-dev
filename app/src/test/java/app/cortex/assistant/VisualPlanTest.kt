@@ -152,4 +152,31 @@ class VisualPlanTest {
         assertFalse(PhoneActionEvidence.containsClaim("Я не отправил сообщение."))
         assertFalse(PhoneActionEvidence.containsClaim("Кому отправить сообщение?"))
     }
+    @Test fun mascotWaitsThreeMinutesAfterCompletionAndInterruption() {
+        val mascot = IslandMascotClock(10L)
+        assertNull(mascot.frame(180_009L, eligible = true))
+        val walk = requireNotNull(mascot.frame(180_010L, eligible = true))
+        assertEquals(IslandScene.WALK, walk.scene)
+        assertNull(mascot.frame(181_000L, eligible = false))
+        assertNull(mascot.frame(360_999L, eligible = true))
+        assertEquals(IslandScene.BOUNCE, mascot.frame(361_000L, eligible = true)?.scene)
+        assertNull(mascot.frame(363_700L, eligible = true))
+        assertNull(mascot.frame(543_699L, eligible = true))
+        assertEquals(IslandScene.THINK, mascot.frame(543_700L, eligible = true)?.scene)
+    }
+
+    @Test fun torchAndShadeSwitchesBecomeBoundedAndroidCommands() {
+        val chain = requireNotNull(CortexLocalCommands.parse(
+            "открой шторку и включи фонарик", { null }
+        ))
+        assertEquals(listOf("shade", "torch"), chain.map { it.getString("kind") })
+        assertEquals("on", chain[1].getString("mode"))
+        val switch = requireNotNull(CortexLocalCommands.parse("в шторке отключи Bluetooth", { null })).single()
+        assertEquals("system_toggle", switch.getString("kind"))
+        assertEquals("bluetooth", switch.getString("target"))
+        assertEquals("off", switch.getString("mode"))
+        assertEquals(false, CortexSystemTiles.state(null, "Bluetooth, Выкл."))
+        assertEquals(true, CortexSystemTiles.state(true, "Режим полёта"))
+        assertNull(CortexSystemTiles.state(null, "Bluetooth доступен"))
+    }
 }

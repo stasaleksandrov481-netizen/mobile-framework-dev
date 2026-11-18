@@ -35,7 +35,7 @@
   let phoneInfo = {};
   let deviceSnapshot = null;
   let androidCompatibility = null;
-  const permissions = { microphone: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  const permissions = { microphone: false, camera: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
   let route = "home", chatId = "";
   let accountMode = "password", accountEmail = "";
   let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
@@ -91,7 +91,7 @@
   function syncIslandOptions() {
     return sendDevice("island-options", { profile: S.preferences.model, modelId: S.preferences.aiModel, phoneActions: S.preferences.phoneActions,
       visualAutomation: S.preferences.visualAutomation, visualLaunch: S.preferences.visualLaunch,
-      reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
+      reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy, voiceReplies: S.preferences.voiceReplies,
       addressName: S.preferences.addressName, appearance: Planner.style() });
   }
 
@@ -1017,7 +1017,7 @@
     const deviceContext = {
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
-      screen_control: Boolean(device && S.preferences.phoneActions && S.preferences.visualAutomation && permissions.screenAutomation),
+      screen_control: Boolean(device && S.preferences.visualAutomation && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
       ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
         deviceSnapshot ? { state: deviceSnapshot } : {})
@@ -1402,6 +1402,7 @@
 
   function voiceReplyReady(job, answer) {
     clearTimeout(job.timer);
+    if (!S.preferences.voiceReplies) { voiceSpoken(job, false); return; }
     job.speechId = M.id("speech");
     if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
       voiceStatus("speaking", "Озвучиваю ответ…");
@@ -1479,6 +1480,8 @@
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
+    if (message.type === "voice-output" && message.id?.startsWith("manual-") && message.ok !== true &&
+        S.preferences.voiceReplies) flash("Android не смог воспроизвести голос. Проверьте синтез речи и громкость.");
     if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
       voiceSpoken(voice, message.ok === true);
       void refreshConnection();
@@ -1580,7 +1583,11 @@
     S.preferences[key] = value;
     saved();
     appearance();
-    if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
+    if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics", "voiceReplies"].includes(key)) syncIslandOptions();
+    if (key === "voiceReplies" && !value) {
+      sendDevice("voice-stop");
+      if (voice?.speechId) voiceSpoken(voice, false);
+    }
     render();
   }
 
@@ -1687,6 +1694,20 @@
       if (last?.role === "user") void answer(chat, last.text, { retry: true, explain: errors.get(chat.id)?.explain });
     },
     copy(index) { return copyText(current()?.messages[Number(index)]?.text); },
+    "voice-preview"() {
+      if (voice) closeVoice();
+      if (S.preferences.voiceReplies && !sendDevice("voice-speak", {
+        id: "manual-" + M.id("speech"), text: "Привет, я Кортекс. Голосовые ответы включены."
+      })) flash("Озвучка доступна в приложении Android.");
+    },
+    "speak-answer"(index) {
+      const answer = current()?.messages[Number(index)];
+      if (answer?.role !== "assistant" || answer.ephemeral || !S.preferences.voiceReplies) return;
+      if (voice) closeVoice();
+      if (!sendDevice("voice-speak", { id: "manual-" + M.id("speech"), text: answer.text.slice(0, 550) })) {
+        flash("Озвучка доступна в приложении Android.");
+      }
+    },
     regenerate,
     "feedback-up": index => rateAnswer(index, "up"),
     "feedback-down": index => rateAnswer(index, "down"),
@@ -1729,6 +1750,7 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "camera-permission": () => sendDevice("camera-permission"),
     "notification-listener-permission": () => sendDevice("notification-listener-permission"),
     "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
       if (!sendDevice("notification-journal-clear")) flash("Очистка доступна только в приложении Android.");

@@ -158,6 +158,7 @@ const CortexUI = (() => {
         ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
         <div class="message-actions">${iconButton("copy", "Копировать ответ", "copy", index)}
+        ${M.state.preferences.voiceReplies && !message.ephemeral ? iconButton("play", "Озвучить ответ", "speak-answer", index) : ""}
           ${iconButton("refresh", "Перегенерировать", "regenerate", index)}
           ${iconButton("thumb-up", "Полезный ответ", "feedback-up", index, message.feedback === "up" ? "feedback-selected" : "")}
           ${iconButton("thumb-down", "Неудачный ответ", "feedback-down", index, message.feedback === "down" ? "feedback-selected" : "")}
@@ -367,12 +368,14 @@ const CortexUI = (() => {
       ${group((perm.assistantSupported ? tile("Цифровой помощник Android",
         perm.assistant ? "CORTEX выбран · открывает островок" : "Выбрать CORTEX для системного жеста",
         "focus", "assistant-permission") : "") + voiceRow +
-        switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue"))}
+        switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue") +
+        switchRow("Озвучивать ответы", "Голосовой режим и кнопка воспроизведения в чате", p.voiceReplies, "voiceReplies") +
+        (p.voiceReplies ? tile("Проверить голос", "", "play", "voice-preview") : ""))}
       <h2 class="group-label">Управление телефоном</h2>
-      ${group(switchRow("Команды телефона", "Открытие приложений, системные действия и сценарии", p.phoneActions, "phoneActions") +
+      ${group(switchRow("Команды телефона", "Фонарик, громкость и запуск приложений через Android", p.phoneActions, "phoneActions") +
         `<label class="switch-row call-beta-row">
           <span class="tile-copy"><strong>Визуальное управление <span class="call-beta-badge">БЕТА</span></strong>
-          <small>Работа с элементами экрана по запросу</small></span>
+          <small>Нажатия, свайпы и чтение экрана по запросу</small></span>
           <input type="checkbox" data-visual-beta aria-label="Визуальное управление (бета)" ${p.visualAutomation ? "checked" : ""}>
         </label>` +
         switchRow("Показывать, как открываются приложения", "Для сценариев и визуальных команд", p.visualLaunch, "visualLaunch"))}
@@ -467,9 +470,10 @@ const CortexUI = (() => {
     return detail("Доступы Android", "Давайте только те разрешения, которые нужны вам", `<section class="access-list">
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
       ${item("focus", "Поверх приложений", "Показывать островок поверх других окон. Не даёт доступа к содержимому экрана.", a.overlay, "overlay-permission")}
+      ${item("focus", "Фонарик", "Доступ к вспышке через Android. CORTEX только переключает вспышку.", a.camera, "camera-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
-      ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
+      ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
       </section>
       ${compatibilityPanel}

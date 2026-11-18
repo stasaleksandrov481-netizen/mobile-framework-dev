@@ -6,16 +6,21 @@ import vm from "node:vm";
 const native = name => readFileSync(new URL(`../app/src/main/java/app/cortex/assistant/${name}`, import.meta.url), "utf8");
 const web = name => readFileSync(new URL(`../app/src/main/assets/web/${name}`, import.meta.url), "utf8");
 
-test("CORTEX compact island defaults to solid black and logo-only artwork", () => {
+test("CORTEX compact island defaults to tinted glass with an optional character", () => {
   const style = native("IslandAppearance.kt");
   const surface = native("LiquidIslandView.kt");
   const layout = native("IslandPlacement.kt");
-  assert.match(style, /color\("background", "#000000"\)/);
+  assert.match(style, /color\("background", "#34465A"\)/);
+  assert.match(style, /settings\.optBoolean\("glass", true\)/);
+  assert.match(style, /settings\.optBoolean\("mascot", true\)/);
+  assert.match(native("IslandGlass.kt"), /LinearGradient/);
   assert.match(style, /number\("opacity", 100\.0/);
   assert.match(layout, /val width = minOf\(72 \* density/);
   assert.match(surface, /signal\.mark\(canvas, logoX, cy/);
   assert.doesNotMatch(surface, /LinearGradient|drawFace\(|canvas\.drawText\("CORTEX"/);
-  assert.match(surface, /postInvalidateDelayed\(if \(isActivePhase\(\)\)/);
+  assert.match(surface, /postDelayed\(wakeMascot, wakeAt - now\)/);
+  assert.match(surface, /removeCallbacks\(wakeMascot\)/);
+  assert.match(native("IslandMascot.kt"), /const val INTERVAL_MS = 180_000L/);
 });
 
 test("island customization controls rendering and first-step feedback", () => {
@@ -82,14 +87,16 @@ test("island Markdown uses safe native text spans without remote HTML", () => {
   assert.doesNotMatch(panel, /GradientDrawable\.Orientation\.TL_BR/);
 });
 
-test("Android and web island presets agree on true black", () => {
+test("Android and web use the same tint and preserve the black voice command", () => {
   const sandbox = vm.createContext({});
   vm.runInContext(web("island-command.js"), sandbox);
   const commands = vm.runInContext("CortexIslandCommands", sandbox);
-  assert.equal(commands.defaults.background, "#000000");
+  assert.equal(commands.defaults.background, "#34465a");
+  assert.equal(commands.defaults.glass, true);
+  assert.equal(commands.defaults.mascot, true);
   assert.equal(commands.defaults.opacity, 100);
   assert.equal(commands.parse("Сделай островок чёрным").style.background, "#000000");
-  assert.match(web("planner.js"), /background: "#000000", text: "#ffffff"/);
+  assert.match(web("planner.js"), /background: "#34465a", text: "#ffffff"/);
 });
 
 test("Android 13+ keeps the compositor bounds fixed while the touchable region changes", () => {

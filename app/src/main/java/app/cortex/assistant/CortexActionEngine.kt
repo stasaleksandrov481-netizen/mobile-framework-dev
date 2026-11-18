@@ -92,16 +92,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val action = conversation != null || search != null || schoolSite ||
             ConversationRequest.wantsMessage(command) || VisualRequest.isAction(text)
         val scenario = explicitScenario ?: CortexScenarios.find(context, text)
-        if (!allowPhone) {
-            if (!action && scenario == null && network == null && !force) return false
-            finished(Result("Управление телефоном выключено. Его можно включить в разделе «Вызов».", false))
-            return true
-        }
         val direct = when {
             schoolSite && SCHOOL_OPEN.containsMatchIn(command) && !SCHOOL_TASK.containsMatchIn(command) ->
                 listOf(schoolUrl(command))
             schoolSite || search != null || conversation != null -> null
-            !resumeText && network == null -> parseSystem(command)
+            !resumeText -> parseSystem(command)
             else -> null
         }
         val reply = saved?.takeIf { !resumeText && it.source == source && it.question.isNotBlank() &&
@@ -110,6 +105,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 (!action && network == null && !text.endsWith('?')) ||
                 it.conversation?.let { pending -> pending.app.isBlank() && pending.withAnswer(text).app.isNotBlank() } == true) }
         if (!force && !resumeText && reply == null && scenario == null && network == null && direct == null && !action) return false
+        if (!allowPhone && (direct != null || network != null || scenario != null ||
+                !preferences.getBoolean("visualAutomation", false))) {
+            finished(Result("Команды телефона выключены в разделе «Вызов».", false))
+            return true
+        }
         if (job?.isActive == true || !CortexActionState.acquire(::cancel)) {
             finished(Result(if (CortexActionState.gate == "open") "Сначала остановите текущую задачу CORTEX."
                 else "Управление недоступно во время обновления или обслуживания.", false))
@@ -161,15 +161,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                             task.scenario = true
                             executeScenario(scenario, task, service, visualAllowed, beforeScreen, ::report)
                         }
-                        network != null && reply == null -> {
-                            firstStep(::report)
-                            PhoneNetwork(context).run(network, service.takeIf { visualAllowed }, beforeScreen, ::report)
-                        }
                         service?.locked() == true && direct?.all { it.optString("kind") in READ_ONLY } != true ->
                             Result("Разблокируйте телефон, чтобы начать задачу.", false, state != null)
                         direct != null && reply == null -> {
                             firstStep(::report)
                             executeSystem(direct, beforeScreen, ::report)
+                        }
+                        network != null && reply == null -> {
+                            firstStep(::report)
+                            PhoneNetwork(context).run(network, service.takeIf { visualAllowed }, beforeScreen, ::report)
                         }
                         !visualAllowed -> {
                             val name = VisualRequest.singleApp(command)
@@ -352,7 +352,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 when (step.optString("kind")) {
                     "read_device", "volume", "brightness", "rotate", "ringer", "media", "copy_text", "recents", "play_store",
                     "home", "lock_screen", "close_app", "settings", "panel", "display_refresh", "open_web", "app_info",
-                    "timer", "alarm", "search", "maps", "utility", "dial", "sms", "torch" -> true
+                    "timer", "alarm", "search", "maps", "utility", "dial", "sms", "torch", "shade", "system_toggle" -> true
                     // Opening an installed app is an Android operation; don't depend on LLM quota.
                     "app" -> true
                     else -> false
@@ -377,9 +377,41 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             if (steps.firstOrNull()?.optString("kind") in setOf("app", "close_app", "open_web")) beforeScreen()
             CortexActionSequence(steps, { pending.isActive }, { step, _, _, done ->
                 val kind = step.optString("kind")
-                if (kind == "display_refresh") {
+                if (kind == "system_toggle") {
                     taskScope.launch {
-                        val outcome = CortexDisplaySettings.set(context, step.optInt("level"), report)
+                        val target = step.optString("target")
+                        val enabled = step.optString("mode") == "on"
+                        val visual = CortexScreenService.connected.takeIf { preferences.getBoolean("visualAutomation", false) }
+                        if (target == "wifi") {
+                            val mode = if (enabled) NetworkRequest.Mode.ENABLE else NetworkRequest.Mode.DISABLE
+                            val outcome = PhoneNetwork(context).run(NetworkRequest(mode, wifi = true, hotspot = false),
+                                visual, beforeScreen, report)
+                            done(JSONObject().put("status", if (outcome.ok) "done" else "requested").put("message", outcome.text))
+                        } else {
+                            val verified = visual?.let {
+                                beforeScreen()
+                                report("Переключаю системную плитку…")
+                                CortexSystemTiles(context, it).set(target, enabled)
+                            } == true
+                            if (verified) {
+                                done(JSONObject().put("status", "done").put("message",
+                                    if (enabled) "Android подтвердил включение." else "Android подтвердил отключение."))
+                            } else {
+                                beforeScreen()
+                                phone.executeChecked(JSONObject().put("kind", "settings").put("target", target), { pending.isActive }) { opened ->
+                                    val handoff = opened.optString("status") == "opened"
+                                    done(opened.put("status", if (handoff) "panel" else "unavailable").put("message", if (handoff)
+                                        "Открыл системные настройки. Изменение переключателя Android не подтвердил."
+                                        else "Android не разрешил изменить этот переключатель."))
+                                }
+                            }
+                        }
+                    }
+                } else if (kind == "display_refresh") {
+                    taskScope.launch {
+                        beforeScreen()
+                        val outcome = CortexDisplaySettings.set(context, step.optInt("level"), report,
+                            allowVisual = preferences.getBoolean("visualAutomation", false))
                         done(JSONObject().put("status", if (outcome.ok) "done" else "requested").put("message", outcome.text))
                     }
                 } else {
@@ -1040,7 +1072,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         private const val TASK_TIMEOUT_MS = 1_800_000L
         private val READ_ONLY = setOf("read_device")
         private val SCENARIO_SCREEN_STEPS = setOf("if", "tap", "swipe", "type", "wait", "point")
-        private const val VISUAL_DISABLED = "Для работы с экраном включите «Визуальное управление» в разделе «Вызов»."
+        private const val VISUAL_DISABLED = "Для этого действия нужны нажатия или чтение экрана. Их можно разрешить в «Вызов → Визуальное управление»."
         private val REPEATABLE = setOf(VisualAction.HOME, VisualAction.OPEN, VisualAction.SET, VisualAction.EXPECT,
             VisualAction.QUICK_SETTINGS)
         const val READ_SCREEN = "Прочитай текущий экран. Используй видимые условия и элементы для следующего шага."

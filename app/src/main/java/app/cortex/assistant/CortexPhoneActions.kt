@@ -49,6 +49,15 @@ internal class CortexPhoneActions(private val context: Context) {
         fun status(value: String) = JSONObject().put("status", value)
         fun started(intent: Intent) = status(if (launch(intent)) "opened" else "unavailable")
         when (kind) {
+            "shade" -> {
+                val service = CortexScreenService.connected ?: return status("needs_screen").put(
+                    "message", "Для системной шторки разрешите службу CORTEX в «Вызов → Разрешения Android».")
+                val action = if (target == "notifications") AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+                    else AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
+                val opened = service.global(action)
+                return status(if (opened) "requested" else "unavailable").put("message",
+                    if (opened) "Android принял команду открыть шторку." else "Android не открыл шторку.")
+            }
             "media" -> return CortexMedia.execute(context, mode)
             "app" -> {
                 if (normalized(target) in CAMERA_NAMES) return openCamera()
@@ -339,6 +348,15 @@ internal class CortexPhoneActions(private val context: Context) {
                 val foreground = CortexScreenService.connected?.activePackage()
                 foreground != null && if (kind == "close_app") foreground != expected else foreground == expected
             }) { confirmed -> done(result.put("verified", confirmed)) }
+        } else if (kind == "shade" && result.optString("status") == "requested") {
+            awaitState(active, attempts = 18, interval = 160L, condition = {
+                CortexScreenService.connected?.frame()?.let {
+                    it.pkg == "com.android.systemui" && it.tree.isNotEmpty()
+                } == true
+            }) { confirmed ->
+                done(result.put("status", if (confirmed) "done" else "requested").put("message",
+                    if (confirmed) "Шторка открыта." else "Android принял запрос открыть шторку."))
+            }
         } else if (kind == "lock_screen" && result.optString("status") == "requested") {
             val keyguard = context.getSystemService(KeyguardManager::class.java)
             awaitState(active, condition = { keyguard.isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive }) {
@@ -362,49 +380,82 @@ internal class CortexPhoneActions(private val context: Context) {
     }
 
     private fun torch(mode: String, active: () -> Boolean, done: (JSONObject) -> Unit) {
+        fun result(status: String, message: String = "", enabled: Boolean? = null) =
+            JSONObject().put("status", status).apply {
+                if (message.isNotBlank()) put("message", message)
+                if (enabled != null) put("enabled", enabled)
+            }
+        val permissionHint = "Разрешите доступ к фонарику в CORTEX → Вызов → Разрешения Android → Фонарик."
+        val cameraGranted = context.checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val manager = context.getSystemService(CameraManager::class.java)
         val id = runCatching {
-            manager.cameraIdList.firstOrNull {
-                manager.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            val cameras = manager.cameraIdList.mapNotNull { id ->
+                val info = manager.getCameraCharacteristics(id)
+                if (info.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) != true) null
+                else id to (info.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK)
             }
+            cameras.firstOrNull { it.second }?.first ?: cameras.firstOrNull()?.first
         }.getOrNull()
         if (id == null) {
-            done(JSONObject().put("status", "unsupported"))
+            val flash = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_FLASH)
+            done(if (flash && !cameraGranted) result("permission", permissionHint)
+                else result("unsupported", "Android не предоставил доступную вспышку."))
             return
         }
-        if (mode !in listOf("on", "off", "toggle", "status")) {
-            done(JSONObject().put("status", "invalid"))
-            return
+        var target: Boolean? = when (mode) {
+            "on" -> true
+            "off" -> false
+            "toggle", "status" -> null
+            else -> { done(result("invalid")); return }
         }
-        var target: Boolean? = null
         var finished = false
         lateinit var callback: CameraManager.TorchCallback
-        fun finish(status: String, enabled: Boolean? = null) {
-            if (finished) return
+        val timeout = Runnable {
+            if (active()) done(result("unavailable", "Android не подтвердил состояние фонарика."))
             finished = true
             runCatching { manager.unregisterTorchCallback(callback) }
-            if (active()) done(JSONObject().put("status", status).apply { if (enabled != null) put("enabled", enabled) })
+        }
+        fun finish(status: String, message: String = "", enabled: Boolean? = null) {
+            if (finished) return
+            finished = true
+            main.removeCallbacks(timeout)
+            runCatching { manager.unregisterTorchCallback(callback) }
+            if (active()) done(result(status, message, enabled))
+        }
+        fun request(enabled: Boolean) {
+            try { manager.setTorchMode(id, enabled) }
+            catch (_: SecurityException) { finish("permission", permissionHint) }
+            catch (_: android.hardware.camera2.CameraAccessException) {
+                finish("unavailable", "Вспышка занята или недоступна. Закройте камеру и попробуйте снова.")
+            } catch (_: IllegalArgumentException) {
+                finish("unavailable", "Android отклонил переключение этой вспышки.")
+            }
         }
         callback = object : CameraManager.TorchCallback() {
             override fun onTorchModeUnavailable(cameraId: String) {
-                if (cameraId == id) finish("unavailable")
+                if (cameraId == id) finish("unavailable", "Вспышка сейчас недоступна.")
             }
 
             override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
                 if (cameraId != id || finished) return
                 if (!active()) { finish("cancelled"); return }
-                val wanted = target
-                if (wanted != null) {
-                    if (wanted == enabled) finish("done", enabled)
-                    return
+                if (mode == "status" || target == enabled) {
+                    finish("done", enabled = enabled)
+                } else if (target == null) {
+                    target = !enabled
+                    request(!enabled)
                 }
-                target = when (mode) { "on" -> true; "off" -> false; "toggle" -> !enabled; else -> enabled }
-                if (target == enabled) finish("done", enabled)
-                else runCatching { manager.setTorchMode(id, target == true) }.onFailure { finish("unavailable") }
             }
         }
-        runCatching { manager.registerTorchCallback(callback, main) }.onFailure { finish("unavailable") }
-        main.postDelayed({ finish("requested") }, 2700)
+        try {
+            manager.registerTorchCallback(callback, main)
+            main.postDelayed(timeout, 3_800L)
+            target?.let(::request)
+        } catch (_: SecurityException) {
+            finish("permission", permissionHint)
+        } catch (_: IllegalArgumentException) {
+            finish("unavailable", "Android не предоставил состояние вспышки.")
+        }
     }
 
     private fun readDevice(target: String): JSONObject {

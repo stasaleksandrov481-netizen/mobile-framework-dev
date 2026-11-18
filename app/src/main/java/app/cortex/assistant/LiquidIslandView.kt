@@ -50,6 +50,13 @@ internal class LiquidIslandView(
     private val traceMeasure = PathMeasure()
     private val traceBounds = RectF()
     private val signal = IslandSignal(density)
+    private val glass = IslandGlass(density)
+    private val mascot = IslandMascot(density)
+    private val power by lazy { context.getSystemService(android.os.PowerManager::class.java) }
+    private val mascotClock = IslandMascotClock(SystemClock.uptimeMillis())
+    private val mascotClip = Path()
+    private var mascotWakeAt = 0L
+    private val wakeMascot = Runnable { mascotWakeAt = 0L; invalidate() }
     private var placement: IslandPlacement? = null
     private var animator: ValueAnimator? = null
     private var expansion = 0f
@@ -303,8 +310,12 @@ internal class LiquidIslandView(
         } else getLocationOnScreen(location)
     }
 
-    private fun drawShell(canvas: Canvas, shape: RectF, visibility: Float, radius: Float) {
+    private fun drawShell(canvas: Canvas, shape: RectF, visibility: Float, radius: Float, panel: Boolean) {
         if (visibility <= .01f) return
+        if (style.glass) {
+            glass.draw(canvas, shape, radius, visibility, style, panel)
+            return
+        }
         ink.style = Paint.Style.FILL
         ink.color = style.background
         ink.alpha = (255 * visibility * style.opacity).roundToInt()
@@ -345,9 +356,9 @@ internal class LiquidIslandView(
         body.offset(-location[0].toFloat(), -location[1].toFloat())
         compactBody.set(compact)
         compactBody.offset(-location[0].toFloat(), -location[1].toFloat())
-        drawShell(canvas, body, panelAlpha, minOf(style.corner * density, body.height() / 2f))
+        drawShell(canvas, body, panelAlpha, minOf(style.corner * density, body.height() / 2f), panel = true)
         val radius = minOf(style.corner * density, compactBody.height() / 2f)
-        drawShell(canvas, compactBody, compactAlpha, radius)
+        drawShell(canvas, compactBody, compactAlpha, radius, panel = false)
         if (press && compactAlpha > .01f) {
             ink.style = Paint.Style.FILL
             ink.color = Color.WHITE
@@ -355,7 +366,16 @@ internal class LiquidIslandView(
             canvas.drawRoundRect(compactBody, radius, radius, ink)
         }
         if (style.progress && compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
-        if (compactAlpha > .02f) {
+        val decoration = mascotFrame(now, moving)
+        if (decoration != null && compactAlpha > .02f) {
+            mascotClip.rewind()
+            mascotClip.addRoundRect(compactBody, radius, radius, Path.Direction.CW)
+            val save = canvas.save()
+            canvas.clipPath(mascotClip)
+            mascot.draw(canvas, compactBody, radius, decoration, style, compactAlpha)
+            canvas.restoreToCount(save)
+            postInvalidateDelayed(32L)
+        } else if (compactAlpha > .02f) {
             val showStatus = style.status && phase == "executing"
             val cy = compactBody.centerY() - if (showStatus) 5f * density else 0f
             val active = style.progress && isActivePhase()
@@ -387,8 +407,31 @@ internal class LiquidIslandView(
                 canvas.drawRoundRect(stopX - r, cy - r, stopX + r, cy + r, density, density, ink)
             }
         }
-        if (moving && compactAlpha > .02f && disappearance == 0f) {
-            postInvalidateDelayed(if (isActivePhase()) 48L else 85L)
+        if (moving && compactAlpha > .02f && disappearance == 0f && isActivePhase()) {
+            postInvalidateDelayed(48L)
+        }
+    }
+
+    private fun mascotFrame(now: Long, visible: Boolean): IslandMascotClock.Frame? {
+        val eligible = visible && style.mascot && phase == "idle" && !press && !activeStop &&
+            expansion == 0f && disappearance == 0f && animator == null && power.isInteractive
+        val frame = mascotClock.frame(now, eligible)
+        val wakeAt = if (eligible && frame == null) mascotClock.nextAt else 0L
+        if (wakeAt != mascotWakeAt) {
+            removeCallbacks(wakeMascot)
+            mascotWakeAt = wakeAt
+            if (wakeAt > now) postDelayed(wakeMascot, wakeAt - now)
+        }
+        return frame
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) invalidate()
+        else {
+            removeCallbacks(wakeMascot)
+            mascotWakeAt = 0L
+            mascotClock.frame(SystemClock.uptimeMillis(), false)
         }
     }
 
@@ -396,8 +439,10 @@ internal class LiquidIslandView(
         ink.style = Paint.Style.FILL
         ink.color = style.faceColor
         ink.alpha = (255 * alpha).roundToInt()
-        canvas.drawCircle(x, y, 7 * density, ink)
-        ink.color = style.background
+        canvas.drawRoundRect(x - 7.7f * density, y - 7.4f * density, x + 7.7f * density, y + 7.4f * density,
+            5.5f * density, 5.5f * density, ink)
+        ink.color = if (androidx.core.graphics.ColorUtils.calculateLuminance(style.faceColor) > .42)
+            0xFF172331.toInt() else Color.WHITE
         ink.alpha = (255 * alpha).roundToInt()
         canvas.drawCircle(x - 2.25f * density, y - 1.3f * density, density, ink)
         canvas.drawCircle(x + 2.25f * density, y - 1.3f * density, density, ink)
@@ -477,6 +522,8 @@ internal class LiquidIslandView(
         cancelPlacementWait()
         cancelAnimation()
         appliedTouchRegion.setEmpty()
+        removeCallbacks(wakeMascot)
+        mascotWakeAt = 0L
         super.onDetachedFromWindow()
     }
 
