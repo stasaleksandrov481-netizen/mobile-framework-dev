@@ -12,6 +12,18 @@
 - Next steps: verify CI and beta on Samsung A23, then review and merge PR only if passing; deploy a verified v47 Edge separately after exact file comparison. Existing signed v1.0.17 is the rollback candidate.
 
 
+
+
+## 2026-11-18 UTC · Стабилизация сайта после повторного отката интерфейса
+
+- Инцидент: в GitHub `main` (`3d8c81ebfe4f35e54988540a214620888bdc3bc3`) отсутствует часть подтверждённого владельцем сайта; публикация GitHub-сборки возвращала старую главную, ломала `/payment` и визуально меняла регистрацию. Сайт и исходник в GitHub **не синхронизированы**, несмотря на успешные Android/Edge тесты.
+- Исправлено в production без повторной сборки: Vercel `mobile-framework-dev`, команда `syndicate13`, `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` (READY) повторно назначен на `cortexapp.ru` и `www.cortexapp.ru`. Проверены HTTP 200 `/`, `/register`, `/pricing`, `/payment?plan=start`, `/api/status`; Telegram Stars `GET /api/telegram/stars/availability` → `{"available":true}`, кеш статуса → `{"status":"ok","cache":"ok"}`. Production CSS содержит `repeat(6,minmax(0,1fr))`, без восьми ячеек.
+- Ограничение: у опубликованного snapshot `/account` возвращает 404. Не обещать работающий кабинет или успешную денежную транзакцию без отдельной end-to-end проверки. В нём есть `/support` и `/payment`.
+- Vercel Project API: успешно применено `autoAssignCustomDomains:false` для защиты домена от непроверенных новых GitHub-деплоев. Дополнительно `cortex-web/vercel.json` в этом PR отключает **автоматический Git deploy только ветки `main`**, остальные ветки остаются для preview. Не возвращать настройку до согласованного web-релиза.
+- Источник восстановления: `vercel_list_deployment_files` у `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` содержит `src/cortex-web/`, включая отсутствующие в GitHub `AmbientDotField.tsx`, `PricingPanels.tsx`, `PricingBuyButton.tsx`, `SupportChat.tsx`, `lib/support-media.ts`, `app/api/checkout/route.ts`. API получения файла возвращает урезанную base64-строку (2 KB), поэтому полная исходная версия **ещё не восстановлена в GitHub**; не пытаться заменять её догадками. Отдельная локальная ветка содержит обновлённые Account/Payment API, но не подтверждённый публичный UI.
+- Тесты и статус: на локальном web-кандидате 46/46 `npm test`, `npm run lint` успешно; `npm run release:verify` блокирует релиз из-за шести файлов. Не публиковать этот кандидат. Supabase Edge и Android не менялись в ходе восстановления.
+- Следующий шаг: получить **полный архив исходников** именно `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` через экспорт Vercel, восстановить `cortex-web` поверх актуального `main` без изменения Android и Edge, пройти `release:verify`, выполнить визуальный diff в Preview и одобрение владельца. Только после этого вручную выпустить новый production и, при необходимости, вновь включить Git auto-deploy.
+
 ## 2026-11-18 UTC · Проверенный production: 6 OTP, Gemini TTS, авторизация
 
 - Коммит `6260e7814cf2660eeb80e032d89556feaa2da2ab` из PR #69 опубликован: исправлено 8 → 6 OTP в React, CSS и проверке формы. Production CSS `.otp-code` проверен на `https://cortexapp.ru/register`: шесть колонок, восемь отсутствуют; страница HTTP 200.
