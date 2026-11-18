@@ -24,6 +24,8 @@
 .payment-option:hover { background: #1c1c1c; border-color: #494949; }
 .payment-option.is-active { background: #222; border-color: #a1a1a1; }
 .payment-option:disabled { cursor: wait; opacity: .7; }
+.payment-option--unavailable { background: #131313; border-color: #252525; opacity: .62; cursor: not-allowed; }
+.payment-option--unavailable:hover { background: #131313; border-color: #252525; }
 .payment-radio { position: relative; flex: 0 0 19px; width: 19px; height: 19px; border: 1.5px solid #666; border-radius: 50%; }
 .payment-option.is-active .payment-radio { border-color: #f5f5f5; }
 .payment-option.is-active .payment-radio::after { content: ""; position: absolute; inset: 4px; background: #f5f5f5; border-radius: 50%; }

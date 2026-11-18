@@ -6,7 +6,6 @@ import Link from "next/link";
 import { cortexAuth } from "@/lib/cortex-auth";
 
 type Plan = "start" | "pro" | "ultra";
-type Method = "card" | "stars";
 type Price = { code: Plan; price_kopecks: number };
 type StarsPrice = { plan: Plan; stars: number; enabled: boolean };
 
@@ -45,7 +44,6 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
   initialPlan: Plan; prices: Price[]; starsPrices: StarsPrice[]; starsConfigured: boolean;
 }) {
   const [plan, setPlan] = useState<Plan>(initialPlan);
-  const [method, setMethod] = useState<Method>("stars");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [invoice, setInvoice] = useState<{ id: string; url: string; stars: number } | null>(null);
@@ -56,7 +54,6 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
   const starsAvailable = starsConfigured && starsPrice?.enabled === true;
 
   const selectPlan = (value: Plan) => { setPlan(value); setInvoice(null); setPaymentStatus("pending"); setError(""); };
-  const selectMethod = (value: Method) => { setMethod(value); setInvoice(null); setPaymentStatus("pending"); setError(""); };
 
   async function checkStarsPayment() {
     if (!invoice || checking) return;
@@ -89,7 +86,7 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
   }
 
   async function createStarsInvoice() {
-    if (processing || !starsAvailable || method !== "stars") return;
+    if (processing || !starsAvailable) return;
     setProcessing(true);
     setError("");
     setInvoice(null);
@@ -141,29 +138,27 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
               <span className="payment-plan-price">{prices.length ? money.format((prices.find(p => p.code === item.code)?.price_kopecks || 0) / 100) : "—"}</span>
             </button>)}
           </div>
-          <p className="payment-hint">{price ? "Цена в рублях относится к банковской карте. Звёзды оплачиваются отдельно по указанной цене XTR." : "Точные цены временно не загрузились."}</p>
+          <p className="payment-hint">{price ? "Цена в рублях указана для оплаты через Platega после её подключения. При оплате Telegram Stars применяется отдельная цена в XTR." : "Точные цены временно не загрузились."}</p>
         </section>
 
         <section className="payment-panel" aria-labelledby="payment-method-title">
           <div className="payment-section-title"><span>02</span><h2 id="payment-method-title">Способ оплаты</h2></div>
           <div className="payment-options">
-            <button type="button" className={`payment-option ${method === "card" ? "is-active" : ""}`}
-              onClick={() => selectMethod("card")} aria-pressed={method === "card"} disabled={processing}>
+            <div className="payment-option payment-option--unavailable" aria-label="Platega пока не подключена">
               <span className="payment-radio" aria-hidden="true" />
-              <span className="payment-option-body"><strong>Банковская карта</strong><small>Российские карты</small></span>
-              <span className="payment-method-tag">Скоро</span>
-            </button>
-            <button type="button" className={`payment-option ${method === "stars" ? "is-active" : ""}`}
-              onClick={() => selectMethod("stars")} aria-pressed={method === "stars"} disabled={processing}>
+              <span className="payment-option-body"><strong>Platega</strong><small>Оплата банковской картой</small></span>
+              <span className="payment-method-tag">Не подключена</span>
+            </div>
+            <div className={`payment-option ${starsAvailable ? "is-active" : "payment-option--unavailable"}`}
+              aria-label={starsAvailable ? "Выбрана оплата Telegram Stars" : "Оплата Telegram Stars пока не активирована"}>
               <span className="payment-radio" aria-hidden="true" />
               <span className="payment-option-body"><strong>Telegram Stars</strong><small>Оплата звёздами в Telegram</small></span>
-              <span className="payment-method-tag">{starsPrice ? `${starsPrice.stars} XTR` : "XTR"}</span>
-            </button>
+              <span className="payment-method-tag">{starsPrice ? `${starsPrice.stars} XTR` : "Недоступно"}</span>
+            </div>
           </div>
           <div className="payment-action-area">
             {error && <p className="payment-error" role="alert">{error}</p>}
-            {method === "card" ? <p className="payment-notice" role="status">Оплата картой появится после восстановления платёжного кабинета. Сейчас списание недоступно.</p>
-              : invoice ? <>
+            {invoice ? <>
                 <p className="payment-success" role="status">{paymentStatus === "paid" ? "Платёж подтверждён, подписка активирована." :
                   paymentStatus === "refunded" ? "Платёж возвращён, доступ отозван." :
                     `Счёт на ${invoice.stars} Stars создан. Подтверди платёж в Telegram.`}</p>
@@ -173,9 +168,10 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
                 </button>
               </> : <button className="payment-submit" type="button" disabled={!starsAvailable || processing}
                 onClick={() => void createStarsInvoice()}>
-                {processing ? "Создаём счёт…" : starsAvailable ? `Оплатить ${starsPrice?.stars} Stars` : "Оплата Stars скоро"}
+                {processing ? "Создаём счёт…" : starsAvailable ? `Оплатить ${starsPrice?.stars} Stars` : "Оплата временно недоступна"}
                 {!processing && <span aria-hidden="true">↗</span>}
               </button>}
+            {!starsAvailable && <p className="payment-notice" role="status">Telegram Stars ещё не активированы на сервере. Счёт создать нельзя, пока подключение не завершено.</p>}
             {starsPrice && <p className="payment-disclaimer">Стоимость покупки звёзд в Telegram зависит от региона и способа пополнения.</p>}
             <p className="payment-disclaimer">Подписка активируется только после подтверждения платежа. <Link href="/offer">Условия и возвраты</Link>.</p>
           </div>

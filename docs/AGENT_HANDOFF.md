@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-11-18 UTC: исправление DNS CORTEX и подготовка выбора Stars/Platega (production DNS исправлен, сайт не пересобран)
+
+- **Cloudflare DNS LIVE:** зона `cortexapp.ru` активна, NS `maeve.ns.cloudflare.com`/`phil.ns.cloudflare.com`. CNAME apex указывал на ошибочный `d7e50c96c0ff0a4.vercel-dns-017.com` вместо точного рекомендуемого Vercel `d7e50c96c0fff0a4.vercel-dns-017.com`. Обновлена только запись apex `442757712416af5585845fcbe61dc216` с `proxied=false`; запись `www`, почтовые DNS и прочие значения не затрагивались.
+- **Проверка после изменения DNS:** Cloudflare readback вернул правильный CNAME; Vercel `get_domain_config` показал `misconfigured=false` и IP `64.29.17.1`/`216.198.79.1`; `https://cortexapp.ru/api/status` 200 `{"status":"ok","cache":"ok"}`, `https://www.cortexapp.ru/` 200. В firewall Vercel нет блокировок по странам; пользовательский доступ из всех сетей и VPN не подтверждён синтетическими замерами.
+- **Telegram Stars не включены фактически:** в Supabase production `jjcqrjztxohnifmziksy` отсутствуют `public.cortex_stars_orders`, `public.cortex_stars_prices`, `cortex_stars_public_prices()`. Vercel production не содержит `CORTEX_TELEGRAM_STARS_ENABLED` и необходимых секретов. Миграцию `20261117185346_cortex_telegram_stars.sql` и запуск реальных платежей **не проводили**, пока не обеспечены бот, секреты, вебхук и проверка полного цикла. Ни одного платежа или списания не создавалось.
+- **GitHub WIP:** `components/PaymentMethods.tsx` оставляет Telegram Stars единственным потенциально активным способом оплаты, Platega отображает как недоступную. При отсутствии серверной конфигурации кнопка заблокирована и показывает точную причину; `/pricing` по-прежнему ведёт на `/payment?plan=...`. Обновлены CSS, пояснения и статические security-тесты. Локально до отключения executor: `npm run lint`, `npm test` (39/39), `npm run build` прошли.
+- **Production UI не менялся**: одобренный snapshot `dpl_4d8fXbrisfVBfm6tyzCDjjqie86T` нельзя заменять этим WIP до восстановления шести исходников современного дизайна. Следующий шаг: получить полный source approved Vercel, объединить payment route и кабинет, включить SQL + Telegram credentials + webhook только после готовности всех зависимостей, провести E2E, затем выпустить.
+
 ## 2026-11-18 09:31 UTC: GitHub WIP + Vercel Preview, без публикации в Production
 
 - **Разрешение владельца:** после явного согласия на отправку исходников в `stasaleksandrov481-netizen/mobile-framework-dev` подготовлена удалённая ветка `feat/cortex-web-approved-account-20261118`. Обычный git push через терминал невозможен из-за отсутствия Git credentials; использован штатный GitHub connector.

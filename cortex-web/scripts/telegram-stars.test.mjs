@@ -202,7 +202,12 @@ test("Payment selection is a separate page and never passes client-selected amou
   const pricing = readFileSync(new URL("../app/pricing/page.tsx", import.meta.url), "utf8");
   assert.match(page, /starsConfigured=/);
   assert.match(pricing, /href=\{`\/payment\?plan=\$\{plan\.code\}`\}/);
-  assert.match(methods, /Банковская карта/);
+  assert.match(methods, /Platega/);
+  assert.match(methods, /payment-option--unavailable/);
+  assert.match(methods, /Банковская карта|банковской картой/);
+  assert.doesNotMatch(methods, /selectMethod\("card"\)|Оплата Stars скоро/);
+  assert.match(methods, /!starsAvailable \|\| processing/);
+  assert.match(methods, /Telegram Stars ещё не активированы на сервере/);
   assert.match(methods, /Telegram Stars/);
   assert.match(methods, /JSON\.stringify\(\{ plan \}\)/);
   assert.doesNotMatch(methods, /JSON\.stringify\(\{.*(?:subject|amount|stars).*\}\)/);
