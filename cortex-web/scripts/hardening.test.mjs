@@ -65,6 +65,28 @@ test("Signup always explains invalid email, missing agreement and short password
   assert.match(component, /aria-live="assertive"/);
 });
 
+test("Recovery validates the email without requiring an old password and does not disclose account existence", () => {
+  const fields = { mode: "recovery", email: "test@example.com", password: "", accepted: false, acceptedTerms: false };
+  assert.equal(registrationValidationError(fields), null);
+  assert.match(registrationValidationError({ ...fields, email: "" }), /адрес электронной почты/);
+  assert.match(registrationValidationError({ ...fields, email: "invalid" }), /корректный адрес/);
+  const form = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  const callback = readFileSync(new URL("../app/auth/callback/page.tsx", import.meta.url), "utf8");
+  const reset = readFileSync(new URL("../app/reset-password/page.tsx", import.meta.url), "utf8");
+  assert.match(form, /resetPasswordForEmail\(/);
+  assert.match(form, /Если для этого адреса существует аккаунт/);
+  assert.match(form, /Забыли пароль\?/);
+  assert.match(form, /resendSignupConfirmation\(\)/);
+  assert.match(form, /Не пришло письмо подтверждения\?/);
+  assert.match(form, /type: "signup", email: address/);
+  assert.match(callback, /exchangeCodeForSession\(code\)/);
+  assert.match(callback, /recoveryFlow\.current \? "recovery" : "email"/);
+  assert.match(callback, /router\.replace\(recoveryFlow\.current \? "\/reset-password" : "\/account"\)/);
+  assert.match(reset, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(reset, /password\.length < 10/);
+  assert.doesNotMatch(reset, /service.role|service_role/i);
+});
+
 test("Auth errors are actionable and never expose backend messages", () => {
   assert.match(safeAuthErrorMessage(new Error("Failed to fetch")), /сервером/);
   assert.match(safeAuthErrorMessage(new RegistrationValidationError("Введите адрес электронной почты.")), /Введите адрес/);
@@ -245,7 +267,7 @@ test("Auth errors cannot leak raw database, SMTP or account-enumeration details"
   assert.equal(isRateLimited(Object.assign(new Error("temporary"), { status: 429 })), true);
   assert.match(safeAuthErrorMessage(Object.assign(new Error("Too many requests"), { status: 429 })), /Слишком много/);
   assert.match(safeAuthErrorMessage(new Error("CORTEX_REQUEST_TIMEOUT")), /слишком долго/);
-  assert.equal(safeAuthErrorMessage(new Error("Invalid login credentials")), "Неверная почта или пароль.");
+  assert.match(safeAuthErrorMessage(new Error("Invalid login credentials")), /восстановлением доступа/);
   assert.match(safeAuthErrorMessage(new Error("Token has expired")), /запросите новый код/);
   assert.match(safeAuthErrorMessage(new Error('gomail: could not send email: 550 non-local recipient verification failed')), /Почтовый сервер/);
 });
