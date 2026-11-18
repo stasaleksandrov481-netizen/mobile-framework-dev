@@ -30,7 +30,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val context = context.applicationContext
     private val gateway = CortexServerBridge(this.context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val phone by lazy { CortexPhoneActions(this.context) }
+    // Warm the application index while the island is idle, not on the first command.
+    private val phone = CortexPhoneActions(this.context)
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
     private val turnContext = CortexTurnContext()
