@@ -131,4 +131,17 @@ class LocalIntentTest {
         assertEquals("CORTEX QA", sms.getString("text"))
     }
 
+    @Test fun fastCommandsHandleColloquialTorchAndNavigation() {
+        fun parsed(text: String) = requireNotNull(CortexLocalCommands.parse(text) { null }).single()
+        assertEquals("off", parsed("Потуши фонарик").getString("mode"))
+        assertEquals("off", parsed("Выключить фонарь").getString("mode"))
+        assertEquals("off", parsed("Убери фонарик").getString("mode"))
+        assertEquals("on", parsed("Вруби вспышку").getString("mode"))
+        assertEquals("home", parsed("Вернись домой").getString("kind"))
+        assertEquals("recents", parsed("Покажи открытые приложения").getString("kind"))
+        assertEquals("app", requireNotNull(CortexLocalCommands.parse("Запускай Telegram") {
+            if (it == "telegram") "org.telegram.messenger" else null
+        }).single().getString("kind"))
+    }
+
 }
