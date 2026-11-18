@@ -314,6 +314,31 @@ test("guest traffic shares an atomic global budget even when install and IP rota
   assert.ok(models.length > aiRequests.length);
 });
 
+test("global AI budget covers authenticated calls and fails before any provider request", async () => {
+  const { call, reservations, models, aiRequests } = fixture(false, undefined, 15_000, 50,
+    true, false, 0, "chat:all:minute");
+  const bearer = "Bearer " + "T".repeat(43);
+  for (const identity of [install, otherInstall]) {
+    const response = await call("check", {}, {
+      Authorization: bearer, "x-cortex-install": identity,
+      "cf-connecting-ip": identity === install ? "192.0.2.1" : "198.51.100.9",
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("Retry-After") !== null, true);
+  }
+  assert.equal(models.length, 0, "global rejection must never reach OpenRouter");
+  assert.equal(aiRequests.length, 0, "global rejection must not consume an AI quota");
+  const rules = reservations.filter(batch => batch.some(rule => rule.bucket === "chat:all:minute"));
+  assert.equal(rules.length, 2);
+  for (const batch of rules) {
+    assert.deepEqual(batch.filter(rule => rule.bucket.startsWith("chat:all:")), [
+      { bucket: "chat:all:minute", seconds: 60, maximum: 2_000 },
+      { bucket: "chat:all:day", seconds: 86_400, maximum: 50_000 },
+    ]);
+  }
+  assert.equal((await call("status")).status, 200, "public status remains available");
+});
+
 test("free AI requires a syntactically valid device ID and reserves a device budget", async () => {
   const { call, reservations, models } = fixture();
   for (const device of ["", "fake-attestation", "0123456789abcdeg"]) {
