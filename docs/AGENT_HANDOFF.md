@@ -16,6 +16,14 @@
 
 ---
 
+## 2026-11-18 UTC: запрос на production после исправления входа — выпуск заблокирован проверкой утверждённого UI
+
+- **Запрос:** опубликовать исправление регистрации, входа и восстановления пароля непосредственно на `cortexapp.ru`.
+- **Проверено:** текущий Vercel production всё ещё `dpl_4d8fXbrisfVBfm6tyzCDjjqie86T` (`READY`, алиасы `cortexapp.ru`/`www.cortexapp.ru`), рабочая ветка `feat/cortex-web-approved-account-20261118` содержит новые auth-формы, прошла 42 теста, lint и build на предыдущем шаге. На живой странице `/register` отображается форма утверждённого сайта, отличающаяся от GitHub WIP.
+- **Источник утверждённого релиза найден:** `vercel_list_deployment_files` для production и approved `dpl_3hRmFmcdnr2sSHGSyfgqwRsJhwto` возвращает список 138 source-файлов, включая точные шесть недостающих (`app/api/checkout/route.ts`, `AmbientDotField.tsx`, `PricingBuyButton.tsx`, `PricingPanels.tsx`, `SupportChat.tsx`, `lib/support-media.ts`). Но `vercel_get_deployment_file_contents` возвращает только усечённую первую часть base64 (по 2014 символов с меткой `truncated` даже для небольших файлов), поэтому полные исходники нельзя достоверно восстановить этим подключением. Страница Vercel Source через браузер переводит на вход; чужую сессию не обходили.
+- **Решение по релизу:** не назначать preview из GitHub в production: `npm run release:verify` до сих пор блокирует её, иначе исчезнет одобренный интерфейс. Не активировать Stars/Platega, пока не восстановлены исходники checkout, серверный ключ и проверенный webhook; SMTP Supabase продолжает отвергать письма 550, настройки не обновлены. Никакой новый production deployment не создавался.
+- **Следующий шаг:** получить полные исходники approved deployment через авторизованный Vercel Source/CLI или архив владельца, восстановить точный UI в GitHub, проверить разрешённые Supabase Auth redirect URLs и SMTP, объединить в один Preview, выполнить end-to-end email signup/login/reset, `release:verify`, визуальную проверку и только затем выпуск с подтверждением rollback-кандидата.
+
 ## 2026-11-18 12:30 UTC: восстановление входа при неверных данных и незавершённой регистрации (WIP)
 
 - **Задача / контекст:** пользователь показал жалобу на отказ входа после регистрации с текстом «Неверный пароль или почта». Исправление выполнено только в `feat/cortex-web-approved-account-20261118`; не утверждать, что пользовательский инцидент уже решён в production.
