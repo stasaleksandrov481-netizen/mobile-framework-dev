@@ -22,16 +22,6 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 internal class CortexPhoneActions(private val context: Context) {
-    companion object {
-        // PackageManager launcher enumeration and label loading must never stall the island UI.
-        private val appWorker = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "cortex-app-index").apply { isDaemon = true }
-        }
-        @Volatile private var appIndex: List<App> = emptyList()
-        @Volatile private var indexUpdatedAt = 0L
-        @Volatile private var indexPending = false
-        private const val APP_INDEX_TTL_MS = 120_000L
-    }
 
     init { scheduleAppIndex() }
 
@@ -542,6 +532,14 @@ internal class CortexPhoneActions(private val context: Context) {
     }
 
     private companion object {
+        // PackageManager launcher enumeration and label loading must never stall the island UI.
+        private val appWorker = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "cortex-app-index").apply { isDaemon = true }
+        }
+        @Volatile private var appIndex: List<App> = emptyList()
+        @Volatile private var indexUpdatedAt = 0L
+        @Volatile private var indexPending = false
+        private const val APP_INDEX_TTL_MS = 120_000L
         val CAMERA_NAMES = setOf("camera", "камера", "камеру", "фотокамера", "фотокамеру")
         val TELEGRAM_NAMES = listOf("telegram", "телеграм", "телеграмм", "телеграме", "телега", "телегу", "телеге", "тг")
         val ALIASES = mapOf(
