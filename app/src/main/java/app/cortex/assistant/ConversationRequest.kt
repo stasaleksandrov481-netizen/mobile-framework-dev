@@ -40,6 +40,7 @@ internal data class ConversationRequest(
         private val shortWrite = Regex("""^(?:(?:можешь(?:\s+мне)?|пожалуйста|давай|надо)[, ]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение\s+)?(?:(?:контакту|пользователю)\s+)?(.+)$""", RegexOption.IGNORE_CASE)
         private val address = Regex("""^(@[a-zA-Z0-9_.]{3,64})\s*(?:[:—,]\s*|\s+)(.+)$""")
         private val named = Regex("""^(.{1,90}?)\s*[:—]\s*(.+)$""")
+        private val greeting = Regex("""(?iu)^(привет|спасибо|поздравления)\s+(@?[\p{L}\p{N}._-]+(?:\s+[\p{L}\p{N}._-]+)?)\s*[.!]?$""")
         private val messageIntent = Regex("""(?iu)^(?:(?:можешь|пожалуйста|давай)[,\s]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение\b|контакту\b|пользователю\b|@[a-zA-Z0-9_]|.+\s+(?:в|через)\s+(?:телеграм\p{L}*|тг|whatsapp|ватсап\p{L}*|мессенджер\p{L}*))""")
 
         fun wantsMessage(raw: String): Boolean {
@@ -66,6 +67,10 @@ internal data class ConversationRequest(
 
         private fun simpleRequest(command: String, app: String, send: Boolean): ConversationRequest? {
             val tail = shortWrite.matchEntire(command)?.groupValues?.get(1)?.trim().orEmpty()
+            greeting.matchEntire(tail)?.destructured?.let { (message, recipient) ->
+                val name = recipientName(recipient)
+                if (name.isNotBlank()) return ConversationRequest(app, name, message, send)
+            }
             val straight = address.matchEntire(tail) ?: named.matchEntire(tail) ?: immediateMessage.matchEntire(tail)
             if (straight != null) {
                 val recipient = recipientName(straight.groupValues[1])
