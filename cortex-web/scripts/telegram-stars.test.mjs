@@ -161,7 +161,7 @@ test("Deployment remains gated and payment entitlement requires authenticated SQ
   const route = readFileSync(new URL("../app/api/telegram/stars/checkout/route.ts", import.meta.url), "utf8");
   const webhook = readFileSync(new URL("../app/api/telegram/webhook/route.ts", import.meta.url), "utf8");
   const engine = readFileSync(new URL("../lib/telegram-stars-webhook.ts", import.meta.url), "utf8");
-  const sql = readFileSync(new URL("../../supabase/migrations/20261117185346_cortex_telegram_stars.sql", import.meta.url), "utf8");
+  const sql = readFileSync(new URL("../../supabase/migrations/20261118105407_cortex_telegram_stars.sql", import.meta.url), "utf8");
   assert.match(route, /CORTEX_TELEGRAM_STARS_ENABLED !== "true"/);
   assert.match(route, /getUser\(jwt\)/);
   assert.match(route, /provider_token: ""/);
@@ -189,7 +189,7 @@ test("Deployment remains gated and payment entitlement requires authenticated SQ
 });
 
 test("The server seeds exact Stars price parity but does not enable real sales", () => {
-  const sql = readFileSync(new URL("../../supabase/migrations/20261117185346_cortex_telegram_stars.sql", import.meta.url), "utf8");
+  const sql = readFileSync(new URL("../../supabase/migrations/20261118105407_cortex_telegram_stars.sql", import.meta.url), "utf8");
   assert.match(sql, /\('start',199,false\),\('pro',399,false\),\('ultra',799,false\)/);
   assert.match(sql, /cortex_stars_public_prices/);
   assert.match(sql, /grant execute on function public\.cortex_stars_public_prices\(\) to anon,authenticated/);
@@ -198,6 +198,7 @@ test("The server seeds exact Stars price parity but does not enable real sales",
 
 test("Payment selection is a separate page and never passes client-selected amount or account ID", () => {
   const page = readFileSync(new URL("../app/payment/page.tsx", import.meta.url), "utf8");
+  const catalog = readFileSync(new URL("../lib/public-catalog.ts", import.meta.url), "utf8");
   const methods = readFileSync(new URL("../components/PaymentMethods.tsx", import.meta.url), "utf8");
   const pricing = readFileSync(new URL("../app/pricing/page.tsx", import.meta.url), "utf8");
   assert.match(page, /starsConfigured=/);
@@ -214,7 +215,8 @@ test("Payment selection is a separate page and never passes client-selected amou
   assert.match(methods, /getUser\(\)/);
   assert.match(methods, /target="_blank" rel="noopener noreferrer"/);
   assert.match(methods, /Не удалось создать счёт/);
-  assert.match(page, /cortex_stars_public_prices/);
+  assert.match(page, /loadPublicStarsPrices/);
+  assert.match(catalog, /cortex_stars_public_prices/);
   assert.match(methods, /starsPrice\.stars/);
   assert.match(methods, /cortex_stars_my_status/);
   assert.match(methods, /\/api\/telegram\/stars\/reconcile/);

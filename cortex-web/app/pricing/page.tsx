@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { cortexPublishableKey, cortexSupabaseUrl } from "@/lib/cortex-public-config";
+import { loadPublicPlans } from "@/lib/public-catalog";
 
 export const metadata: Metadata = {
   title: "Тарифы и цены — CORTEX",
@@ -18,42 +18,13 @@ const planInfo = {
   ultra: ["Ultra", "Максимальный контекст и максимальная квота продвинутых моделей"],
 };
 
-type Plan = {
-  code: keyof typeof planInfo;
-  price_kopecks: number;
-  daily_tokens: number;
-  advanced_tokens: number;
-};
-
 const numbers = new Intl.NumberFormat("ru-RU");
 const rubles = new Intl.NumberFormat("ru-RU", {
   style: "currency", currency: "RUB", minimumFractionDigits: 0, maximumFractionDigits: 2,
 });
 
-async function loadPlans(): Promise<Plan[] | null> {
-  try {
-    const url = new URL("/rest/v1/cortex_plans", cortexSupabaseUrl);
-    url.searchParams.set("select", "code,price_kopecks,daily_tokens,advanced_tokens");
-    url.searchParams.set("order", "rank");
-    const response = await fetch(url, {
-      headers: { apikey: cortexPublishableKey },
-      next: { revalidate: 300 },
-      signal: AbortSignal.timeout(3500),
-    });
-    if (!response.ok) return null;
-    const rows: unknown = await response.json();
-    if (!Array.isArray(rows) || rows.length !== Object.keys(planInfo).length) return null;
-    if (!rows.every(row => row && Object.hasOwn(planInfo, row.code) &&
-        Number.isSafeInteger(row.price_kopecks) && Number.isSafeInteger(row.daily_tokens) &&
-        Number.isSafeInteger(row.advanced_tokens))) return null;
-    return rows;
-  } catch {
-    return null;
-  }
-}
-
 export default async function PricingPage() {
-  const plans = await loadPlans();
+  const plans = await loadPublicPlans();
   return (
     <div className="shell">
       <main className="simple-page legal-page">

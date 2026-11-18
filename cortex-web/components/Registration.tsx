@@ -208,7 +208,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         setPassword("");
       } else if (mode === "verify") {
         if (activeEmail !== email.trim().toLowerCase()) {
-          if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
+          if (!isEmailOtp(code)) throw new Error("Введите код из письма: 6 или 8 цифр.");
           const { error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({
             email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
           }), 15_000);
@@ -229,7 +229,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         setResendWait(60);
         setMode("signin_code_verify");
       } else if (mode === "signin_code_verify") {
-        if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
+        if (!isEmailOtp(code)) throw new Error("Введите код из письма: 6 или 8 цифр.");
         const { error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code, type: "email",
         }), 15_000);
@@ -329,10 +329,10 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
               ? "Укажите почту, с которой регистрировались. Если аккаунт существует, отправим ссылку для смены пароля."
             : mode === "verify"
               ? emailOtpReady
-                ? "Мы отправили шестизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
+                ? "Мы отправили код подтверждения. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
                 : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
             : mode === "signin_code_verify"
-              ? "Мы отправили шестизначный код. Введи его из письма, чтобы продолжить."
+              ? "Мы отправили код подтверждения. Введи его из письма, чтобы продолжить."
               : mode === "signin_code"
                 ? "Войди без пароля. Отправим одноразовый код на твою почту."
               : "Войди в свой аккаунт CORTEX."}</p>

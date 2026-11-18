@@ -40,7 +40,7 @@ export default function OtpCodeInput({ value, onChange, disabled = false }: Prop
   }
 
   return (
-    <div className="otp-code" role="group" aria-label="Шестизначный код подтверждения" onPaste={paste}>
+    <div className="otp-code" role="group" aria-label="Код подтверждения из 6 или 8 цифр" onPaste={paste}>
       {Array.from({ length: CODE_LENGTH }, (_, index) => (
         <input key={index} id={index === 0 ? "registration-code" : undefined}
           ref={(element) => { inputs.current[index] = element; }} className="otp-digit"

@@ -1,6 +1,7 @@
-/** Matches the six-digit Supabase Auth {{ .Token }} email template. */
-export const EMAIL_OTP_LENGTH = 6;
+/** The input must accommodate both default six-digit and observed eight-digit email codes. */
+export const EMAIL_OTP_LENGTH = 8;
 
 export function isEmailOtp(value: string): boolean {
-  return /^\d{6}$/.test(value);
+  // The Auth server, not this client-side format check, validates the actual OTP.
+  return /^\d{6}(?:\d{2})?$/.test(value);
 }

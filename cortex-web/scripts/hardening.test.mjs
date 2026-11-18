@@ -39,11 +39,14 @@ test("Email confirmation never overwrites an existing launch-notification prefer
   assert.equal(inserts, 0);
 });
 
-test("Email OTP input matches the Supabase six-digit email templates", () => {
-  assert.equal(EMAIL_OTP_LENGTH, 6);
+test("Email OTP input supports both six- and eight-digit Auth templates", () => {
+  assert.equal(EMAIL_OTP_LENGTH, 8);
   assert.equal(isEmailOtp("001234"), true);
   assert.equal(isEmailOtp("12345"), false);
-  assert.equal(isEmailOtp("12345678"), false);
+  assert.equal(isEmailOtp("12345678"), true);
+  assert.equal(isEmailOtp("00000000"), true);
+  assert.equal(isEmailOtp("1234567"), false);
+  assert.equal(isEmailOtp("123456789"), false);
   assert.equal(isEmailOtp("1234ab"), false);
   const input = readFileSync(new URL("../components/OtpCodeInput.tsx", import.meta.url), "utf8");
   const form = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
@@ -339,7 +342,7 @@ test("Security headers restrict third-party origins and prohibit API caching", a
 });
 
 test("Account quota RPC never accepts arbitrary user IDs from a browser", () => {
-  const sql = readFileSync(new URL("../../supabase/migrations/20261117180500_cortex_web_account_usage.sql", import.meta.url), "utf8");
+  const sql = readFileSync(new URL("../../supabase/migrations/20261117155421_cortex_web_account_usage.sql", import.meta.url), "utf8");
   assert.match(sql, /security definer/i);
   assert.match(sql, /account_id uuid := \(select auth\.uid\(\)\)/);
   assert.match(sql, /public\.cortex_ai_usage\(account_id::text\)/);
