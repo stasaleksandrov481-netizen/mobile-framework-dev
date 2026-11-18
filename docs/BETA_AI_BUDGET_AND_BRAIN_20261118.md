@@ -33,3 +33,7 @@ Branch: `fix/cortex-beta-brain-budget-20261118`, based on `main` `3d8c81ebfe4f35
 
 ## Release block / smoke checks
 Before publishing a signed beta, CI must pass, the actual APK certificate must match the established release signer, and a human should check app launch, island, unlock, flash on/off, messaging and real AI plan execution on an Android phone. A green CI run alone cannot verify accessibility navigation or a live LLM provider. Do not overwrite production Supabase Edge Function with an outdated copy; the live `cortex` v46 files and GitHub main were equal on 18 Nov for six checked server files.
+
+## Live deployment evidence
+- The `cortex` function was deployed from the PR using all 11 verified sources as v47; Supabase reported `ACTIVE`, preserved `verify_jwt=false`, and subsequent source comparison returned **11/11 exact matches**.
+- The signing workflow prepares `1.0.18-beta.1` (`versionCode=118`) and can publish only from main after an explicit `release(cortex): publish beta 1.0.18-beta.1` commit or a manual workflow dispatch. A PR passing CI is not itself a published or physically verified APK.
