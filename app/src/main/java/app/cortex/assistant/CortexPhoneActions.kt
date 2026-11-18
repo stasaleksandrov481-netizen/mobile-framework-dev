@@ -307,8 +307,7 @@ internal class CortexPhoneActions(private val context: Context) {
             if (clean in names) {
                 apps.firstOrNull { it.pkg == pkg }?.let { return it }
                 // Handle a very first voice command before the background app index is ready.
-                if (apps.isEmpty() && context.packageManager.getLaunchIntentForPackage(pkg) != null)
-                    return App(pkg, target)
+                if (apps.isEmpty()) return App(pkg, target)
             }
         }
         return when (clean) {
