@@ -19,8 +19,48 @@ import android.view.inputmethod.InputMethodManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.concurrent.Executors
 
 internal class CortexPhoneActions(private val context: Context) {
+    companion object {
+        // PackageManager launcher enumeration and label loading must never stall the island UI.
+        private val appWorker = Executors.newSingleThreadExecutor { task ->
+            Thread(task, "cortex-app-index").apply { isDaemon = true }
+        }
+        @Volatile private var appIndex: List<App> = emptyList()
+        @Volatile private var indexUpdatedAt = 0L
+        @Volatile private var indexPending = false
+        private const val APP_INDEX_TTL_MS = 120_000L
+    }
+
+    init { scheduleAppIndex() }
+
+    private fun scheduleAppIndex() {
+        val now = SystemClock.elapsedRealtime()
+        if (indexPending || indexUpdatedAt != 0L && now - indexUpdatedAt < APP_INDEX_TTL_MS) return
+        synchronized(appWorker) {
+            if (indexPending || indexUpdatedAt != 0L &&
+                SystemClock.elapsedRealtime() - indexUpdatedAt < APP_INDEX_TTL_MS) return
+            indexPending = true
+            appWorker.execute {
+                try {
+                    val installed = launchableApps()
+                    if (installed.isNotEmpty()) appIndex = installed
+                } catch (_: Exception) {
+                    // Keep the previous successful snapshot; allow a later refresh.
+                } finally {
+                    indexUpdatedAt = SystemClock.elapsedRealtime()
+                    indexPending = false
+                }
+            }
+        }
+    }
+
+    private fun cachedApps(): List<App> {
+        scheduleAppIndex()
+        return appIndex
+    }
+
     private val audio by lazy { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     private val main = Handler(Looper.getMainLooper())
     private fun launch(intent: Intent): Boolean = runCatching {
@@ -263,12 +303,10 @@ internal class CortexPhoneActions(private val context: Context) {
 
     private fun normalized(text: String) = text.lowercase(Locale.ROOT).replace('ё', 'е').trim()
 
-    fun commandAppResolver(): (String) -> String? {
-        val apps by lazy { launchableApps() }
-        return { target -> resolveApp(target, apps)?.pkg }
-    }
+    fun commandAppResolver(): (String) -> String? =
+        { target -> resolveApp(target, cachedApps())?.pkg }
 
-    fun resolveApp(target: String): App? = resolveApp(target, launchableApps())
+    fun resolveApp(target: String): App? = resolveApp(target, cachedApps())
 
     private fun resolveApp(target: String, apps: List<App>): App? {
         val clean = normalized(target)
@@ -304,7 +342,7 @@ internal class CortexPhoneActions(private val context: Context) {
 
     fun mentionedApp(text: String): App? {
         val clean = normalized(text)
-        val matches = launchableApps().filter { app ->
+        val matches = cachedApps().filter { app ->
             val terms = listOf(normalized(app.name), app.pkg) + ALIASES[app.pkg].orEmpty()
             terms.any { name ->
                 name.length >= 2 && Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(name) +
@@ -339,30 +377,42 @@ internal class CortexPhoneActions(private val context: Context) {
             torch(command.optString("mode"), active, done)
             return
         }
-        val result = runCatching { execute(command) }.getOrElse { JSONObject().put("status", "unavailable") }
-        val expected = result.optString("package")
-        if (kind in setOf("app", "close_app") && result.optString("status") == "opened" &&
-            expected.isNotBlank() && CortexScreenService.connected != null) {
-            // Return on the first observed foreground change, including cold starts.
-            awaitState(active, attempts = if (kind == "app") 60 else 12, interval = 180L, condition = {
-                val foreground = CortexScreenService.connected?.activePackage()
-                foreground != null && if (kind == "close_app") foreground != expected else foreground == expected
-            }) { confirmed -> done(result.put("verified", confirmed)) }
-        } else if (kind == "shade" && result.optString("status") == "requested") {
-            awaitState(active, attempts = 18, interval = 160L, condition = {
-                CortexScreenService.connected?.frame()?.let {
-                    it.pkg == "com.android.systemui" && it.tree.isNotEmpty()
-                } == true
-            }) { confirmed ->
-                done(result.put("status", if (confirmed) "done" else "requested").put("message",
-                    if (confirmed) "Шторка открыта." else "Android принял запрос открыть шторку."))
+        fun checked(result: JSONObject) {
+            if (!active()) return
+            val expected = result.optString("package")
+            if (kind in setOf("app", "close_app") && result.optString("status") == "opened" &&
+                expected.isNotBlank() && CortexScreenService.connected != null) {
+                awaitState(active, attempts = if (kind == "app") 30 else 12, interval = 160L, condition = {
+                    val foreground = CortexScreenService.connected?.activePackage()
+                    foreground != null && if (kind == "close_app") foreground != expected else foreground == expected
+                }) { confirmed -> done(result.put("verified", confirmed)) }
+            } else if (kind == "shade" && result.optString("status") == "requested") {
+                awaitState(active, attempts = 18, interval = 160L, condition = {
+                    CortexScreenService.connected?.frame()?.let {
+                        it.pkg == "com.android.systemui" && it.tree.isNotEmpty()
+                    } == true
+                }) { confirmed ->
+                    done(result.put("status", if (confirmed) "done" else "requested").put("message",
+                        if (confirmed) "Шторка открыта." else "Android принял запрос открыть шторку."))
+                }
+            } else if (kind == "lock_screen" && result.optString("status") == "requested") {
+                val keyguard = context.getSystemService(KeyguardManager::class.java)
+                awaitState(active, condition = {
+                    keyguard.isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive
+                }) { done(result.put("status", if (it) "done" else "requested")) }
+            } else done(result)
+        }
+        if (kind in setOf("app", "close_app", "app_list", "app_info")) {
+            // These paths query installed apps and can take hundreds of milliseconds on Samsung.
+            appWorker.execute {
+                val result = runCatching { execute(command) }
+                    .getOrElse { JSONObject().put("status", "unavailable") }
+                main.post { checked(result) }
             }
-        } else if (kind == "lock_screen" && result.optString("status") == "requested") {
-            val keyguard = context.getSystemService(KeyguardManager::class.java)
-            awaitState(active, condition = { keyguard.isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive }) {
-                done(result.put("status", if (it) "done" else "requested"))
-            }
-        } else done(result)
+        } else {
+            checked(runCatching { execute(command) }
+                .getOrElse { JSONObject().put("status", "unavailable") })
+        }
     }
 
     private fun awaitState(
