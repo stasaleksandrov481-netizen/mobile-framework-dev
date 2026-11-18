@@ -2,16 +2,19 @@
 
 ## Актуальная сверка: 18.11.2026, `main` `7a92fea`
 
-Подтверждено через GitHub API и `git fetch` всех refs: **76 веток** (включая `main`).
+Подтверждено через GitHub API и `git fetch` всех refs, затем создано два новых feature refs: **78 веток** (включая `main`).
 
 | Группа | Количество | Действие |
 | --- | ---: | --- |
 | `main` — Android 1.0.17 | 1 | Основная ветка; production Vercel на `7a92fea` |
 | Уже полностью входят в `main` | 20 | Кандидаты на архивирование только после проверки внешних зависимостей |
-| Отличаются от `main` собственными коммитами | 41 | Сохранять, разбирать через отдельные PR |
+| Отличаются от `main` собственными коммитами | 43 | Сохранять, разбирать через отдельные PR |
 | Dependabot | 14 | Обновлять/закрывать поштучно только после CI |
 
-Открыто **19 PR**, в том числе 5 не от Dependabot:
+Открыт **21 PR**, в том числе 7 не от Dependabot:
+
+- [#69 — ровно шесть цифр в форме регистрации](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/69) — новый небольшой draft PR для безопасного релиза OTP.
+- [#70 — Gemini TTS / обязательная авторизация поверх Android 1.0.17](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/70) — отдельный draft PR с серверными и Android проверками.
 
 - [#64 — регистрация / шесть цифр / Redis](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/64) — draft; содержит нужную правку веб-кода, но **не сливать вместе с пропавшими компонентами опубликованного UI**.
 - [#61 — кабинет после регистрации и баланс ИИ](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/61) — открыт, проверять вместе с одобренным web UI.
