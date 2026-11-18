@@ -81,11 +81,8 @@ window.CortexControl = (() => {
     if (!visible() || Date.now() - lastHeartbeat < 42_000) return;
     lastHeartbeat = Date.now();
     try {
-      const result = await api.request("presence", { payload: { session_id: session,
+      await api.request("presence", { payload: { session_id: session,
         screen: document.querySelector("#screen")?.dataset.route || "home" } });
-      if (typeof result.guest_id === "string" && /^@g\d{6,17}$/.test(result.guest_id)) {
-        window.dispatchEvent(new CustomEvent("cortex-guest-id", { detail: result.guest_id }));
-      }
     }
     catch { /* Presence is retried on the next interval. */ }
   }
@@ -232,7 +229,7 @@ window.CortexControl = (() => {
     if (inbox.open) inbox.close();
     host.textContent = "";
     lastInboxCheck = 0;
-    // Separate presence sessions when switching between guest and account.
+    // Separate presence sessions when switching signed-in accounts.
     session = crypto.randomUUID();
     lastHeartbeat = 0;
     refresh();

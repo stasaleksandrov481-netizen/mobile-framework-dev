@@ -85,6 +85,77 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         return id
     }
 
+    /** Streams signed 24 kHz mono PCM on the worker thread; no full-audio buffering. */
+    fun speechPcmStream(text: String, onChunk: (ByteArray, Int) -> Unit, done: (Boolean) -> Unit): String {
+        val id = UUID.randomUUID().toString()
+        val task = FutureTask<Unit> {
+            var success = false
+            try { success = streamSpeechBytes(text, id, onChunk) }
+            catch (_: Exception) { /* Caller chooses the Android TTS fallback. */ }
+            main.post { if (jobs.remove(id) != null) done(success) }
+        }
+        val accepted = synchronized(lifecycle) {
+            if (executor.isShutdown || jobs.size >= 19 || jobs.putIfAbsent(id, task) != null) false
+            else try { executor.execute(task); true }
+            catch (_: RejectedExecutionException) { jobs.remove(id, task); false }
+        }
+        if (!accepted) main.post { done(false) }
+        return id
+    }
+
+    private fun streamSpeechBytes(text: String, id: String, onChunk: (ByteArray, Int) -> Unit): Boolean {
+        if (text.isBlank() || text.length > 550) return false
+        val connection = URL(endpoint + "speech").openConnection() as HttpURLConnection
+        connections[id] = connection
+        try {
+            if (!jobs.containsKey(id)) return false
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 48_000
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Accept", "application/octet-stream")
+            connection.setRequestProperty("X-Cortex-Audio-Stream", CortexAudioCodec.PCM_FORMAT)
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("X-Cortex-Install", installId)
+            if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
+            store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            connection.doOutput = true
+            connection.outputStream.use {
+                it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8))
+            }
+            if (connection.responseCode !in 200..299 ||
+                connection.getHeaderField("X-Cortex-Audio-Format") != CortexAudioCodec.PCM_FORMAT ||
+                !connection.contentType.orEmpty().startsWith("application/octet-stream")) return false
+            val buffer = ByteArray(4096)
+            var size = 0
+            var pending = -1
+            connection.inputStream.use { input ->
+                while (true) {
+                    if (Thread.currentThread().isInterrupted || !jobs.containsKey(id)) return false
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    size += read
+                    if (size > 2_400_000) return false
+                    // AudioTrack only accepts complete signed 16-bit samples.
+                    var offset = 0
+                    if (pending >= 0 && read > 0) {
+                        onChunk(byteArrayOf(pending.toByte(), buffer[0]), 2)
+                        pending = -1
+                        offset = 1
+                    }
+                    val even = (read - offset) and -2
+                    if (even > 0) onChunk(buffer.copyOfRange(offset, offset + even), even)
+                    if (offset + even < read) pending = buffer[read - 1].toInt() and 0xff
+                }
+            }
+            return size > 0 && pending < 0
+        } finally {
+            connections.remove(id, connection)
+            connection.disconnect()
+        }
+    }
+
     fun status() {
         enqueue(UUID.randomUUID().toString(), JSONObject().put("operation", "status"), {}, {})
     }

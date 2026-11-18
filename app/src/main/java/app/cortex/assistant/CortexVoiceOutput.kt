@@ -10,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.util.Base64
 import java.util.Locale
 
 /** Plays ephemeral server speech and falls back to Android speech on provider errors. */
@@ -27,6 +26,8 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private var localTts: TextToSpeech? = null
     private var localTurn: Int? = null
     private var generation = 0
+    private var streamedFrames = 0
+    private var streamStarted = false
 
     init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
 
@@ -40,35 +41,30 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
             useAndroidVoice(turn, normalized, complete)
             return
         }
-        request = bridge.speech(normalized) { response ->
+        streamedFrames = 0
+        streamStarted = false
+        request = bridge.speechPcmStream(normalized, { bytes, count ->
+            writeStreamChunk(turn, bytes, count)
+        }) { ok ->
             synchronized(this) {
-                if (turn != generation || request == null) return@speech
+                if (turn != generation || request == null) return@speechPcmStream
                 request = null
             }
-            val encoded = response.optJSONObject("result")?.optString("audio").orEmpty()
-            val format = response.optJSONObject("result")?.optString("audio_format")
-                ?.takeIf { it.isNotBlank() } ?: CortexAudioCodec.PCM_FORMAT
-            val wire = runCatching { Base64.decode(encoded, Base64.NO_WRAP) }.getOrNull()
-            val pcm = when (format) {
-                CortexAudioCodec.PCM_FORMAT -> wire
-                CortexAudioCodec.ADPCM_FORMAT -> wire?.let { packed ->
-                    CortexAudioCodec.decode(packed).also { packed.fill(0.toByte()) }
-                }
-                else -> null
-            }
-            if (pcm == null || pcm.isEmpty() || pcm.size % 2 != 0) {
-                wire?.fill(0.toByte())
-                pcm?.fill(0.toByte())
+            val started = synchronized(this) { streamStarted }
+            if (ok && started) waitForPlayback(turn, complete)
+            else if (!started) {
+                releaseStreamPlayer(turn)
                 useAndroidVoice(turn, normalized, complete)
-                return@speech
+            } else {
+                // A partial cloud sentence already played. Do not repeat it via local TTS.
+                releaseStreamPlayer(turn)
+                complete(false)
             }
-            Thread({ play(turn, pcm, normalized, complete) }, "cortex-voice-playback").start()
         }
-        // The normal cloud TTS round trip may exceed four seconds. Give it a
-        // realistic playback window before falling back to Android speech.
+        // Only fall back when no first chunk arrives; never cut off live streaming audio.
         handler.postDelayed({
             val stale = synchronized(this) {
-                if (turn != generation) null else request.also { request = null }
+                if (turn != generation || streamStarted) null else request.also { request = null }
             }
             if (stale != null) {
                 bridge.cancel(stale)
@@ -77,46 +73,67 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         }, 10_000L)
     }
 
-    private fun play(turn: Int, pcm: ByteArray, text: String, complete: (Boolean) -> Unit) {
-        var current: AudioTrack? = null
-        var success = false
+    private fun writeStreamChunk(turn: Int, pcm: ByteArray, count: Int) {
         try {
-            current = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(24_000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(pcm.size)
-                .setTransferMode(AudioTrack.MODE_STATIC).build()
-            synchronized(this) {
+            val player = synchronized(this) {
                 if (turn != generation) return
-                track = current
+                track ?: AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(24_000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setBufferSizeInBytes(maxOf(8192, AudioTrack.getMinBufferSize(24_000,
+                        AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2))
+                    .setTransferMode(AudioTrack.MODE_STREAM).build().also {
+                        track = it
+                        it.play()
+                        streamStarted = true
+                    }
             }
-            val player = current ?: return
-            if (player.write(pcm, 0, pcm.size) != pcm.size) return
-            player.play()
-            val frames = pcm.size / 2
-            val deadline = System.currentTimeMillis() + frames * 1000L / 24_000L + 2500L
-            while (System.currentTimeMillis() < deadline) {
-                synchronized(this) { if (turn != generation) return }
-                if (player.playbackHeadPosition >= frames) { success = true; break }
-                Thread.sleep(45)
+            var written = 0
+            while (written < count) {
+                synchronized(this) { if (turn != generation || track !== player) return }
+                val next = player.write(pcm, written, count - written)
+                if (next <= 0) throw IllegalStateException("AudioTrack stream rejected samples")
+                written += next
             }
-        } catch (_: Exception) {
-            // Untrusted audio bytes should not crash the assistant.
+            synchronized(this) { if (turn == generation) streamedFrames += written / 2 }
         } finally {
-            synchronized(this) { if (track === current) track = null }
-            runCatching { current?.stop() }
-            runCatching { current?.release() }
-            // Previous spoken responses must not remain readable in retained memory.
             pcm.fill(0.toByte())
-            handler.post {
-                synchronized(this) {
-                    if (turn != generation) return@post
-                }
-                if (success) complete(true) else useAndroidVoice(turn, text, complete)
+        }
+    }
+
+    private fun waitForPlayback(turn: Int, complete: (Boolean) -> Unit) {
+        val player = synchronized(this) { if (turn == generation) track else null }
+        if (player == null) { complete(false); return }
+        val frameCount = synchronized(this) { streamedFrames }
+        val deadline = System.currentTimeMillis() + frameCount * 1000L / 24_000L + 2500L
+        fun poll() {
+            synchronized(this) { if (turn != generation) return }
+            if (player.playbackHeadPosition >= frameCount) {
+                synchronized(this) { if (track === player) track = null }
+                runCatching { player.stop() }
+                runCatching { player.release() }
+                complete(true)
+            } else if (System.currentTimeMillis() >= deadline) {
+                // Part of the sentence has played; do not repeat it via Android TTS.
+                releaseStreamPlayer(turn)
+                complete(false)
+            } else {
+                handler.postDelayed({ poll() }, 45L)
             }
         }
+        poll()
+    }
+
+    private fun releaseStreamPlayer(turn: Int) {
+        val old = synchronized(this) {
+            if (turn != generation) return
+            track.also { track = null }
+        }
+        runCatching { old?.pause() }
+        runCatching { old?.flush() }
+        runCatching { old?.release() }
     }
 
     private fun useAndroidVoice(turn: Int, text: String, complete: (Boolean) -> Unit) {
@@ -192,6 +209,8 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         request = null
         val previous = track
         track = null
+        streamedFrames = 0
+        streamStarted = false
         runCatching { previous?.pause() }
         runCatching { previous?.flush() }
         runCatching { previous?.release() }
