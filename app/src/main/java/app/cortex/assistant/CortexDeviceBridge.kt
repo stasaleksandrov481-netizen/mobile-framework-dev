@@ -42,7 +42,8 @@ internal class CortexDeviceBridge(
             "permissions" -> refreshPermissions()
             "open-settings" -> sendAction("settings") { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
             "assistant-permission" -> sendAction("assistant-permission") {
-                open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) || open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+                requestAssistantRole() || open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) ||
+                    open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
             }
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -249,6 +250,16 @@ internal class CortexDeviceBridge(
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun requestAssistantRole(): Boolean {
+        if (Build.VERSION.SDK_INT < 29 || CortexAssistActivity.selected(context)) return false
+        val roles = context.getSystemService(RoleManager::class.java) ?: return false
+        if (!roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) return false
+        return runCatching {
+            activity.startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT), 505)
+        }.isSuccess
+    }
+
     private fun requestPermission(name: String) {
         if (Build.VERSION.SDK_INT >= 23 && activity.checkSelfPermission(name) != PackageManager.PERMISSION_GRANTED) {
             if (name == Manifest.permission.POST_NOTIFICATIONS && Build.VERSION.SDK_INT < 33) return
@@ -256,14 +267,9 @@ internal class CortexDeviceBridge(
         } else refreshPermissions()
     }
     fun refreshPermissions() {
-        val roleManager = if (Build.VERSION.SDK_INT >= 29) context.getSystemService(RoleManager::class.java) else null
-        val assistantAvailable = if (Build.VERSION.SDK_INT >= 29) roleManager?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true
-            else Build.VERSION.SDK_INT >= 26
-        val assistantSelected = if (Build.VERSION.SDK_INT >= 29) roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
-            else Settings.Secure.getString(context.contentResolver, "assistant")?.substringBefore('/') == context.packageName
         val obj = JSONObject().put("type", "permissions")
-            .put("assistantSupported", assistantAvailable)
-            .put("assistant", assistantSelected)
+            .put("assistantSupported", CortexAssistActivity.available(context))
+            .put("assistant", CortexAssistActivity.selected(context))
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("manufacturer", Build.MANUFACTURER)
@@ -282,6 +288,10 @@ internal class CortexDeviceBridge(
         emit(obj)
     }
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == 505) {
+            refreshPermissions()
+            return
+        }
         if (requestCode == 501 && pendingImage) {
             pendingImage = false
             val e = JSONObject().put("type", "image")

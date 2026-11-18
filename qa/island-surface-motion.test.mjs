@@ -31,6 +31,21 @@ test("island customization controls rendering and first-step feedback", () => {
   assert.match(native("CortexPhoneActions.kt"), /attempts = 6, interval = 105L/);
 });
 
+test("Android Assistant invocation opens the island without loading MainActivity or waking the microphone", () => {
+  const manifest = readFileSync(new URL("../app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+  assert.match(manifest, /android:name="\.CortexAssistActivity"[\s\S]*?android.intent.action.ASSIST/);
+  const activity = native("CortexAssistActivity.kt");
+  assert.match(activity, /intent\.action != Intent\.ACTION_ASSIST \|\| !selected\(this\)/);
+  assert.match(activity, /Settings\.canDrawOverlays\(this\)/);
+  assert.match(activity, /startForegroundService[\s\S]+ACTION_SYSTEM_ASSIST/);
+  assert.doesNotMatch(activity, /MainActivity|ACTION_WAKE|intent\.extras|VoiceInteractionService/);
+  const service = native("CortexIslandService.kt");
+  assert.match(service, /if \(systemRequested\)[\s\S]*?openFromSystem\(\)/);
+  assert.match(service, /systemInvocation = true[\s\S]*?setExpanded\(true\)/);
+  assert.match(service, /ACTION_SCREEN_OFF && systemInvocation/);
+  assert.match(service, /if \(systemInvocation && !busy && !actionBusy\)[\s\S]*?dismissIsland\(power = true\)/);
+});
+
 test("window placement is observed before morphs and pending transitions are cancelable", () => {
   const service = native("CortexIslandService.kt");
   const surface = native("LiquidIslandView.kt");

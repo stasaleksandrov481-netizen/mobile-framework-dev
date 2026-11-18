@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
@@ -27,6 +29,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
+import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 
 class CortexIslandService : Service(), DisplayManager.DisplayListener {
@@ -62,6 +65,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var moving = false
     private var busy = false
     private var wakeExpanded = false
+    private var systemInvocation = false
+    private var screenListenerRegistered = false
     private var hiddenByVoice = false
     private var touchThrough = false
     private var task: CortexActionState.Status? = null
@@ -82,6 +87,15 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private val repaintAnswer = Runnable {
         repaintPending = false
         if (busy) render()
+    }
+
+    private val screenOff = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF && systemInvocation) {
+                systemInvocation = false
+                if (backgroundDisabled()) dismissIsland(power = true) else setExpanded(false)
+            }
+        }
     }
 
     override fun onCreate() {
@@ -125,14 +139,18 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             stopSelf()
             return
         }
+        screenListenerRegistered = runCatching {
+            ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+        }.isSuccess
         CortexActionState.status?.takeIf {
             it.phase == "executing" || SystemClock.uptimeMillis() - it.at < RESULT_MS
         }?.let(::updateTask)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val systemRequested = intent?.action == ACTION_SYSTEM_ASSIST
         if (poweringOff) {
-            if (preferences.getBoolean(WAKE_PAUSED, false)) return START_NOT_STICKY
+            if (!systemRequested && preferences.getBoolean(WAKE_PAUSED, false)) return START_NOT_STICKY
             poweringOff = false
             exiting = false
             removeIsland()
@@ -159,7 +177,11 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             }
             hiddenByVoice = false
         }
-        if (mode == "off" || preferences.getBoolean(WAKE_PAUSED, false)) {
+        if (systemRequested) {
+            openFromSystem()
+            return if (backgroundDisabled()) START_NOT_STICKY else START_STICKY
+        }
+        if (backgroundDisabled() && !systemInvocation) {
             dismissIsland(power = true)
             return START_NOT_STICKY
         }
@@ -200,12 +222,48 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             }
             else -> render()
         }
-        return START_STICKY
+        return if (backgroundDisabled()) START_NOT_STICKY else START_STICKY
     }
 
-    private fun canShow() = Settings.canDrawOverlays(this) &&
-        (!preferences.getBoolean(EXTRA_HIDE_LANDSCAPE, true) ||
-            resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE)
+    private fun backgroundDisabled() = mode == "off" || preferences.getBoolean(WAKE_PAUSED, false)
+
+    private fun canShow() = Settings.canDrawOverlays(this) && allowedInOrientation(this)
+
+    private fun openFromSystem() {
+        if (!CortexSchedule.screenReady(this) || !canShow()) {
+            if (backgroundDisabled()) dismissIsland(power = true)
+            return
+        }
+        if (exiting) {
+            exiting = false
+            removeIsland()
+        }
+        hiddenByVoice = false
+        wakeExpanded = false
+        systemInvocation = true
+        render()
+        if (island == null) {
+            systemInvocation = false
+            if (backgroundDisabled()) dismissIsland(power = true)
+            return
+        }
+        if (!actionBusy) setExpanded(true)
+    }
+
+    private fun closeComposer() {
+        if (reminder != null) {
+            closeReminder(true)
+            return
+        }
+        if (systemInvocation && !busy && !actionBusy) {
+            systemInvocation = false
+            if (backgroundDisabled()) {
+                dismissIsland(power = true)
+                return
+            }
+        }
+        setExpanded(false)
+    }
 
     private fun presentReminder(id: String, text: String): Boolean {
         if (mode == "off" || hiddenByVoice || poweringOff || exiting || busy || actionBusy ||
@@ -262,7 +320,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private fun hideTemporarily() {
         if (hiddenByVoice || poweringOff) return
         hiddenByVoice = true
-        dismissIsland(power = false)
+        systemInvocation = false
+        dismissIsland(power = backgroundDisabled())
     }
 
     private fun dismissIsland(power: Boolean) {
@@ -273,6 +332,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         if (power) {
             if (poweringOff) return
             poweringOff = true
+            systemInvocation = false
             ui.removeCallbacks(returnToIdle)
             ui.removeCallbacks(clearTask)
             ui.removeCallbacks(repaintAnswer)
@@ -324,9 +384,16 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun render() {
         if (exiting || poweringOff) return
-        if (mode == "off" || hiddenByVoice || CortexRuntime.appVisible && reminder == null && !moving || !canShow() ||
-            (mode == "wake" && phase == "idle" && task == null && reminder == null && !opening && !moving)) {
-            if (island != null) dismissIsland(power = mode == "off")
+        if (!canShow()) {
+            val wasInvoked = systemInvocation
+            systemInvocation = false
+            if (island != null || wasInvoked && backgroundDisabled()) dismissIsland(power = backgroundDisabled())
+            return
+        }
+        val hiddenInApp = CortexRuntime.appVisible && reminder == null && !moving
+        val waitingForWake = mode == "wake" && phase == "idle" && task == null && reminder == null && !opening && !moving
+        if (!systemInvocation && (backgroundDisabled() || hiddenByVoice || hiddenInApp || waitingForWake)) {
+            if (island != null) dismissIsland(power = backgroundDisabled())
             return
         }
         if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density, style)
@@ -363,14 +430,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun createIsland(): LiquidIslandView? {
         val panel = IslandConversationPanel(overlayContext, { submit(it) }, ::stopAnswer,
-            { if (reminder != null) closeReminder(true) else setExpanded(false) }, ::openApplication)
+            ::closeComposer, ::openApplication)
         panel.draft(draft)
         panel.onKeyboardFocus = { focused ->
             keyboardFocus = focused && opening && !exiting
             island?.let(::placeIsland)
         }
         val view = LiquidIslandView(overlayContext, panel, { setExpanded(true) },
-            { setExpanded(false) }, ::openApplication, ::stopAnswer)
+            ::closeComposer, ::openApplication, ::stopAnswer)
         val params = layoutParams()
         window = params
         placeIsland(view)
@@ -499,7 +566,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun openApplication() {
-        setExpanded(false)
+        closeComposer()
         runCatching {
             startActivity(Intent(this, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
@@ -652,6 +719,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         if (CortexRuntime.wakeLevel === wakeLevel) CortexRuntime.wakeLevel = null
         if (CortexRuntime.islandTouchPassThrough === passThrough) CortexRuntime.islandTouchPassThrough = null
         if (running === this) running = null
+        if (screenListenerRegistered) unregisterReceiver(screenOff)
         displays.unregisterDisplayListener(this)
         ui.removeCallbacksAndMessages(null)
         removeIsland()
@@ -663,6 +731,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     companion object {
         const val ACTION_CONFIG = "app.cortex.assistant.island.CONFIG"
         const val ACTION_ENSURE = "app.cortex.assistant.island.ENSURE"
+        internal const val ACTION_SYSTEM_ASSIST = "app.cortex.assistant.island.SYSTEM_ASSIST"
         const val ACTION_WAKE = "app.cortex.assistant.island.WAKE"
         const val ACTION_WAKE_CLOSED = "app.cortex.assistant.island.WAKE_CLOSED"
         const val ACTION_SUBMIT = "app.cortex.assistant.island.SUBMIT"
@@ -678,6 +747,10 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         private const val CHANNEL = "cortex-island"
         private const val NOTIFICATION = 2810
         private var running: CortexIslandService? = null
+
+        internal fun allowedInOrientation(context: Context) =
+            context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||
+                !context.getSharedPreferences("cortex-display", MODE_PRIVATE).getBoolean(EXTRA_HIDE_LANDSCAPE, true)
 
         internal fun handleControl(context: Context, raw: String): String? {
             val command = (CortexHotword.command(raw) ?: raw).trim().trimEnd('.', '!', '?').trim()

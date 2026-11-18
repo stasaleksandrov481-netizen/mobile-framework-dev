@@ -11,8 +11,8 @@ const CortexUI = (() => {
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
-    support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
-    chat: "home", "phone-tools": "settings", schedule: "phone-tools", scenarios: "phone-tools",
+    support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
+    chat: "home", "phone-tools": "settings", schedule: "profile", scenarios: "phone-tools",
     "island-editor": "phone-tools", energy: "settings",
     account: "profile"
   };
@@ -214,7 +214,7 @@ const CortexUI = (() => {
   }
 
   function chats() {
-    return `<header class="profile-header notes-header"><h1>Чаты</h1>
+    return `<header class="profile-header chats-header"><h1>Чаты</h1>
       ${iconButton("search", "Поиск по чатам", "history")}</header>
       <div class="scroll detail-scroll stack">${button("Новый чат", "plus", "new-chat", "", "primary")}
         ${chatItems({ search: "" })}</div>`;
@@ -235,7 +235,9 @@ const CortexUI = (() => {
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
         </section>
-        ${group(tile("Настройки", "", "sliders", "go", "settings") +
+        ${CortexSubscription.balance(ctx.connection?.quota || ctx.connection?.subscription?.quota, esc)}
+        ${group(tile("Напоминания", "Созданные голосом и вручную", "bell", "go", "schedule") +
+          tile("Настройки", "", "sliders", "go", "settings") +
           tile("Данные и чаты", "", "folder", "go", "data") +
           tile("Память и персонализация", "", "memory", "go", "memory"))}
         ${group(tile("Разрешения Android", "", "shield", "go", "permissions") +
@@ -358,8 +360,10 @@ const CortexUI = (() => {
         </button>`).join("")}
       </section>
       ${group(switchRow("Скрывать в альбомном режиме", "Например, в играх и видео", p.hideLandscape, "hideLandscape"))}
-      <h2 class="group-label">Голос</h2>
-      ${group(voiceRow +
+      <h2 class="group-label">Способы вызова</h2>
+      ${group((perm.assistantSupported ? tile("Цифровой помощник Android",
+        perm.assistant ? "CORTEX выбран · открывает островок" : "Выбрать CORTEX для системного жеста",
+        "focus", "assistant-permission") : "") + voiceRow +
         switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue"))}
       <h2 class="group-label">Управление телефоном</h2>
       ${group(switchRow("Команды телефона", "Открытие приложений, системные действия и сценарии", p.phoneActions, "phoneActions") +
@@ -371,7 +375,6 @@ const CortexUI = (() => {
         switchRow("Показывать, как открываются приложения", "Для сценариев и визуальных команд", p.visualLaunch, "visualLaunch"))}
       <h2 class="group-label">Инструменты</h2>
       ${group(tile("Сценарии", "Сохранённые цепочки действий", "layers", "go", "scenarios") +
-        tile("Расписание", "Напоминания и отложенные действия", "bell", "go", "schedule") +
         tile("Разрешения Android", "Микрофон, островок и доступ к экрану", "shield", "go", "permissions") +
         tile("Как управлять экраном", "Примеры команд и подтверждения действий", "focus", "go", "tool-list") +
         tile("Настроить заново", "Открыть пошаговую настройку", "sliders", "open-setup"))}`);
@@ -450,14 +453,6 @@ const CortexUI = (() => {
         <button type="submit" class="action primary">${icon("check", 17)}Сохранить</button>
       </form>`);
   }
-  function notes() {
-    return `<header class="profile-header notes-header"><h1>Заметки</h1>
-      ${iconButton("plus", "Добавить заметку", "note-edit", "", "accent")}</header>
-      <div class="scroll detail-scroll stack notes-scroll">${M.state.notes.length ? group(M.state.notes.map(item =>
-        tile(item.title, item.body, "note", "note-edit", item.id, "note-row")).join("")) :
-        `<div class="empty-panel">${icon("note", 29)}<h3>Заметок пока нет</h3>
-          ${button("Создать заметку", "plus", "note-edit", "", "primary")}</div>`}</div>`;
-  }
   function permissions(ctx) {
     const a = ctx.permissions;
     const compatibility = ctx.compatibility;
@@ -492,7 +487,7 @@ const CortexUI = (() => {
       ${button("Повторить начальную настройку", "refresh", "open-setup", "", "outline")}</div>`);
   }
   function support() {
-    return heading("Поддержка", "") + `<section class="support-chat" id="support-chat">
+    return heading("Поддержка", "", button("FAQ", "help", "go", "faq", "outline faq-shortcut")) + `<section class="support-chat" id="support-chat">
       <div class="support-messages" id="support-messages" aria-live="polite"><div class="support-message support-assistant">Напишите, что случилось. Я помогу разобраться.</div></div>
       <form class="support-compose" id="support-compose"><textarea name="message" rows="1" maxlength="3000" required placeholder="Сообщение поддержке" aria-label="Сообщение поддержке"></textarea>
         <button type="submit" aria-label="Отправить">${icon("sendUp", 21)}</button></form>
@@ -500,23 +495,27 @@ const CortexUI = (() => {
   }
 
   const questions = [
-    ["Команды", "Что работает без интернета?", "Открытие приложений и разделов Android, проверка заряда и частоты экрана, громкость, напоминания и сценарии выполняются на устройстве. Для сложного диалога и облачного планирования нужно подключение."],
-    ["Команды", "Чем отличаются диктовка и разговор?", "Диктовка вставляет распознанный текст в поле ввода. Голосовой разговор отправляет реплику после паузы. Доступность распознавания без сети зависит от службы Android."],
-    ["Разрешения", "Как включить управление экраном?", "Откройте «Вызов», затем «Управление экраном». В специальных возможностях Android включите службу CORTEX. На защищённых экранах завершите действие вручную."],
-    ["Разрешения", "Почему островок пропал?", "Проверьте разрешение «Поверх других окон» и режим островка в разделе «Вызов». При режиме «По вызову» островок появляется после команды или запуска."],
-    ["Токены", "Что расходует токены ИИ?", "В гостевом режиме доступно 5 000 токенов в день, после входа — 20 000. Локальные команды, напоминания и сценарии выполняются без расхода токенов."],
-    ["Токены", "Почему ИИ временно недоступен при наличии токенов?", "У OpenRouter есть общий дневной и минутный бюджет. Пока облако недоступно, локальные команды остаются доступны."],
-    ["Сценарии", "Как запустить сценарий голосом?", "Сохраните сценарий и скажите «Запусти сценарий» и его название. Можно также указать свою фразу в конструкторе."],
-    ["Сценарии", "Когда сработает отложенное действие?", "Срок и статус видны в «Расписании». Android может задержать запуск. Если экран заблокирован или Android ограничил запуск в фоне, нажмите уведомление после разблокировки."],
-    ["Аккаунт", "Где хранятся чаты и заметки?", "Сохранённые диалоги и заметки остаются на этом устройстве. Чаты можно экспортировать в разделе «Данные и чаты»."],
-    ["Аккаунт", "Как вернуться в старый аккаунт?", "Выберите «Вход по почте», затем «Забыли пароль?», и укажите прежнюю почту. После кода из письма установите пароль для этого аккаунта."]
+    ["Быстрый старт", "Что работает без интернета?", "Поддерживаемые команды телефона, напоминания и сценарии выполняются на устройстве. Для ответов облачного ИИ нужно подключение."],
+    ["Быстрый старт", "Как запустить сценарий голосом?", "Откройте «Сценарии», сохраните цепочку и скажите «Запусти сценарий» и его название. Можно указать свою фразу запуска."],
+    ["Островок", "Как открыть островок кнопкой «Домой»?", "В разделе «Вызов» выберите CORTEX цифровым помощником Android и разрешите показ поверх приложений. Используйте жест или кнопку вызова помощника на вашем устройстве."],
+    ["Островок", "Почему островок не виден?", "Проверьте разрешение показа поверх приложений и режим в разделе «Вызов». Для альбомной ориентации действует отдельная настройка."],
+    ["Островок", "Как включить визуальное управление?", "Включите «Визуальное управление» в разделе «Вызов». Затем в специальных возможностях Android разрешите службу CORTEX. Защищённые экраны требуют ручного ввода."],
+    ["Напоминания", "Где посмотреть то, о чём я попросил напомнить?", "Откройте «Профиль» → «Напоминания». Там появятся записи, которые CORTEX успешно сохранил после голосовой или текстовой команды."],
+    ["Напоминания", "Почему напоминание пришло позже?", "Android может задержать сигнал, если точные напоминания или уведомления ограничены. Их можно настроить в разделе «Напоминания»."],
+    ["Аккаунт и лимиты", "Где виден лимит ИИ?", "Остаток, дневной максимум и время обновления видны в профиле. В разделе «Подписка» указаны лимиты тарифов. Локальные команды не расходуют облачные токены."],
+    ["Аккаунт и лимиты", "Как вернуть доступ к аккаунту?", "Выберите «Вход по почте», затем «Забыли пароль?». Введите код, который придёт на вашу почту, и задайте новый пароль."]
   ];
   function faq() {
-    return `<section class="panel stack faq" data-faq><h2>Частые вопросы</h2>
-      <label class="field"><span>Поиск</span><input type="search" id="faq-search" placeholder="Например, токены" maxlength="80"></label>
-      ${questions.map(([category, question, answer]) => `<details data-faq-category="${esc(category)}">
-        <summary>${esc(question)}${icon("chevron", 15)}</summary><p>${esc(answer)}</p></details>`).join("")}
-      <p class="muted" data-faq-empty hidden>Совпадений нет.</p></section>`;
+    return detail("Частые вопросы", "", `<section class="faq faq-page" data-faq>
+      <label class="faq-search search-box">${icon("search", 18)}
+        <input type="search" id="faq-search" placeholder="Найти ответ" aria-label="Поиск по вопросам" maxlength="80"></label>
+      ${[...new Set(questions.map(([category]) => category))].map(category =>
+        `<section class="faq-group" data-faq-group><h2>${esc(category)}</h2>
+          ${questions.filter(([key]) => key === category).map(([, question, answer]) => `<details data-faq-category="${esc(category)}">
+            <summary><span>${esc(question)}</span>${icon("chevron", 15)}</summary><p>${esc(answer)}</p></details>`).join("")}
+        </section>`).join("")}
+      <p class="muted" data-faq-empty hidden role="status">Совпадений нет. Попробуйте другие слова.</p>
+    </section>`);
   }
   function about(ctx) {
     const publicId = M.state.account?.public_id || ctx.connection?.guestId || "";
@@ -530,8 +529,8 @@ const CortexUI = (() => {
   }
   function privacy(ctx) {
     return detail("Конфиденциальность", "Данные, необходимые для работы", `<section class="panel stack prose">
-      <h2>Профиль</h2><p>CORTEX получает имя и адрес почты при входе. Пароли и одноразовые коды обрабатывает Supabase Auth. История чатов и заметки остаются на вашем устройстве.</p>
-      <h2>Сообщения</h2><p>Сохранённые чаты и заметки остаются на устройстве. Команды, которые выполняет локальный движок, остаются на телефоне. Для разговорных ответов и сложных задач CORTEX передаёт серверу запрос и нужный контекст. Сервер обращается к OpenRouter.</p>
+      <h2>Профиль</h2><p>CORTEX получает имя и адрес почты при входе. Пароли и одноразовые коды обрабатывает Supabase Auth. История чатов остаётся на вашем устройстве.</p>
+      <h2>Сообщения</h2><p>Сохранённые чаты остаются на устройстве. Команды, которые выполняет локальный движок, остаются на телефоне. Для разговорных ответов и сложных задач CORTEX передаёт серверу запрос и нужный контекст. Сервер обращается к OpenRouter.</p>
       <h2>Голос и команды</h2><p>Речь распознаёт служба Android. Распознанная команда проходит ту же обработку, что и текстовая. CORTEX читает элементы и распознаёт текст на телефоне. При вашем согласии для сложной задачи сервер и OpenRouter могут получить краткое описание экрана. Снимки экрана остаются на телефоне.</p>
       ${window.CortexDevice ? button(ctx.connection.visualPrivacy ? "Отключить передачу текста экрана ИИ" : "Разрешить передачу текста экрана ИИ", "shield", "visual-privacy", "", "outline") : ""}
       <h2>Поддержка</h2><p>Разработчик получает текст обращения и приложенные вами email, скриншот и версию приложения.</p>
@@ -540,7 +539,7 @@ const CortexUI = (() => {
 
   function page(route, ctx) {
     const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
-      data, memory, personality, instructions, notes, permissions, support, about, privacy, guide, models, "tool-list": toolList };
+      data, memory, personality, instructions, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
     return pages[route](ctx);
   }
   function navigation() {

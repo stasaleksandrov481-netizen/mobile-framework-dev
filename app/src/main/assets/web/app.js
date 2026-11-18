@@ -934,7 +934,7 @@
   window.cortexAdminLogin = accountOptions;
 
   function logout() {
-    confirm("Выйти из аккаунта?", "Локальные чаты и заметки останутся на этом устройстве.", async () => {
+    confirm("Выйти из аккаунта?", "Локальные чаты останутся на этом устройстве.", async () => {
       if (pending) stopAnswer(false);
       ++statusEpoch;
       try {
@@ -1071,7 +1071,7 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text) ?? M.noteCommand(text);
+      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
       const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
@@ -1231,18 +1231,6 @@
         else memory.entries.unshift({ id: M.id("fact"), enabled: true, ...values });
         closeSheet(); saved("Факт сохранён"); render();
       }, { extra: entry ? button("Удалить", "trash", "memory-delete", entry.id, "danger") : "" });
-  }
-
-  function noteEditor(id) {
-    const note = S.notes.find(item => item.id === id);
-    editor(note ? "Заметка" : "Новая заметка",
-      field("title", "Название", note?.title || "", { max: 65 }) +
-      field("body", "Текст", note?.body || "", { rows: 5, max: 5000, optional: true }),
-      values => {
-        if (note) Object.assign(note, values);
-        else S.notes.unshift({ id: M.id("note"), ...values });
-        closeSheet(); saved("Заметка сохранена"); render();
-      }, { extra: note ? button("Удалить", "trash", "note-delete", note.id, "danger") : "" });
   }
 
   function exportChats() {
@@ -1568,6 +1556,7 @@
       if (message.ok && typeof message.data === "string") attachment(message.data);
       else flash("Не удалось подготовить скриншот.");
     }
+    if (message.type === "assistant-permission" && !message.ok) flash("Не удалось открыть выбор помощника Android.");
     if (message.type === "export" && !message.cancelled) flash(message.ok ? "Чаты экспортированы" : "Не удалось сохранить файл");
   }
   if (device) device.onmessage = deviceEvent;
@@ -1621,6 +1610,9 @@
       row.hidden = !text.includes(query);
       if (!row.hidden) found = true;
     }
+    for (const group of faq.querySelectorAll("[data-faq-group]")) {
+      group.hidden = !group.querySelector("details:not([hidden])");
+    }
     faq.querySelector("[data-faq-empty]").hidden = found;
   }
 
@@ -1672,7 +1664,7 @@
     },
     "delete-chat": id => confirm("Удалить чат?", "Переписка будет удалена с устройства.", () => deleteChats(chat => chat.id === id, "Чат удалён")),
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
-    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
+    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
       supportThread.length = 0;
       localStorage.removeItem(supportStore());
@@ -1783,11 +1775,6 @@
       const memory = M.memory();
       memory.entries = memory.entries.filter(item => item.id !== id);
       saved("Факт удалён"); render();
-    }),
-    "note-edit": noteEditor,
-    "note-delete": id => confirm("Удалить заметку?", "Запись будет удалена с устройства.", () => {
-      S.notes = S.notes.filter(item => item.id !== id);
-      saved("Заметка удалена"); render();
     }),
     "personality-edit"() {
       const person = M.profile();

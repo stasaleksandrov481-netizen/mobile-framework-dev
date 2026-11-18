@@ -61,7 +61,7 @@ const CortexPlanner = (() => {
   };
 
   function schedule() {
-    if (!app.native) return detail("Расписание", "", '<p class="muted">Расписание работает в Android-приложении.</p>');
+    if (!app.native) return detail("Напоминания", "", '<p class="muted">Напоминания доступны в Android-приложении.</p>');
     const permissions = (!notifications ? action("Разрешить уведомления", "native", "notification-permission") : "") +
       (!exact ? action("Включить точные напоминания", "native", "schedule-exact") : "");
     const taskCard = task => {
@@ -82,21 +82,22 @@ const CortexPlanner = (() => {
     if (scheduleDraft) {
       const { kind, text, local, repeat } = scheduleDraft;
       editor = `<form class="panel stack" id="plan-schedule-form">
-        <h2>${scheduleDraft.id ? "Изменить поручение" : "Запланировать поручение"}</h2>
-        ${label("Что сделать", `<select name="kind">${options({ reminder: "Напомнить", action: "Выполнить действие" }, kind)}</select>`)}
+        <h2>${scheduleDraft.id ? (kind === "reminder" ? "Изменить напоминание" : "Изменить действие") : "Новое напоминание"}</h2>
         ${label("Текст", `<textarea name="text" rows="2" maxlength="2400" required>${esc(text)}</textarea>`)}
         ${label("Местные дата и время", `<input name="local" type="datetime-local" value="${esc(local)}" required>`)}
         ${label("Повторять", `<select name="repeat">${options({ none: "Один раз", daily: "Каждый день", weekly: "Каждую неделю" }, repeat)}</select>`)}
         <div class="actions">${submit("Сохранить")}${action("Закрыть", "schedule-close", "", "quiet")}</div>
       </form>`;
     }
-    const active = tasks.filter(task => ["scheduled", "due", "blocked", "running"].includes(task.status));
-    const history = tasks.filter(task => !active.includes(task));
-    return detail("Расписание", "Напоминания и действия", `<div class="actions">${action("Добавить", "schedule-edit", "", "primary")}</div>` +
+    // Previously scheduled actions remain accessible from their notifications.
+    const visible = tasks.filter(task => task.kind === "reminder" || task.id === selectedTask);
+    const active = visible.filter(task => ["scheduled", "due", "blocked", "running"].includes(task.status));
+    const history = visible.filter(task => !active.includes(task));
+    return detail("Напоминания", "", `<div class="actions">${action("Добавить напоминание", "schedule-edit", "", "primary")}</div>` +
       (scheduleReady && permissions ? `<section class="panel stack"><p class="muted">${!notifications ?
         "Разрешите уведомления для напоминаний при выключенном экране." : "Android может доставлять напоминания с задержкой."}</p>
         <div class="actions">${permissions}</div></section>` : "") + editor +
-      (active.length ? active.map(taskCard).join("") : `<p class="muted">${scheduleReady ? "Скажите «Напомни через десять минут достать курицу»." : "Загружаю расписание…"}</p>`) +
+      (active.length ? active.map(taskCard).join("") : `<p class="muted">${scheduleReady ? "Пока пусто. Скажите: «Кортекс, напомни через десять минут достать курицу»." : "Загружаю напоминания…"}</p>`) +
       (history.length ? `<h2 class="group-label">История</h2>${history.map(taskCard).join("")}` : ""));
   }
 

@@ -6,8 +6,8 @@ import vm from "node:vm";
 const root = new URL("../app/src/main/assets/web/", import.meta.url);
 const source = file => readFileSync(new URL(file, root), "utf8");
 
-function fixture() {
-  const saved = new Map();
+function fixture(persisted) {
+  const saved = new Map(persisted ? [["cortex.interface.v2", JSON.stringify(persisted)]] : []);
   const context = vm.createContext({
     localStorage: { getItem: k => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v),
       removeItem: k => saved.delete(k) },
@@ -16,9 +16,9 @@ function fixture() {
     CortexMarkdown: { render: text => text, renderStream: text => text, webUrl: value => value },
   });
   vm.runInContext(source("model.js"), context);
-  vm.runInContext(source("screens.js"), context);
-  vm.runInContext("globalThis.CortexTest = Cortex; globalThis.CortexUITest = CortexUI;", context);
-  return { model: context.CortexTest, ui: context.CortexUITest, saved };
+  for (const file of ["subscription.js", "screens.js", "planner.js"]) vm.runInContext(source(file), context);
+  vm.runInContext("globalThis.CortexTest = Cortex; globalThis.CortexUITest = CortexUI; globalThis.PlannerTest = CortexPlanner;", context);
+  return { model: context.CortexTest, ui: context.CortexUITest, planner: context.PlannerTest, saved };
 }
 
 test("chat composer keeps only model picker and quota below the input", () => {
@@ -44,9 +44,11 @@ test("call settings keep normal commands independent from beta screen control", 
   assert.equal(model.state.preferences.phoneActions, true);
   assert.equal(model.state.preferences.visualAutomation, false);
   const call = ui.page("phone-tools", { permissions: {} });
-  for (const route of ["island-editor", "schedule", "scenarios", "permissions", "tool-list"]) {
+  for (const route of ["island-editor", "scenarios", "permissions", "tool-list"]) {
     assert.ok(call.includes(`data-value="${route}"`), route);
   }
+  assert.doesNotMatch(call, /data-value="schedule"/);
+  assert.match(ui.page("phone-tools", { permissions: { assistantSupported: true } }), /data-action="assistant-permission"/);
   assert.match(call, /type="checkbox" data-visual-beta/);
   assert.match(call, /data-value="phoneActions"/);
   assert.match(call, /data-value="visualLaunch"/);
@@ -74,16 +76,56 @@ test("model feedback survives restart and affects following prompts", () => {
   assert.match(JSON.stringify(restarted.turns(restarted.state.chats[0], "")), /Не понравился ответ.*Слишком длинное/);
 });
 
-test("support is a single chat and account/profile no longer repeats quotas", () => {
-  const { ui, model } = fixture();
+test("support links to a searchable FAQ and profile shows reminder access and quota", () => {
+  const { ui } = fixture();
   const support = ui.page("support", {});
   assert.match(support, /id="support-messages"/);
-  assert.match(support, /id="support-compose"/);
-  assert.doesNotMatch(support, /Мои обращения|Сообщить об ошибке|Частые вопросы/);
-  const profile = ui.page("profile", { connection: {}, native: false });
-  assert.doesNotMatch(profile, /quota-panel|Токены ИИ/);
-  assert.equal(model.noteCommand("создай заметку План: Проверить релиз"), "Создал заметку «План»." );
-  assert.match(model.noteCommand("покажи заметки"), /Проверить релиз/);
+  assert.match(support, /data-value="faq"/);
+  assert.doesNotMatch(support, /Мои обращения|Сообщить об ошибке/);
+  const faq = ui.page("faq", {});
+  assert.match(faq, /aria-label="Поиск по вопросам"/);
+  assert.match(faq, /Как открыть островок кнопкой «Домой»/);
+  const quota = { unit: "tokens", remaining: 700, limit: 1000, reset_at: "2026-11-19T00:00:00Z" };
+  const profile = ui.page("profile", { connection: { quota }, native: false });
+  assert.match(profile, /<progress[^>]+value="700" max="1000"/);
+  assert.match(profile, /Обновление/);
+  assert.match(profile, /data-value="schedule"/);
+  assert.equal(ui.parent.schedule, "profile");
+  const subscription = ui.page("subscription", { connection: { quota, subscription: {
+    plans: [{ code: "start", price_kopecks: 19900, daily_tokens: 4321, advanced_tokens: 765 }]
+  } } });
+  assert.match(subscription, /4\s321 токенов в день/);
+  assert.match(subscription, /Из них 765 для продвинутых моделей/);
+});
+
+test("reminders view displays saved reminders and excludes scheduled actions from its ordinary list", () => {
+  const { planner } = fixture();
+  let updated = 0;
+  const requests = [];
+  planner.bind({ root: { addEventListener() {} }, native: true, route: () => "schedule",
+    send: operation => requests.push(operation), render() { updated++; } });
+  planner.enter("schedule");
+  assert.deepEqual(requests, ["schedule-list"]);
+  planner.handle({ type: "schedule-list", exact: true, notifications: true, tasks: [
+    { id: "r", kind: "reminder", status: "scheduled", text: "Позвонить бабушке", at: 1795000000000 },
+    { id: "a", kind: "action", status: "scheduled", text: "Старое поручение", at: 1795000000000 }
+  ] });
+  const page = planner.page("schedule");
+  assert.equal(updated, 1);
+  assert.match(page, /Позвонить бабушке/);
+  assert.match(page, /Добавить напоминание/);
+  assert.doesNotMatch(page, /Старое поручение/);
+});
+
+test("notes are retired without dropping old local records while saving other settings", () => {
+  const notes = [{ id: "old", title: "Старая запись", body: "Локальный текст" }];
+  const { model, ui, saved } = fixture({ notes });
+  assert.equal(model.noteCommand, undefined);
+  assert.equal(model.state.notes, undefined);
+  assert.match(ui.page("data", {}), /Экспорт чатов/);
+  assert.doesNotMatch(source("app.js"), /note-editor|note-edit|noteCommand/);
+  assert.equal(model.save(), true);
+  assert.deepEqual(JSON.parse(saved.get("cortex.interface.v2")).notes, notes);
 });
 
 test("public question coalescing never drops personalised chat context", () => {

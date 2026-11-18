@@ -705,7 +705,7 @@ svg { flex-shrink: 0; }
 .guide-steps > div { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 5px 9px;
   border-bottom: 1px solid var(--hairline); padding: 13px 0; }
 .guide-steps p { grid-column: 2; color: rgb(255 255 255 / .77); font-size: .91rem; }
-.notes-header { display: flex; align-items: center; justify-content: space-between; }
+.chats-header { display: flex; align-items: center; justify-content: space-between; }
 
 .transition-particles { position:absolute; inset:0; width:100%; height:100%; z-index:8; pointer-events:none; }
 
@@ -2673,3 +2673,21 @@ button, .tile, .surface-option, .intro-mode { -webkit-tap-highlight-color:transp
 .message.assistant .markdown hr { border: 0; height: 1px; background: #ffffff2a; margin: 14px 0; }
 .message.assistant .markdown .table-scroll { max-width: 100%; overflow-x: auto; border-radius: 12px; }
 .app-shell :is(.tile, .switch-row, .icon-btn, .action, .pill) { transition-duration: .18s; }
+
+.faq-shortcut.action { padding-inline: 10px; white-space: nowrap; }
+.faq-page { display: grid; gap: 15px; }
+.faq-page .faq-search { margin-bottom: 2px; }
+.faq-page .faq-group[hidden], .faq-page details[hidden] { display: none; }
+.faq-page .faq-group { border: 1px solid #ffffff20; border-radius: 18px; padding: 4px 14px; background: #101010; }
+.faq-page .faq-group h2 { margin: 12px 0 7px; color: #aaa; font-size: .75rem; font-weight: 620; }
+.faq-page .faq-group details { background: transparent; border-color: #ffffff18; }
+.faq-page .faq-group summary { gap: 8px; }
+.faq-page .faq-group summary svg { flex: 0 0 15px; }
+.faq-page .faq-group p { max-width: 46ch; line-height: 1.55; }
+.cortex-quota-card { display: grid; gap: 8px; padding: 14px; }
+.cortex-quota-card h2 { margin: 0; font-size: .88rem; }
+.cortex-quota-card p { margin: 0; color: #aaa; font-size: .8rem; }
+.cortex-quota-card .quota-amount strong { margin-right: 3px; font-size: 1.45rem; color: #fff; font-variant-numeric: tabular-nums; }
+.cortex-quota-card progress { width: 100%; height: 5px; accent-color: #fff; }
+.cortex-quota-card progress::-webkit-progress-bar { background: #ffffff22; border-radius: 8px; }
+.cortex-quota-card progress::-webkit-progress-value { background: #f2f2f2; border-radius: 8px; }
