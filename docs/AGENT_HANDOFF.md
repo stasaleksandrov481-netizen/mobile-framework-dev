@@ -4,6 +4,7 @@
 
 - Ветка `fix/cortex-restore-production-sql-history-20261118`, baseline `af48b0edfa71e31cacfe5c1ac1b1b2d3697c4f05`. `cortex` ACTIVE v48; все 11 prod-файлов = `main`; WAF active v10, 14 deny paths + limit status; DDoS challenge от Vercel. БД в Ирландии, GDPR/152-ФЗ не закрыты.
 - Сверено `supabase_migrations.schema_migrations` с `supabase/migrations`: отсутствовали 15 **prod-версий** (оригинальные statements теперь в Git). Два файла с неправильными timestamp и тем же SQL удалены, устаревший альтернативный budget SQL архивирован. В production не применено ни одной миграции и не менялась Edge Function.
+- На главной странице сайта добавлен прозрачный текст об ограничениях тестовой версии, зарубежном размещении и разрешениях; CSS сохранён минимальным. **В Production Vercel этот текст ещё не опубликован.**
 - Проверки: точное количество и версии statements из БД, сопоставление двух дубликатов, скан строк на типовые ключи и пароли; **тест с нуля на пустой БД не проведён**. Перед merge запустить CI и локальное восстановление на отдельном тестовом Supabase, затем сверить schema diff; не деплоить восстановленные исторические SQL на живую БД повторно. Полная ведомость: `docs/SECURITY_AUDIT_VERIFICATION_20261118.md`.
 - Следующие шаги: проверить подписи реальных APK 1.0.11 / 1.0.18-beta.1, миграции с нуля, данные РФ и законность сбора, leaked-password protection и реальные бюджет/запросы OpenRouter.
 
