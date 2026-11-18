@@ -1,5 +1,13 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-18 UTC · Аудит безопасности, восстановление 15 production SQL migrations
+
+- Ветка `fix/cortex-restore-production-sql-history-20261118`, baseline `af48b0edfa71e31cacfe5c1ac1b1b2d3697c4f05`. `cortex` ACTIVE v48; все 11 prod-файлов = `main`; WAF active v10, 14 deny paths + limit status; DDoS challenge от Vercel. БД в Ирландии, GDPR/152-ФЗ не закрыты.
+- Сверено `supabase_migrations.schema_migrations` с `supabase/migrations`: отсутствовали 15 **prod-версий** (оригинальные statements теперь в Git). Два файла с неправильными timestamp и тем же SQL удалены, устаревший альтернативный budget SQL архивирован. В production не применено ни одной миграции и не менялась Edge Function.
+- Проверки: точное количество и версии statements из БД, сопоставление двух дубликатов, скан строк на типовые ключи и пароли; **тест с нуля на пустой БД не проведён**. Перед merge запустить CI и локальное восстановление на отдельном тестовом Supabase, затем сверить schema diff; не деплоить восстановленные исторические SQL на живую БД повторно. Полная ведомость: `docs/SECURITY_AUDIT_VERIFICATION_20261118.md`.
+- Следующие шаги: проверить подписи реальных APK 1.0.11 / 1.0.18-beta.1, миграции с нуля, данные РФ и законность сбора, leaked-password protection и реальные бюджет/запросы OpenRouter.
+
+
 ## 2026-11-18 UTC · DDoS-эпизод, WAF v10 и синхронизация Edge v47
 
 - Vercel `get_active_attack_status`: обнаружен **active DDoS** на `cortexapp.ru` с `2026-11-18T18:45:00Z`; зафиксировано `1,206,282` запросов для минуты `18:45Z`, системное действие `sys_dos_mitigation:challenge`. Это **не** показатель постоянной интенсивности после указанной минуты. Проверка `/`, `/register`, `/pricing`, `/payment?plan=start`, `/api/status` после обнаружения дала 200; `/api/status` вернул `{status:"ok",cache:"ok"}`. Не пытаться имитировать нагрузку на живом домене.

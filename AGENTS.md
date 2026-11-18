@@ -8,8 +8,8 @@
 - Android: `app/`; интерфейс: `app/src/main/assets/web/`; нативные функции: `app/src/main/java/app/cortex/assistant/`.
 - Сайт: `cortex-web/`; служебная панель: `cortex-control/`.
 - Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. На 17.11.2026 production связан с `main`; **это не означает, что Android APK с `main` имеет одобренный пользователем интерфейс**.
-- Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex` **ACTIVE v45** (17.11.2026, PR #54, `main` SHA `60f5b91`). После релиза 11 файлов runtime точно сверены с `main`. SQL baseline для `cortex_ai_device_identity` теперь в `supabase/migrations/20261117080100_cortex_device_identity_baseline.sql`; живую БД повторно не мигрировали, объекты уже существуют. **Не выкатывать Edge Function или БД без повторной проверки live version, всех 11 файлов, миграций и совместимости.**
-- Android `main` по `app/build.gradle.kts`: `1.0.14` / `114`. Версия интерфейса, которую пользователь считает правильной, пока не подтверждена. Не выпускать и не распространять новый APK, пока не установлен её точный commit SHA.
+- Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex` **ACTIVE v48** (18.11.2026, `main` SHA `af48b0e`). Все 11 runtime-файлов побайтно совпадают с `main` при последней проверке. SQL baseline для `cortex_ai_device_identity` теперь в `supabase/migrations/20261117080100_cortex_device_identity_baseline.sql`; живую БД повторно не мигрировали, объекты уже существуют. **Не выкатывать Edge Function или БД без повторной проверки live version, всех 11 файлов, миграций и совместимости.**
+- Android `main` по `app/build.gradle.kts`: `1.0.18-beta.1` / `118`. Версия интерфейса, которую пользователь считает правильной, пока не подтверждена. Не выпускать и не распространять новый APK, пока не установлен её точный commit SHA.
 
 ## Обязательная последовательность
 
