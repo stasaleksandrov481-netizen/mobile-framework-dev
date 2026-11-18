@@ -164,6 +164,15 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   // shared budget for all guest traffic so rotating them cannot reset capacity.
   const guestGlobalMinute = Math.max(30, Math.min(1000,
     Math.floor(Number(env.CORTEX_GUEST_GLOBAL_MINUTE_LIMIT) || 180)));
+  // A botnet can rotate accounts and devices to evade per-user quotas. Keep
+  // an atomic, global spending fuse at the gateway, separate from guest-only
+  // limits. Two shared rows per time window avoid per-request storage growth.
+  // Limits are deliberately generous for the current beta and adjustable for
+  // larger launches without changing the authentication or subscription logic.
+  const globalChatMinute = Math.max(500, Math.min(20_000,
+    Math.floor(Number(env.CORTEX_CHAT_GLOBAL_MINUTE_LIMIT) || 2_000)));
+  const globalChatDay = Math.max(20_000, Math.min(100_000,
+    Math.floor(Number(env.CORTEX_CHAT_GLOBAL_DAILY_LIMIT) || 50_000)));
   const allow = new Set((env.CORTEX_ALLOWED_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
   // Guest AI is off for all new releases, including installations whose old
   // environment still explicitly sets CORTEX_GUEST_ACCESS=true.
@@ -441,6 +450,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
 
   function budget(caller: Awaited<ReturnType<typeof actor>>): Promise<unknown> {
     return reserve(
+      { bucket: "chat:all:minute", seconds: 60, maximum: globalChatMinute },
+      { bucket: "chat:all:day", seconds: 86_400, maximum: globalChatDay },
       { bucket: "chat:" + caller.bucket, seconds: 60, maximum: caller.account ? 16 : 12 },
       ...(caller.device ? [{ bucket: "chat:device:" + caller.device, seconds: 60, maximum: 16 }] : []),
       ...(caller.account ? [] : [
@@ -964,11 +975,11 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.settings || input.profile !== "deep";
-        const firstTokenMs = input.visual || input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
+        const firstTokenMs = input.visual ? 5_500 : input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
         // A mirrored generation survives the first request disconnecting while
         // another caller is still consuming it. All flights remain time-bound.
         const signal = AbortSignal.any([...(flightKey ? [] : [request.signal]), upstream.signal,
-          AbortSignal.timeout(input.visual || input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 20_000 : input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : input.settings ? "settings:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());

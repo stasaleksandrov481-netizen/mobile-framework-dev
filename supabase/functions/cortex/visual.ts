@@ -38,9 +38,13 @@ export const visualTool = {
   },
 };
 
-export const visualGuide = 'Return exactly one JSON object with keys steps, question, answer, done. ' +
-  'Each step has keys action, target, value, expect, confirm. Allowed actions: ' +
-  actions.join(", ") + '. Use empty strings or false for unused values. Return the plan through plan_android_screen if available.';
+export const visualGuide = 'You are a fast Android ACTION planner, not a chatbot. Return exactly one JSON object ' +
+  'with keys steps, question, answer, done. Each step has action, target, value, expect, confirm. ' +
+  'Choose 1-3 concrete executable steps at a time, using currently visible labels or the exact installed app name. ' +
+  'Allowed actions ONLY: ' + actions.join(", ") + '. Never invent action names, app packages or screen elements. ' +
+  'For unused fields use empty strings or false. Use question only when a required target is genuinely missing. ' +
+  'Avoid asking for confirmation when merely opening a safe installed app; preserve confirm for sensitive actions. ' +
+  'Do not claim success: Android will verify each step. Prefer the plan_android_screen tool if available.';
 
 function field(value: unknown, maximum: number): string {
   if (value === undefined || value === null) return "";
@@ -51,8 +55,16 @@ function field(value: unknown, maximum: number): string {
 export function checkedVisualPlan(text: string) {
   try {
     if (text.length > 18_000) throw new Failure("invalid_plan", 502);
-    const data = JSON.parse(text.trim().replace(/^`{3}(?:json)?\s*([\s\S]*?)\s*`{3}$/i, "$1"));
-    if (!data || !Array.isArray(data.steps) || data.steps.length > 10 ||
+    const parsed = JSON.parse(text.trim().replace(/^`{3}(?:json)?\s*([\s\S]*?)\s*`{3}$/i, "$1"));
+    // Some free models return their one valid tool call as a JSON object in
+    // message.content instead of a tool_calls field. Accept only our exact
+    // function name and still validate every Android action below.
+    const wrapped = parsed && !Array.isArray(parsed) && typeof parsed === "object" &&
+      parsed.name === visualToolName && Object.keys(parsed).every(key => ["name", "arguments"].includes(key));
+    const data = wrapped
+      ? (typeof parsed.arguments === "string" ? JSON.parse(parsed.arguments) : parsed.arguments)
+      : parsed;
+    if (!data || typeof data !== "object" || Array.isArray(data) || !Array.isArray(data.steps) || data.steps.length > 10 ||
       Object.keys(data).some(key => !["steps", "question", "answer", "done"].includes(key))) throw new Failure("invalid_plan", 502);
     const question = field(data.question, 1200).trim(), answer = field(data.answer, 6000).trim();
     if (data.done !== undefined && typeof data.done !== "boolean") throw new Failure("invalid_plan", 502);
