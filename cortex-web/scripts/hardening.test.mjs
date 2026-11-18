@@ -12,6 +12,7 @@ import { createLatestRequest } from "../lib/latest-request.ts";
 import { completeVerifiedAccount } from "../lib/verified-account.ts";
 import { validQuota, validReservation, resetLabel } from "../lib/account-data.ts";
 import { EMAIL_OTP_LENGTH, isEmailOtp } from "../lib/email-otp.ts";
+import { RegistrationValidationError, registrationValidationError } from "../lib/registration-validation.ts";
 import { deliverClaimedNotification } from "../lib/launch-delivery.ts";
 import nextConfig from "../next.config.ts";
 
@@ -49,6 +50,28 @@ test("Email OTP input matches the Supabase six-digit email templates", () => {
   assert.match(input, /const CODE_LENGTH = EMAIL_OTP_LENGTH/);
   assert.match(form, /isEmailOtp\(code\)/);
   assert.doesNotMatch(form, /восьмизначн/);
+});
+
+test("Signup always explains invalid email, missing agreement and short password without relying on browser tooltip", () => {
+  const fields = { mode: "signup", email: "test@example.com", password: "strongpassword", accepted: true, acceptedTerms: true };
+  assert.equal(registrationValidationError(fields), null);
+  assert.match(registrationValidationError({ ...fields, email: "" }), /адрес электронной почты/);
+  assert.match(registrationValidationError({ ...fields, email: "+79990000000" }), /Номер телефона/);
+  assert.match(registrationValidationError({ ...fields, password: "short" }), /10 символов/);
+  assert.match(registrationValidationError({ ...fields, accepted: false }), /согласие/);
+  assert.match(registrationValidationError({ ...fields, acceptedTerms: false }), /условия/);
+  const component = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  assert.match(component, /<form onSubmit=\{submit\} noValidate/);
+  assert.match(component, /aria-live="assertive"/);
+});
+
+test("Auth errors are actionable and never expose backend messages", () => {
+  assert.match(safeAuthErrorMessage(new Error("Failed to fetch")), /сервером/);
+  assert.match(safeAuthErrorMessage(new RegistrationValidationError("Введите адрес электронной почты.")), /Введите адрес/);
+  assert.doesNotMatch(safeAuthErrorMessage(new Error("Введите секретное значение внутреннего сервиса")), /секретное/);
+  assert.match(safeAuthErrorMessage(new Error("Error sending confirmation email")), /Почтовый сервер/);
+  assert.match(safeAuthErrorMessage(Object.assign(new Error("rate limit exceeded"), { status: 429 })), /Слишком много запросов/);
+  assert.doesNotMatch(safeAuthErrorMessage(new Error("sensitive database diagnostics")), /sensitive/);
 });
 
 test("launch mail does not immediately requeue an email SMTP already accepted", async () => {
