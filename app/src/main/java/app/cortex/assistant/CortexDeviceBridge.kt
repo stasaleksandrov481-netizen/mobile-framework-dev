@@ -2,6 +2,7 @@ package app.cortex.assistant
 
 import android.Manifest
 import android.app.Activity
+import android.app.role.RoleManager
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -40,7 +41,9 @@ internal class CortexDeviceBridge(
         when (body.optString("operation")) {
             "permissions" -> refreshPermissions()
             "open-settings" -> sendAction("settings") { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
-            "assistant-permission" -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+            "assistant-permission" -> sendAction("assistant-permission") {
+                open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) || open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            }
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
@@ -83,7 +86,8 @@ internal class CortexDeviceBridge(
                 if (item == null) scenarioStatus("Сначала сохраните сценарий.", false, "run")
                 else engine.start(item.name, "fast", force = true, explicitScenario = item,
                     beforeScreen = { activity.moveTaskToBack(true) },
-                    allowPhone = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("phoneActions", true)) {
+                    allowPhone = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("phoneActions", true),
+                    progress = { emit(JSONObject().put("type", "scenario-progress").put("text", it)) }) {
                     scenarioStatus(it.text, it.ok, "run")
                 }
             }
@@ -252,7 +256,14 @@ internal class CortexDeviceBridge(
         } else refreshPermissions()
     }
     fun refreshPermissions() {
+        val roleManager = if (Build.VERSION.SDK_INT >= 29) context.getSystemService(RoleManager::class.java) else null
+        val assistantAvailable = if (Build.VERSION.SDK_INT >= 29) roleManager?.isRoleAvailable(RoleManager.ROLE_ASSISTANT) == true
+            else Build.VERSION.SDK_INT >= 26
+        val assistantSelected = if (Build.VERSION.SDK_INT >= 29) roleManager?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+            else Settings.Secure.getString(context.contentResolver, "assistant")?.substringBefore('/') == context.packageName
         val obj = JSONObject().put("type", "permissions")
+            .put("assistantSupported", assistantAvailable)
+            .put("assistant", assistantSelected)
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("manufacturer", Build.MANUFACTURER)

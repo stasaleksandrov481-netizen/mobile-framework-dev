@@ -37,7 +37,7 @@ const Cortex = (() => {
   const defaults = {
     quality: "balanced", reduceMotion: false, rememberSaved: true,
     language: "auto", haptics: true, voiceContinue: true,
-    phoneActions: true, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
+    phoneActions: true, visualAutomation: false, visualBetaSeen: false, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
     overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };
   const array = input => Array.isArray(input) ? input : [];

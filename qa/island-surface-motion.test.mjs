@@ -18,6 +18,19 @@ test("CORTEX compact island defaults to solid black and logo-only artwork", () =
   assert.match(surface, /postInvalidateDelayed\(if \(isActivePhase\(\)\)/);
 });
 
+test("island customization controls rendering and first-step feedback", () => {
+  const surface = native("LiquidIslandView.kt");
+  assert.match(surface, /if \(style\.face\) drawCompactFace/);
+  assert.match(surface, /style\.status && phase == "executing"/);
+  assert.match(surface, /canvas\.drawText\("Выполняю"/);
+  assert.match(surface, /if \(style\.progress && compactAlpha/);
+  const engine = native("CortexActionEngine.kt");
+  assert.match(engine, /report\("Выполняю…"\)\s+delay\(1_000L\)/);
+  assert.match(engine, /direct != null && reply == null -> \{\s*firstStep\(::report\)\s*executeSystem/);
+  assert.match(engine, /!visualAllowed ->/);
+  assert.match(native("CortexPhoneActions.kt"), /attempts = 6, interval = 105L/);
+});
+
 test("window placement is observed before morphs and pending transitions are cancelable", () => {
   const service = native("CortexIslandService.kt");
   const surface = native("LiquidIslandView.kt");

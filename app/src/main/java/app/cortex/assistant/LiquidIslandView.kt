@@ -340,9 +340,10 @@ internal class LiquidIslandView(
             canvas.drawRoundRect(body, radius, radius, ink)
         }
         val compactAlpha = (1f - ease(.02f, .44f, t)) * (1f - ease(0f, .76f, disappearance))
-        if (compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
+        if (style.progress && compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
         if (compactAlpha > .02f) {
-            val cy = body.centerY()
+            val showStatus = style.status && phase == "executing"
+            val cy = body.centerY() - if (showStatus) 5f * density else 0f
             val active = style.progress && isActivePhase()
             val pulse = if (moving) (sin(time * if (active) 5f else 1.75f) + 1f) * .5f else .5f
             val logoX = body.centerX() - if (activeStop) dp(7).toFloat() else 0f
@@ -350,8 +351,18 @@ internal class LiquidIslandView(
             val logoScale = .95f + .10f * pulse + .14f * voice
             canvas.save()
             canvas.scale(logoScale, logoScale, logoX, cy)
-            signal.mark(canvas, logoX, cy, compactAlpha * (.77f + pulse * .23f))
+            if (style.face) drawCompactFace(canvas, logoX, cy, compactAlpha)
+            else signal.mark(canvas, logoX, cy, compactAlpha * (.77f + pulse * .23f))
             canvas.restore()
+            if (showStatus) {
+                ink.style = Paint.Style.FILL
+                ink.color = style.text
+                ink.alpha = (232 * compactAlpha).roundToInt()
+                ink.textSize = 8.5f * density
+                ink.textAlign = Paint.Align.CENTER
+                canvas.drawText("Выполняю", body.centerX(), body.bottom - 4 * density, ink)
+                ink.textAlign = Paint.Align.LEFT
+            }
             if (activeStop) {
                 // A real stop control remains available during a long action.
                 val stopX = body.right - dp(13)
@@ -365,6 +376,21 @@ internal class LiquidIslandView(
         if (moving && compactAlpha > .02f && disappearance == 0f) {
             postInvalidateDelayed(if (isActivePhase()) 48L else 85L)
         }
+    }
+
+    private fun drawCompactFace(canvas: Canvas, x: Float, y: Float, alpha: Float) {
+        ink.style = Paint.Style.FILL
+        ink.color = style.faceColor
+        ink.alpha = (255 * alpha).roundToInt()
+        canvas.drawCircle(x, y, 7 * density, ink)
+        ink.color = style.background
+        ink.alpha = (255 * alpha).roundToInt()
+        canvas.drawCircle(x - 2.25f * density, y - 1.3f * density, density, ink)
+        canvas.drawCircle(x + 2.25f * density, y - 1.3f * density, density, ink)
+        ink.style = Paint.Style.STROKE
+        ink.strokeWidth = density
+        canvas.drawArc(x - 2.5f * density, y - .3f * density, x + 2.5f * density,
+            y + 3.5f * density, 18f, 144f, false, ink)
     }
 
     /** One quiet light trace follows the compact capsule perimeter.

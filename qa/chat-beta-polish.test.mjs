@@ -31,12 +31,29 @@ test("chat composer keeps only model picker and quota below the input", () => {
   assert.ok(!html.includes('www.google.com/s2/favicons'));
 });
 
-test("only three primary tabs and the empty chat shows a plain mark", () => {
+test("call and scenarios are primary tabs and the empty chat keeps its mark", () => {
   const { ui, model } = fixture();
-  assert.deepEqual([...ui.tabs.map(item => item[0])], ["chats", "home", "profile"]);
+  assert.deepEqual([...ui.tabs.map(item => item[0])], ["chats", "phone-tools", "home", "scenarios", "profile"]);
   const markup = ui.page("chat", { chat: model.createChat(), pending: null, error: null });
   assert.match(markup, /class="chat-empty" aria-label="CORTEX"/);
   assert.doesNotMatch(markup, /На связи|chat-empty-signal/);
+});
+
+test("call settings keep normal commands independent from beta screen control", () => {
+  const { ui, model } = fixture();
+  assert.equal(model.state.preferences.phoneActions, true);
+  assert.equal(model.state.preferences.visualAutomation, false);
+  const call = ui.page("phone-tools", { permissions: {} });
+  for (const route of ["island-editor", "schedule", "scenarios", "permissions", "tool-list"]) {
+    assert.ok(call.includes(`data-value="${route}"`), route);
+  }
+  assert.match(call, /type="checkbox" data-visual-beta/);
+  assert.match(call, /data-value="phoneActions"/);
+  assert.match(call, /data-value="visualLaunch"/);
+  assert.match(ui.page("settings", {}), /data-value="phone-tools"/);
+  assert.doesNotMatch(ui.page("data", {}), /data-value="notes"/);
+  model.state.preferences.visualAutomation = true;
+  assert.match(ui.page("phone-tools", { permissions: {} }), /data-visual-beta[^>]* checked/);
 });
 
 test("model feedback survives restart and affects following prompts", () => {

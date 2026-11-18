@@ -80,6 +80,7 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
                             .putString("addressName", objectValue.optString("addressName").take(60))
                             .putString("island-style", if (voiceStylePending) nativeStyle else objectValue.optJSONObject("appearance")?.toString() ?: "{}")
                             .putBoolean("phoneActions", objectValue.optBoolean("phoneActions", true))
+                            .putBoolean("visualAutomation", objectValue.optBoolean("visualAutomation"))
                             .putBoolean("visualLaunch", objectValue.optBoolean("visualLaunch"))
                             .putBoolean("reduceMotion", objectValue.optBoolean("reduceMotion"))
                             .putBoolean("haptics", objectValue.optBoolean("haptics", true)).apply()

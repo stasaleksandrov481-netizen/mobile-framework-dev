@@ -5,13 +5,15 @@ const CortexUI = (() => {
   const icon = CortexIcons;
   let version = "1.0.12";
   const tabs = [
-    ["chats", "Чаты", "message"], ["home", "Кортекс", ""], ["profile", "Профиль", "user"]
+    ["chats", "Чаты", "message"], ["phone-tools", "Вызов", "mic"], ["home", "Кортекс", ""],
+    ["scenarios", "Сценарии", "layers"], ["profile", "Профиль", "user"]
   ];
   const parent = {
     settings: "profile", subscription: "settings", motion: "settings", models: "settings", language: "settings",
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
     support: "profile", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", instructions: "memory", personality: "memory",
-    chat: "home", schedule: "phone-tools", scenarios: "phone-tools", energy: "settings",
+    chat: "home", "phone-tools": "settings", schedule: "phone-tools", scenarios: "phone-tools",
+    "island-editor": "phone-tools", energy: "settings",
     account: "profile"
   };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
@@ -128,7 +130,7 @@ const CortexUI = (() => {
   function actionProgress(job) {
     return `<div class="action-progress" role="status"><span class="action-pulse">${icon(job.webEnabled || job.webSearching ? "globe" : job.waiting ? "history" : "bolt", 18)}</span>
       <span><strong>${job.webSearching ? "Поиск в интернете" : job.webEnabled ? "Интернет" : job.waiting ? "План на паузе" : "Выполняю…"}</strong>
-        <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action)}</small></span></div>`;
+        <small>${esc(job.waiting ? "Вернитесь в чат, чтобы продолжить" : job.action === "Выполняю…" ? "" : job.action)}</small></span></div>`;
   }
 
   function webSourceBadges(text, active) {
@@ -302,6 +304,7 @@ const CortexUI = (() => {
   }
   function settings() {
     return detail("Настройки", "", group(
+      tile("Вызов CORTEX", "Островок, голос и управление телефоном", "mic", "go", "phone-tools") +
       tile("Как к вам обращаться", M.state.preferences.addressName || "Без имени", "user", "address-name") +
       tile("Энергопотребление", "", "bolt", "go", "energy") +
       tile("Подписка", "Тарифы, лимиты и платежи", "spark", "go", "subscription") +
@@ -339,51 +342,41 @@ const CortexUI = (() => {
       ["wake", "Появляется по вызову", "Островок появляется только при активации. Слово «Кортекс» включается ниже, в блоке «Голосовое обращение»."],
       ["off", "Без островка", "Управление из приложения и системных способов запуска."]
     ];
-    return `<header class="profile-header"><h1>Вызов CORTEX</h1></header>
-      <div class="scroll detail-scroll stack phone-tools-scroll">
-        <div class="capability-note"><span class="capability-signal" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(status)}</span></div>
-        ${fix}
-        ${group(tile("Расписание", "Напоминания и отложенные действия", "bell", "go", "schedule") +
-          tile("Сценарии", "Создавайте цепочки действий", "bolt", "go", "scenarios"))}
-        <p class="quiet-copy">Размер и вид островка можно менять прямо в чате или голосом: «Уменьши островок», «Сдвинь островок вправо», «Убери рамку островка».</p>
-        <div class="island-demo" data-camera="${esc(ctx.islandCamera || "drop")}" aria-hidden="true">
-          <div class="demo-pill"><span class="demo-rim"></span>
-            <div class="demo-body">
-              <div class="demo-state"><span class="demo-face">${sign}</span>
-                <span class="demo-wave"><i></i><i></i><i></i><i></i><i></i></span>
-                <span class="demo-text"><b>Слушаю…</b><b>Выполняю…</b><b>Готово</b></span>
-              </div>
-              <div class="demo-composer">
-                <div class="demo-brand">${sign} CORTEX <span class="demo-wave"><i></i><i></i><i></i><i></i><i></i></span>
-                  <span class="demo-actions"><i class="demo-open"></i><i class="demo-close"></i></span></div>
-                <div class="demo-entry">Напиши Кортексу… <span><i class="demo-send"></i></span></div>
-              </div>
-            </div>
-          </div>
-          <div class="island-demo-hood"><span class="island-demo-cam"></span></div>
-        </div>
-        <section class="surface-choices" aria-label="Режим отображения">
+    return detail("Вызов CORTEX", "Островок и управление телефоном",
+      `<section class="call-overview glass-card">
+        <div class="call-preview" aria-hidden="true"><span>${sign}</span></div>
+        <div class="call-overview-copy"><h2>Островок</h2><p>${esc(status)}</p></div>
+      </section>
+      ${fix ? group(fix) : ""}
+      ${group(tile("Оформление островка", "Размер, положение, цвета и индикаторы", "sliders", "go", "island-editor"))}
+      <h2 class="group-label">Когда показывать</h2>
+      <section class="surface-choices" role="radiogroup" aria-label="Режим островка">
         ${options.map(([value, title, hint]) => `<button type="button" class="surface-option" role="radio"
           aria-checked="${p.overlayMode === value}" ${attributes("surface-mode", value)}>
           <span class="surface-radio" aria-hidden="true"></span><span><strong>${esc(title)}</strong><small>${esc(hint)}</small></span>
-          <span class="surface-preview ${value}" aria-hidden="true"><i></i><i></i></span>
+          <span class="surface-preview ${value}" aria-hidden="true"><i></i></span>
         </button>`).join("")}
-        </section>
-        ${group(switchRow("Не показывать в горизонтальных приложениях", "Например, во время игр и просмотра видео", p.hideLandscape, "hideLandscape") +
-          switchRow("Визуальное управление", "Запускать задачи Android из чата и островка", p.phoneActions, "phoneActions") +
-          switchRow("Показывать запуск на экране", "Открывать приложения через рабочий стол и быстрые настройки", p.visualLaunch, "visualLaunch") +
-          voiceRow +
-          switchRow("Продолжать голосовой ввод", "Открывать микрофон для следующей команды после ответа", p.voiceContinue, "voiceContinue"))}
-        <dl class="voice-commands">
-          <div><dt>«Кортекс, убери островок»</dt><dd>Скрыть до следующего вызова</dd></div>
-          <div><dt>«Кортекс, выключись»</dt><dd>Остановить задачу и фоновое прослушивание</dd></div>
-        </dl>
-        ${group(tile("Разрешения и доступы", "Покажем назначение каждого разрешения", "shield", "go", "permissions") +
-          tile("Управление экраном", "Примеры команд и остановка задач", "bolt", "go", "tool-list") +
-          tile("Настроить заново", "Повторить пошаговую настройку", "sliders", "open-setup"))}
-        <p class="quiet-copy">Островок рисуется поверх приложений и требует разрешения. Фоновый микрофон включается только по вашему переключателю.</p>
-      </div>`;
+      </section>
+      ${group(switchRow("Скрывать в альбомном режиме", "Например, в играх и видео", p.hideLandscape, "hideLandscape"))}
+      <h2 class="group-label">Голос</h2>
+      ${group(voiceRow +
+        switchRow("Продолжать голосовой ввод", "Слушать следующую команду после ответа", p.voiceContinue, "voiceContinue"))}
+      <h2 class="group-label">Управление телефоном</h2>
+      ${group(switchRow("Команды телефона", "Открытие приложений, системные действия и сценарии", p.phoneActions, "phoneActions") +
+        `<label class="switch-row call-beta-row">
+          <span class="tile-copy"><strong>Визуальное управление <span class="call-beta-badge">БЕТА</span></strong>
+          <small>Работа с элементами экрана по запросу</small></span>
+          <input type="checkbox" data-visual-beta aria-label="Визуальное управление (бета)" ${p.visualAutomation ? "checked" : ""}>
+        </label>` +
+        switchRow("Показывать, как открываются приложения", "Для сценариев и визуальных команд", p.visualLaunch, "visualLaunch"))}
+      <h2 class="group-label">Инструменты</h2>
+      ${group(tile("Сценарии", "Сохранённые цепочки действий", "layers", "go", "scenarios") +
+        tile("Расписание", "Напоминания и отложенные действия", "bell", "go", "schedule") +
+        tile("Разрешения Android", "Микрофон, островок и доступ к экрану", "shield", "go", "permissions") +
+        tile("Как управлять экраном", "Примеры команд и подтверждения действий", "focus", "go", "tool-list") +
+        tile("Настроить заново", "Открыть пошаговую настройку", "sliders", "open-setup"))}`);
   }
+
   function toolList() {
     return detail("Управление экраном", "Доступность зависит от Android и открытого приложения",
       '<section class="panel stack"><p>Назовите цель или путь по экрану. Например, «Открой Настройки → Дисплей».</p>' +
@@ -491,7 +484,7 @@ const CortexUI = (() => {
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
       ${item("check", "Управление экраном", "CORTEX читает элементы выбранного приложения по вашему запросу. Передача подписей модели требует отдельного согласия.", a.screenAutomation, "verification-permission")}
-      ${a.assistantSupported ? item("focus", "Цифровой помощник", "Разрешает системный вызов помощника и передачу текста экрана после вашего действия.", a.assistant, "assistant-permission") : ""}
+      ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
       </section>
       ${compatibilityPanel}
       <p class="quiet-copy">Некоторые разрешения Android показывает в отдельных системных меню. Нажатие «Настроить» не означает, что доступ уже выдан.</p>
