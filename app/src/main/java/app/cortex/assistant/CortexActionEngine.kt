@@ -363,10 +363,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     private suspend fun firstStep(report: (String) -> Unit) {
         report("Выполняю…")
-        if (CortexActionState.firstCommand) {
-            CortexActionState.firstCommand = false
-            delay(1_000L)
-        }
+        // Never pause the first user command just for a visual loading effect.
+        CortexActionState.firstCommand = false
     }
 
     private suspend fun executeSystem(
@@ -969,7 +967,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         // a verified multi-step task. Only retry transient failures, never
         // provider quotas, authorization, or malformed plans.
         var result: JSONObject? = null
-        val planTimeout = if (task.schoolSite) 18_000L else 48_000L
+        // A frozen provider must not hold the island for nearly a minute per attempt.
+        val planTimeout = if (task.schoolSite) 12_000L else 14_000L
         for (attempt in 0..1) {
             result = withTimeoutOrNull<JSONObject>(planTimeout) {
                 var id: String? = null
@@ -984,7 +983,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             if (attempt == 0 && (result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS)) {
                 if (task.schoolSite) break
                 report("Восстанавливаю соединение с ИИ…")
-                delay(850L)
+                delay(300L)
                 continue
             }
             break
@@ -1003,14 +1002,16 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 "server", "server_busy" -> "Сервер ИИ временно перегружен."
                 "offline" -> "Связь с ИИ потеряна."
                 "timeout" -> "Следующий шаг не удалось получить вовремя."
-                "invalid_plan" -> "Уточните название пункта или приложения, с которого нужно начать."
+                "invalid_plan" -> "Модель не смогла составить допустимый план действий. Попробуйте указать первый шаг точнее."
                 "update", "maintenance" -> "Сервер CORTEX временно недоступен."
                 else -> "Не удалось получить следующий шаг от ИИ."
             }
             return null to "$text Можно продолжить с текущего экрана."
         }
-        val plan = VisualPlan.parse(outcome.optJSONObject("result")?.optString("text").orEmpty())
-        return plan to "Укажите, что открыть или нажать на этом экране."
+        val raw = outcome.optJSONObject("result")?.optString("text").orEmpty()
+        val plan = VisualPlan.parse(raw)
+        return plan to if (plan != null) "" else
+            "ИИ вернул инструкцию, которую нельзя безопасно выполнить. Попробуйте уточнить следующий шаг на текущем экране."
     }
 
     private fun manual() = Result("Этот экран защищён Android. Выполните нужный шаг вручную, затем продолжите задачу.", false, true)
