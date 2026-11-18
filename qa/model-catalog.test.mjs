@@ -11,12 +11,12 @@ test("Android model picker and server catalog agree on every provider model", ()
   const options = ui.split("const aiModels = [")[1]?.split("\n  ];")[0];
   assert.ok(options, "The user-visible model catalog must be defined");
   const ids = [...options.matchAll(/\{ id: "([^"]+)"/g)].map(match => match[1]);
-  assert.equal(ids.length, 20);
+  assert.equal(ids.length, 22);
   assert.equal(new Set(ids).size, ids.length, "No duplicate models in the picker");
   const backend = provider.split("export const MODEL_PRICE_CEILINGS:")[1]?.split("\n};")[0];
   assert.ok(backend);
   const paid = new Set([...backend.matchAll(/"([a-z0-9._-]+\/[a-z0-9._-]+)": \{/g)].map(match => match[1]));
-  assert.equal(paid.size, 15);
+  assert.equal(paid.size, 17);
   for (const id of ids.filter(id => id !== "auto")) {
     assert.ok(id.endsWith(":free") || paid.has(id), `Not allowed on server: ${id}`);
   }

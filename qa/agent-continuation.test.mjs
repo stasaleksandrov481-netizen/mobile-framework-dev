@@ -14,12 +14,16 @@ test("accessibility feedback interruptions cannot silently cancel multi-step aut
   assert.match(kotlin("CortexActionState"), /fun stop\(\) \{ cancel\?\.invoke\(\) \}/);
 });
 
-test("multi-step planning retries only transient errors and retains confirmed progress", () => {
+test("multi-step planning bounds provider calls and retains confirmed progress", () => {
   const engine = kotlin("CortexActionEngine");
-  assert.match(engine, /for \(attempt in 0\.\.1\) \{/);
-  assert.match(engine, /result == null \|\| result\.optString\("error"\) in RETRYABLE_PLAN_ERRORS/);
-  assert.match(engine, /setOf\("offline", "timeout", "server", "server_busy"\)/);
-  assert.doesNotMatch(engine, /RETRYABLE_PLAN_ERRORS = setOf\([^\n]*(?:daily_limit|provider_budget|sign_in)/);
+  const plan = engine.split("private suspend fun plan(")[1]?.split("private fun manual()")[0];
+  assert.ok(plan, "visual planner must be present");
+  assert.match(plan, /val planTimeout = 22_000L/);
+  assert.match(plan, /withTimeoutOrNull<JSONObject>\(planTimeout\)/);
+  assert.doesNotMatch(plan, /for \(attempt in/);
+  assert.match(plan, /"daily_limit" -> "Суточный лимит/);
+  assert.match(plan, /"provider_budget", "provider_balance"/);
+  assert.match(plan, /JSONArray\(task\.verified\)/);
   assert.match(engine, /preserve = task\.completed > 0 \|\| task\.queue\.isNotEmpty\(\) \|\| task\.plans > 0/);
   assert.match(engine, /task\.verified\.addLast\(/);
   assert.match(engine, /if \(!task\.progress\.accept\(signature\)\)/);

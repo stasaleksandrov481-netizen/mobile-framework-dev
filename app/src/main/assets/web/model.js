@@ -19,6 +19,8 @@ const Cortex = (() => {
     { id: "openai/gpt-6-astra", name: "GPT-6 Astra", brand: "OpenAI", domain: "openai.com", detail: "$10 / $50", paid: true },
     { id: "openai/gpt-6.1-sol", name: "GPT-6.1 Sol", brand: "OpenAI", domain: "openai.com", detail: "$2 / $10", paid: true },
     { id: "openai/gpt-6-luna", name: "GPT-6 Luna", brand: "OpenAI", domain: "openai.com", detail: "$0.10 / $0.50", paid: true },
+    { id: "google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", brand: "Google", domain: "google.com", detail: "$0.25 / $1.50", paid: true },
+    { id: "google/gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", brand: "Google", domain: "google.com", detail: "$0.30 / $2.50", paid: true },
     { id: "google/gemini-4-carbon", name: "Gemini 4 Carbon", brand: "Google", domain: "google.com", detail: "$2 / $10", paid: true },
     { id: "google/gemini-4-hydrogen", name: "Gemini 4 Hydrogen", brand: "Google", domain: "google.com", detail: "$1.50 / $7.50", paid: true },
     { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", brand: "DeepSeek", domain: "deepseek.com", detail: "$0.0507 / $0.2028", paid: true },

@@ -124,6 +124,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const adminKey = configuredKey(env, "SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
   const environmentModelKey = env.OPENROUTER_API_KEY?.trim() || "";
   const paidKey = env.CORTEX_PAID_OPENROUTER_KEY?.trim() || "";
+  // Stable, inexpensive Gemini models for paid conversational replies. Keep
+  // Android action plans on their existing validated model/tool routing.
+  const geminiBasicModel = "google/gemini-3.1-flash-lite";
+  const geminiDeepModel = "google/gemini-3.5-flash-lite";
   const haikuModel = "anthropic/claude-haiku-5.5";
   const speechModel = "google/gemini-3.8-flash-lite-tts";
   const speechFallbackModel = "google/gemini-3.8-flash-tts";
@@ -320,6 +324,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       { bucket: "email:ip:" + await peer(request), seconds: 600, maximum: 30 },
       { bucket: (sending ? "email:send:" : "email:verify:") + await hash(email), seconds: 900, maximum: sending ? 4 : 10 },
       { bucket: "email:all", seconds: 60, maximum: 90 },
+      // Prevent registration / password-recovery floods from rotating email
+      // addresses, install IDs and (potentially spoofable) ingress IPs. The
+      // aggregate allowance is high enough for an announced beta launch.
+      ...(sending ? [
+        { bucket: "email:send:all:hour", seconds: 3600, maximum: 600 },
+        { bucket: "email:send:all:day", seconds: 86_400, maximum: 3000 },
+      ] : []),
     );
     if (sending) {
       try {
@@ -713,8 +724,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           !text.trim() || text.length > 550 || /[\u0000-\u0008\u000b\u000e-\u001f]/u.test(text)) throw new Failure("invalid", 400);
         await reserve(
           { bucket: "speech:" + caller.bucket, seconds: 60, maximum: 4 },
-          { bucket: "speech:all", seconds: 60, maximum: 80 },
-          { bucket: "speech:all", seconds: 86_400, maximum: Math.max(50, Math.min(5000,
+          // A bucket is keyed by (name, window_start) in Postgres. Using the
+          // same name for minute/day collided during midnight's first minute.
+          { bucket: "speech:all:minute", seconds: 60, maximum: 80 },
+          { bucket: "speech:all:day", seconds: 86_400, maximum: Math.max(50, Math.min(5000,
             Math.floor(Number(env.CORTEX_SPEECH_GLOBAL_DAILY_LIMIT) || 500))) },
         );
         const wantsStream = request.headers.get("x-cortex-audio-stream") === "pcm_s16le_24000_mono";
@@ -973,13 +986,29 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
             },
           };
         };
+        // A web-search tool call costs money even on a free model. Enforce
+        // shared and per-account budgets before giving it to the model.
+        let searchEnabled = input.webSearch;
+        if (searchEnabled) {
+          try {
+            await reserve(
+              { bucket: "web-search:all:minute", seconds: 60, maximum: 20 },
+              { bucket: "web-search:all:day", seconds: 86_400, maximum: 400 },
+              { bucket: "web-search:" + id + ":day", seconds: 86_400, maximum: hasPaidPlan ? 40 : 5 },
+              ...(!hasPaidPlan ? [{ bucket: "web-search:free:all:day", seconds: 86_400, maximum: 100 }] : []),
+            );
+          } catch (error) {
+            if (!(error instanceof Failure) || error.status !== 429) throw error;
+            searchEnabled = false;
+          }
+        }
         const upstream = new AbortController();
         const quick = input.visual || input.settings || input.profile !== "deep";
-        const firstTokenMs = input.visual ? 5_500 : input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
+        const firstTokenMs = input.visual ? 5_500 : input.settings ? 7_000 : searchEnabled ? 25_000 : quick ? 4_500 : 13_000;
         // A mirrored generation survives the first request disconnecting while
         // another caller is still consuming it. All flights remain time-bound.
         const signal = AbortSignal.any([...(flightKey ? [] : [request.signal]), upstream.signal,
-          AbortSignal.timeout(input.visual ? 20_000 : input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 20_000 : input.settings ? 46_000 : searchEnabled ? 105_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : input.settings ? "settings:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
@@ -988,13 +1017,19 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           ...ready.filter(model => visualSchemas.includes(model)).slice(0, 1),
         ] : ready;
         if (!ordered.length && choices[0]) ordered.push(choices[0]);
-        // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
+        // Paid capacity is earmarked per subscription. Do not silently route
+        // free accounts to a billable model without a separate hard spend cap.
+        const geminiReady = Boolean(isChat && hasPaidPlan && (paidKey || key) &&
+          !input.device && !input.plan && !input.repair && !input.visual && !input.settings);
+        const geminiDeepReady = Boolean(geminiReady && wantsAdvanced && access?.advanced_tokens);
         // Haiku 5.5 is a paid model. Reserve it against the advanced-token and
         // $0.60/M-token liability ceiling; never silently bill free users.
         // A rotated Vault key may serve both free and paid routes. Only accounts
         // with an advanced-token budget can spend against Haiku's paid ceiling.
         const haikuReady = Boolean(isChat && hasPaidPlan && (paidKey || key) && access?.advanced_tokens);
         const paidCandidates = input.settings || chosenFree ? [] : chosenPaid ? [{ model: chosenPaid, advanced: true }] : [
+          ...(geminiDeepReady ? [{ model: geminiDeepModel, advanced: true }] : []),
+          ...(geminiReady ? [{ model: geminiBasicModel, advanced: false }] : []),
           ...(haikuReady ? [{ model: haikuModel, advanced: true }] : []),
           ...(premium && paidDeep !== haikuModel ? [{ model: paidDeep, advanced: true }] : []),
           ...(basic && paidFast !== haikuModel && (!premium || paidFast !== paidDeep)
@@ -1003,7 +1038,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // fallback while the composer still displays a premium model name.
         const routeModels = chosenPaid ? paidCandidates : chosenFree
           ? [{ model: chosenFree, advanced: false }]
-          : [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
+          : [...paidCandidates, ...ordered.slice(0, input.visual || input.settings ? 2 : 3)
+            .map(model => ({ model, advanced: false }))];
         const maxAttempts = chosen ? 1 : paidCandidates.length + (input.visual || input.settings ? 2 : 3);
         const messages = [...input.messages];
         if (access?.context_chars) {
@@ -1049,7 +1085,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 (modelCooldown.get(scope + model) || 0) <= Date.now()).slice(0, 3).map(model => ({ model, advanced: false })));
               if (next >= routeModels.length) break;
             }
-            const { model, advanced } = routeModels[next++];
+            const { model, advanced } = routeModels[next++] as { model: string; advanced: boolean };
             const paid = next <= paidCandidates.length;
             lastModel = model;
             try {
@@ -1066,7 +1102,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 paid && model === haikuModel ? (quick ? 9_000 : 14_000) : firstTokenMs, quick, input.plan,
                 hold(paid ? model : undefined, advanced), format, paid ? MODEL_PRICE_CEILINGS[model] ||
                   { prompt: advanced ? 0.60 : 0.20, completion: advanced ? 0.60 : 0.20 } : undefined,
-                input.webSearch, input.settings ? settingsGuide : "");
+                searchEnabled, input.settings ? settingsGuide : input.webSearch && !searchEnabled
+                  ? "\n\nВеб-поиск сейчас недоступен из-за лимита. Не утверждай, что проверил свежие факты; если они нужны, честно сообщи об ограничении." : "");
               modelCooldown.delete(scope + model);
               return result;
             } catch (error) {

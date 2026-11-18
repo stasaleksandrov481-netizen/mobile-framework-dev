@@ -12,6 +12,7 @@ import android.os.*
 import android.provider.Settings
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 
 /** Kotlin implementation of the web page's `CortexDevice` message contract.
  * The original Kotlin implementation cannot be recovered bit-for-bit from an APK.
@@ -30,6 +31,14 @@ internal class CortexDeviceBridge(
     private val voiceOutput by voiceOutputDelegate
     private var pendingImage = false
     private var pendingExport: String? = null
+    private data class ChunkedExport(
+        val id: String,
+        val expectedChars: Int,
+        var writtenChars: Int = 0,
+        var nextChunk: Int = 0,
+        var output: OutputStream? = null
+    )
+    private var chunkedExport: ChunkedExport? = null
     private var scenarioExport: String? = null
     private var pointRecorder: CortexPointRecorder? = null
     private val scheduleListener: () -> Unit = ::scheduleList
@@ -189,11 +198,78 @@ internal class CortexDeviceBridge(
                 activity.startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE) }, 501)
             }
             "export" -> {
-                pendingExport = body.optString("text").take(2_000_000)
-                @Suppress("DEPRECATION")
-                activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE); type = "text/plain"; putExtra(Intent.EXTRA_TITLE, "cortex-chats.txt")
-                }, 502)
+                val text = body.optString("text")
+                if (chunkedExport != null || pendingExport != null || text.isEmpty() || text.length > 2_000_000) {
+                    emit(JSONObject().put("type", "export").put("ok", false))
+                } else runCatching {
+                    pendingExport = text
+                    @Suppress("DEPRECATION")
+                    activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, "cortex-chats.json")
+                    }, 502)
+                }.onFailure {
+                    pendingExport = null
+                    emit(JSONObject().put("type", "export").put("ok", false))
+                }
+            }
+            "export-begin" -> {
+                val id = body.optString("id")
+                val chars = body.optInt("length", 0)
+                if (chunkedExport != null || pendingExport != null ||
+                    !id.matches(Regex("^[0-9a-fA-F-]{36}$")) || chars !in 1..67_108_864) {
+                    emit(JSONObject().put("type", "export").put("ok", false).put("id", id))
+                } else {
+                    val session = ChunkedExport(id, chars)
+                    chunkedExport = session
+                    runCatching {
+                        @Suppress("DEPRECATION")
+                        activity.startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_TITLE, "cortex-chats.json")
+                        }, 506)
+                    }.onFailure { finishChunkedExport(false) }
+                }
+            }
+            "export-chunk" -> {
+                val session = chunkedExport
+                if (session == null) {
+                    emit(JSONObject().put("type", "export").put("ok", false)
+                        .put("id", body.optString("id")))
+                    return
+                }
+                if (session.output == null) {
+                    finishChunkedExport(false)
+                    return
+                }
+                val chunk = body.optString("text")
+                val next = body.optInt("index", -1)
+                if (session.id != body.optString("id") || next != session.nextChunk ||
+                    chunk.isEmpty() || chunk.length > 65_536 ||
+                    session.writtenChars + chunk.length > session.expectedChars ||
+                    // UTF-16 halves would corrupt UTF-8 if split across chunks.
+                    Character.isHighSurrogate(chunk.last()) || Character.isLowSurrogate(chunk.first())) {
+                    finishChunkedExport(false)
+                    return
+                }
+                runCatching {
+                    session.output!!.write(chunk.toByteArray(Charsets.UTF_8))
+                    session.writtenChars += chunk.length
+                    session.nextChunk++
+                    emit(JSONObject().put("type", "export-next").put("id", session.id)
+                        .put("index", session.nextChunk))
+                }.onFailure { finishChunkedExport(false) }
+            }
+            "export-end" -> {
+                val session = chunkedExport
+                if (session == null || session.id != body.optString("id") || session.output == null ||
+                    session.writtenChars != session.expectedChars) {
+                    if (session != null) finishChunkedExport(false)
+                    else emit(JSONObject().put("type", "export").put("ok", false)
+                        .put("id", body.optString("id")))
+                } else finishChunkedExport(true)
             }
             "screen-context" -> {
                 val frame = CortexScreenService.connected?.frame()?.takeUnless { it.secure || it.hasPrivateFields || it.pkg == context.packageName }
@@ -210,12 +286,26 @@ internal class CortexDeviceBridge(
     }
 
     override fun close() {
+        chunkedExport?.output?.let { runCatching { it.close() } }
+        chunkedExport = null
+        pendingExport = null
         val recorder = pointRecorder
         pointRecorder = null
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (engineDelegate.isInitialized()) engine.close()
         if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
+    }
+
+    private fun finishChunkedExport(ok: Boolean, cancelled: Boolean = false) {
+        val session = chunkedExport ?: return
+        chunkedExport = null
+        val closed = runCatching {
+            if (ok) session.output?.flush()
+            session.output?.close()
+        }.isSuccess
+        emit(JSONObject().put("type", "export").put("id", session.id)
+            .put("ok", ok && closed).put("cancelled", cancelled))
     }
 
     fun scheduleEntry(id: String) = emit(JSONObject().put("type", "schedule-open").put("id", id))
@@ -273,6 +363,7 @@ internal class CortexDeviceBridge(
             .put("assistant", CortexAssistActivity.selected(context))
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
+            .put("chunkedChatExport", true)
             .put("manufacturer", Build.MANUFACTURER)
             .put("phoneModel", Build.MODEL)
             .put("androidRelease", Build.VERSION.RELEASE)
@@ -331,10 +422,24 @@ internal class CortexDeviceBridge(
             pendingExport = null
             if (resultCode == Activity.RESULT_OK && data?.data != null && text != null) {
                 e.put("ok", runCatching {
-                    context.contentResolver.openOutputStream(data.data!!)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                    requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use {
+                        it.write(text.toByteArray(Charsets.UTF_8))
+                    }
                 }.isSuccess)
             } else e.put("cancelled", true)
             emit(e)
+        }
+        if (requestCode == 506) {
+            val session = chunkedExport ?: return
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                finishChunkedExport(false, cancelled = true)
+                return
+            }
+            runCatching {
+                session.output = requireNotNull(context.contentResolver.openOutputStream(data.data!!))
+                emit(JSONObject().put("type", "export-ready").put("id", session.id))
+            }.onFailure { finishChunkedExport(false) }
+            return
         }
         if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) {
             val item = runCatching {

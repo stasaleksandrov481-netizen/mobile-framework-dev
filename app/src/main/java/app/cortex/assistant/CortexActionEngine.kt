@@ -973,9 +973,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             .put(JSONObject().put("role", "user").put("content", user.toString()))
         val payload = JSONObject().put("messages", messages).put("style", "brief")
             .put("profile", if (task.profile == "deep") "deep" else "fast").put("visual_plan", true)
-        // Planning is read-only. A short network interruption must not discard
-        // a verified multi-step task. Only retry transient failures, never
-        // provider quotas, authorization, or malformed plans.
+        // Planning is read-only. The caller keeps verified progress if this
+        // request fails. Do not retry locally: the server already attempts
+        // its bounded tool-compatible fallback and charges usage per call.
         var result: JSONObject? = null
         // A frozen provider must not hold the island for nearly a minute per attempt.
         // The server already tries one tool-compatible model and a structured fallback.
@@ -1070,7 +1070,6 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun clearPaused() { saved = null }
         fun clearPaused(source: String) { if (saved?.source == source) saved = null }
         fun canResume(source: String) = saved?.source == source
-        private val RETRYABLE_PLAN_ERRORS = setOf("offline", "timeout", "server", "server_busy")
         private const val MAX_PLANS = 24
         private const val MAX_SCREEN_STEPS = 120
         private const val TASK_TIMEOUT_MS = 1_800_000L
