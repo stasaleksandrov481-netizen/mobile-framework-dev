@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { betaLaunchEmail, CORTEX_FROM, createCortexMailTransport } from "@/lib/launch-mail";
+import { deliverClaimedNotification } from "@/lib/launch-delivery";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -62,31 +63,57 @@ export async function GET(request: NextRequest) {
   const message = betaLaunchEmail(downloadUrl.toString());
   let sent = 0;
   let failed = 0;
+  let skipped = 0;
+  let unconfirmed = 0;
+  let processed = 0;
 
   try {
     for (const recipient of recipients) {
-      try {
-        await mailer.sendMail({ ...message, from: CORTEX_FROM, to: recipient.email,
-          messageId: `<cortex-beta-20261120-${recipient.user_id}@cortexapp.ru>` });
-        const { data: updated, error: updateError } = await admin.from("cortex_preregistrations")
-          .update({ notified_at: new Date().toISOString(), notification_claimed_at: null, notification_claim_token: null })
-          .eq("user_id", recipient.user_id).eq("notification_claim_token", recipient.claim_token)
-          .eq("notify_opt_in", true).select("user_id").maybeSingle();
-        if (updateError || !updated) throw new Error("send_confirm_failed");
-        sent++;
-      } catch (mailError) {
+      const state = await deliverClaimedNotification({
+        eligible: async () => {
+          // A user can withdraw consent after the queue claim. Recheck before SMTP.
+          const { data: current, error: readError } = await admin.from("cortex_preregistrations")
+            .select("notify_opt_in,notified_at")
+            .eq("user_id", recipient.user_id).eq("notification_claim_token", recipient.claim_token)
+            .maybeSingle();
+          if (readError) throw new Error("recipient_check_failed");
+          return Boolean(current?.notify_opt_in && !current.notified_at);
+        },
+        send: () => mailer.sendMail({ ...message, from: CORTEX_FROM, to: recipient.email,
+          messageId: `<cortex-beta-20261120-${recipient.user_id}@cortexapp.ru>` }),
+        confirm: async () => {
+          const { data: updated, error: updateError } = await admin.from("cortex_preregistrations")
+            .update({ notified_at: new Date().toISOString(), notification_claimed_at: null, notification_claim_token: null })
+            .eq("user_id", recipient.user_id).eq("notification_claim_token", recipient.claim_token)
+            .eq("notify_opt_in", true).select("user_id").maybeSingle();
+          return !updateError && Boolean(updated);
+        },
+        release: async () => {
+          const { error: releaseError } = await admin.from("cortex_preregistrations")
+            .update({ notification_claimed_at: null, notification_claim_token: null })
+            .eq("user_id", recipient.user_id).eq("notification_claim_token", recipient.claim_token);
+          if (releaseError) console.error("CORTEX notification claim release failed", releaseError.code);
+        },
+      });
+      processed++;
+      if (state === "sent") sent++;
+      if (state === "skipped") skipped++;
+      if (state === "failed") {
         failed++;
-        const { error: releaseError } = await admin.from("cortex_preregistrations")
-          .update({ notification_claimed_at: null, notification_claim_token: null })
-          .eq("user_id", recipient.user_id).eq("notification_claim_token", recipient.claim_token);
-        if (releaseError) console.error("CORTEX notification claim release failed", releaseError.code);
-        console.error("CORTEX launch notification failed", mailError instanceof Error ? mailError.name : "unknown");
+        console.error("CORTEX launch notification failed before delivery");
         if (failed >= 3) break;
+      }
+      if (state === "unconfirmed") {
+        unconfirmed++;
+        // Do not release: SMTP accepted the message. Stop the batch for review.
+        console.error("CORTEX notification delivery receipt unavailable; claim retained");
+        break;
       }
     }
   } finally {
     mailer.close();
   }
 
-  return NextResponse.json({ state: failed ? "partial" : "ok", sent, failed, remainingInBatch: Math.max(0, recipients.length - sent - failed) });
+  return NextResponse.json({ state: failed || unconfirmed ? "partial" : "ok", sent, failed, skipped,
+    unconfirmed, remainingInBatch: Math.max(0, recipients.length - processed) });
 }

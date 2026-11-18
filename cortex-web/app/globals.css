@@ -1,5 +1,9 @@
 @import "@fontsource-variable/onest/wght.css";
 
+/* Shared loading screen for member-only navigation from the public landing. */
+.account-gate { min-height:100vh; min-height:100svh; display:grid; place-items:center; background:#070707; }
+.account-gate img { display:block; width:53px; height:53px; opacity:.9; }
+
 :root {
   color-scheme: dark;
   --bg: #050505;
@@ -33,6 +37,7 @@ svg { display: block; flex-shrink: 0; }
 
 /* Compact public landing. The inaccurate 3D phone mockup is intentionally gone. */
 .shell {
+  min-height: 100vh;
   min-height: 100svh;
   display: flex;
   flex-direction: column;
@@ -187,6 +192,7 @@ svg { display: block; flex-shrink: 0; }
 
 /* Dedicated registration page: one focused form and one reactive art panel. */
 .auth-page {
+  min-height: 100vh;
   min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(0, 51%) minmax(0, 49%);
@@ -221,6 +227,8 @@ svg { display: block; flex-shrink: 0; }
   padding: 42px clamp(32px, 4vw, 78px) 55px;
 }
 .auth-form-area { width: 100%; max-width: 430px; margin-inline: auto; }
+.auth-form-logo { width:56px; height:56px; display:grid; place-items:center; margin-bottom:26px; border:1px solid #343434; border-radius:17px; }
+.auth-form-logo img { width:42px; height:42px; object-fit:contain; }
 .auth-kicker {
   display: flex;
   align-items: center;
@@ -343,6 +351,7 @@ svg { display: block; flex-shrink: 0; }
 .auth-art {
   grid-area: auth-art;
   position: relative;
+  min-height: 100vh;
   min-height: 100svh;
   overflow: hidden;
   isolation: isolate;
@@ -400,6 +409,8 @@ svg { display: block; flex-shrink: 0; }
 .pricing-row dd { text-align: right; }
 .pricing-row strong { color: #f1f1f1; font-size: 15px; font-weight: 660; }
 .pricing-row span { color: #999; font-size: 12px; line-height: 1.55; }
+.pricing-row .pricing-pay-link { display: inline-flex; align-self: flex-end; margin-top: 4px; padding: 9px 13px; border: 1px solid #494949; border-radius: 999px; color: #eee; font-size: 11px; font-weight: 650; }
+.pricing-row .pricing-pay-link:hover { background: #242424; border-color: #777; }
 .questions-page h2 { margin-top: 34px; }
 .questions-page .legal-lead { margin-bottom: 30px !important; }
 
@@ -460,3 +471,12 @@ svg { display: block; flex-shrink: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+/* Registration is entirely black apart from the interactive controls. */
+.auth-page, .auth-main, .auth-art, .auth-success-details,
+.registration-form > input, .otp-code .otp-digit, .custom-check { background:#000; }
+.registration-form > input:focus, .otp-code .otp-digit:focus-visible { background:#000; }
+.form-error { background:#000; }
+.auth-form-logo { border-color:#3b3b3b; }
+.auth-closed-note { margin:-13px 0 23px; padding:12px 15px; border:1px solid #343434; border-radius:12px; color:#aeaeae; font-size:12px; line-height:1.6; }
+@media (max-width:600px) { .auth-form-logo { width:48px; height:48px; margin-bottom:20px; } .auth-form-logo img { width:36px; height:36px; } }

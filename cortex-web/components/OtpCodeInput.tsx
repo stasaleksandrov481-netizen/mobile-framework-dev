@@ -2,9 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
+import { EMAIL_OTP_LENGTH } from "@/lib/email-otp";
 
 type Props = { value: string; onChange: (value: string) => void; disabled?: boolean };
-const CODE_LENGTH = 8;
+const CODE_LENGTH = EMAIL_OTP_LENGTH;
 
 export default function OtpCodeInput({ value, onChange, disabled = false }: Props) {
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
@@ -39,7 +40,7 @@ export default function OtpCodeInput({ value, onChange, disabled = false }: Prop
   }
 
   return (
-    <div className="otp-code" role="group" aria-label="Восьмизначный код подтверждения" onPaste={paste}>
+    <div className="otp-code" role="group" aria-label="Шестизначный код подтверждения" onPaste={paste}>
       {Array.from({ length: CODE_LENGTH }, (_, index) => (
         <input key={index} id={index === 0 ? "registration-code" : undefined}
           ref={(element) => { inputs.current[index] = element; }} className="otp-digit"

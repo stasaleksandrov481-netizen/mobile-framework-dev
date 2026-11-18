@@ -11,6 +11,7 @@ export function safeAuthErrorMessage(error: unknown): string {
     return "Слишком много запросов. Подождите несколько минут и попробуйте снова.";
   }
   const message = error instanceof Error ? error.message : "";
+  if (message === "CORTEX_REQUEST_TIMEOUT") return "Сервер отвечает слишком долго. Проверьте соединение и попробуйте ещё раз.";
   if (/invalid login credentials/i.test(message)) return "Неверная почта или пароль.";
   if (/email not confirmed/i.test(message)) return "Сначала подтвердите адрес электронной почты.";
   if (/token has expired|invalid token|otp_expired/i.test(message)) return "Код неверный или уже истёк. Проверьте последнее письмо либо запросите новый код ниже.";

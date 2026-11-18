@@ -6,7 +6,9 @@
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --test scripts/*.test.mjs",
+    "release:verify": "node scripts/verify-approved-source.mjs"
   },
   "dependencies": {
     "@fontsource-variable/onest": "5.3.1",

@@ -68,12 +68,13 @@ export default async function PricingPage() {
                 <dd>
                   <strong>{plan.price_kopecks ? `${rubles.format(plan.price_kopecks / 100)} / месяц` : "Бесплатно"}</strong>
                   <span>{numbers.format(plan.daily_tokens)} токенов в день{plan.advanced_tokens > 0 && `, из них ${numbers.format(plan.advanced_tokens)} для продвинутых моделей`}</span>
+                  {plan.price_kopecks > 0 && <Link className="pricing-pay-link" href={`/payment?plan=${plan.code}`}>Выбрать оплату</Link>}
                 </dd>
               </div>
             ))}
           </dl>
         ) : <p role="status">Цены и лимиты временно не загрузились. Обновите страницу через несколько минут.</p>}
-        <p>Лимиты обновляются ежедневно в 03:00 по московскому времени. Продление подписки оформляется отдельным платежом, без автоматического списания. Оплата станет доступна после завершения подключения платёжного провайдера.</p>
+        <p>Лимиты обновляются ежедневно в 03:00 по московскому времени. Продление подписки оформляется отдельным платежом, без автоматического списания. Способы оплаты указаны на отдельной странице; списание откроется после завершения подключения провайдеров.</p>
         <nav className="legal-links" aria-label="Документы CORTEX">
           <Link href="/questions">Частые вопросы</Link>
           <Link href="/terms">Пользовательское соглашение</Link>

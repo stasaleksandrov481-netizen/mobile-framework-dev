@@ -1,11 +1,105 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import { registrationIsOpen } from "../lib/registration-gate.ts";
+import { insertPreregistrationIfMissing } from "../lib/preregistration-write.ts";
+import { settleWithTimeout } from "../lib/settle-with-timeout.ts";
+import { createLatestRequest } from "../lib/latest-request.ts";
+import { completeVerifiedAccount } from "../lib/verified-account.ts";
+import { validQuota, validReservation, resetLabel } from "../lib/account-data.ts";
+import { EMAIL_OTP_LENGTH, isEmailOtp } from "../lib/email-otp.ts";
+import { deliverClaimedNotification } from "../lib/launch-delivery.ts";
 import nextConfig from "../next.config.ts";
+
+test("Render failures keep a CSS-independent recovery path without exposing exception details", () => {
+  const view = readFileSync(new URL("../components/SiteErrorView.tsx", import.meta.url), "utf8");
+  const route = readFileSync(new URL("../app/error.tsx", import.meta.url), "utf8");
+  const global = readFileSync(new URL("../app/global-error.tsx", import.meta.url), "utf8");
+  assert.match(view, /onClick=\{retry\}/);
+  assert.match(view, /href="\/"/);
+  assert.match(view, /role="alert"/);
+  assert.match(view, /fontFamily: "Arial, sans-serif"/);
+  assert.doesNotMatch(view, /error\.message|error\.stack|digest/);
+  assert.match(route, /<SiteErrorView retry=\{reset\} \/>/);
+  assert.match(global, /<html lang="ru">/);
+  assert.match(global, /<body style=\{\{ margin: 0 \}\}>/);
+});
+
+test("Email confirmation never overwrites an existing launch-notification preference", async () => {
+  let inserts = 0;
+  await insertPreregistrationIfMissing(
+    async () => ({ data: { user_id: "existing-account" }, error: null }),
+    async () => { inserts++; return { error: null }; },
+  );
+  assert.equal(inserts, 0);
+});
+
+test("Email OTP input matches the Supabase six-digit email templates", () => {
+  assert.equal(EMAIL_OTP_LENGTH, 6);
+  assert.equal(isEmailOtp("001234"), true);
+  assert.equal(isEmailOtp("12345"), false);
+  assert.equal(isEmailOtp("12345678"), false);
+  assert.equal(isEmailOtp("1234ab"), false);
+  const input = readFileSync(new URL("../components/OtpCodeInput.tsx", import.meta.url), "utf8");
+  const form = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  assert.match(input, /const CODE_LENGTH = EMAIL_OTP_LENGTH/);
+  assert.match(form, /isEmailOtp\(code\)/);
+  assert.doesNotMatch(form, /восьмизначн/);
+});
+
+test("launch mail does not immediately requeue an email SMTP already accepted", async () => {
+  let sent = 0;
+  let released = 0;
+  let confirmed = 0;
+  const outcome = await deliverClaimedNotification({
+    eligible: async () => true,
+    send: async () => { sent++; },
+    confirm: async () => { confirmed++; throw new Error("storage unavailable"); },
+    release: async () => { released++; },
+  });
+  assert.equal(outcome, "unconfirmed");
+  assert.equal(sent, 1);
+  assert.equal(confirmed, 3);
+  assert.equal(released, 0, "a post-SMTP DB outage must not immediately requeue the message");
+});
+
+test("launch notifications recheck consent, release failed sends, and retry a transient receipt", async () => {
+  let sent = 0, released = 0, confirmations = 0;
+  const actions = {
+    eligible: async () => false,
+    send: async () => { sent++; },
+    confirm: async () => true,
+    release: async () => { released++; },
+  };
+  assert.equal(await deliverClaimedNotification(actions), "skipped");
+  assert.equal(sent, 0);
+  assert.equal(released, 1);
+  assert.equal(await deliverClaimedNotification({ ...actions, eligible: async () => true,
+    send: async () => { throw new Error("SMTP refused"); } }), "failed");
+  assert.equal(released, 2);
+  assert.equal(await deliverClaimedNotification({ ...actions, eligible: async () => true,
+    confirm: async () => ++confirmations >= 2 }), "sent");
+  assert.equal(sent, 1);
+  assert.equal(confirmations, 2);
+  assert.equal(released, 2);
+});
+
+test("Registration write recovers a concurrent confirmation but reports persistent failures", async () => {
+  let reads = 0;
+  await insertPreregistrationIfMissing(
+    async () => ({ data: ++reads === 1 ? null : { user_id: "confirmed-by-other-tab" }, error: null }),
+    async () => ({ error: new Error("duplicate key") }),
+  );
+  assert.equal(reads, 2);
+  await assert.rejects(insertPreregistrationIfMissing(
+    async () => ({ data: null, error: null }),
+    async () => ({ error: new Error("network disconnected") }),
+  ), /Не удалось сохранить регистрацию/);
+});
 
 test("health probes coalesce parallel requests and cache success", async () => {
   let requests = 0;
@@ -39,6 +133,73 @@ test("health probes suppress upstream errors", async () => {
   assert.equal(await healthy(), false);
 });
 
+test("Slow account API calls time out instead of leaving an infinite spinner", async () => {
+  assert.equal(await settleWithTimeout(Promise.resolve("ok"), 100), "ok");
+  await assert.rejects(settleWithTimeout(new Promise(() => {}), 25), /CORTEX_REQUEST_TIMEOUT/);
+});
+
+test("Old account refreshes cannot overwrite a newer response or survive navigation", () => {
+  const requests = createLatestRequest();
+  const first = requests.begin();
+  assert.equal(requests.isCurrent(first), true);
+  const second = requests.begin();
+  assert.equal(requests.isCurrent(first), false);
+  assert.equal(requests.isCurrent(second), true);
+  requests.invalidate();
+  assert.equal(requests.isCurrent(second), false);
+});
+
+test("Email callback accepts verified Android accounts without inventing a website bonus", () => {
+  const callback = readFileSync(new URL("../app/auth/callback/page.tsx", import.meta.url), "utf8");
+  assert.match(callback, /completeVerifiedAccount\(user,/);
+  assert.match(callback, /if \(!confirmation\.current\)/);
+  assert.match(callback, /confirmation\.current\.then\(/);
+});
+
+test("registration and account security keep identity verification and confirmed global sign-out", () => {
+  const registration = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  const dashboard = readFileSync(new URL("../components/AccountDashboard.tsx", import.meta.url), "utf8");
+  const registerPage = readFileSync(new URL("../app/register/page.tsx", import.meta.url), "utf8");
+  assert.match(registration, /auth-form-logo/);
+  assert.match(registerPage, /signupEnabled=\{registrationIsOpen\(\)\}/);
+  assert.match(registerPage, /export const dynamic = "force-dynamic"/);
+  assert.match(registration, /if \(!signupEnabled\) throw new Error\("Регистрация временно закрыта\."\)/);
+  assert.match(registration, /useState<Mode>\(signupEnabled \? "signup" : "signin"\)/);
+  assert.match(dashboard, /auth\.getUser\(\)/);
+  assert.match(dashboard, /!confirmAllSessions/);
+  assert.match(dashboard, /auth\.signOut\(\{ scope: "global" \}\)/);
+  assert.match(dashboard, /role="group" aria-label="Подтверждение завершения сеансов"/);
+});
+
+test("Confirmed email is not a successful registration until DB persistence succeeds", async () => {
+  const verified = { id: "account-id", email: "TEST@example.com", email_confirmed_at: "2026-11-17T00:00:00Z",
+    user_metadata: { cortex_preregistration: true } };
+  await assert.rejects(completeVerifiedAccount(verified, async () => { throw new Error("write failed"); }), /write failed/);
+  assert.equal(await completeVerifiedAccount(verified, async () => {}), "test@example.com");
+  let writes = 0;
+  const android = { ...verified, user_metadata: {} };
+  await completeVerifiedAccount(android, async () => { writes++; });
+  assert.equal(writes, 0, "existing Android users must not gain a new web bonus");
+  await assert.rejects(completeVerifiedAccount({ ...verified, email_confirmed_at: null }, async () => {}), /Подтвердите/);
+});
+
+test("Account cards reject malformed quota and reservation responses", () => {
+  const quota = { daily_limit: 5_000, used: 350, remaining: 4_650, unlimited: false,
+    plan: "free", reset_at: "2026-11-18T00:00:00Z", bonus_remaining: 0 };
+  const reservation = { bonus_tokens: 5_000, bonus_spent: 100, bonus_granted_at: null,
+    registered_at: "2026-11-17T00:00:00Z", notify_opt_in: false };
+  assert.equal(validQuota(quota), true);
+  assert.equal(validReservation(reservation), true);
+  assert.equal(validQuota({ ...quota, remaining: -5 }), false);
+  assert.equal(validQuota({ ...quota, remaining: null }), false, "finite plans must never render a missing balance as zero");
+  assert.equal(validQuota({ ...quota, remaining: null, unlimited: true }), true);
+  assert.equal(validQuota({ ...quota, reset_at: "not-a-date" }), false);
+  assert.equal(validReservation({ ...reservation, bonus_spent: -1 }), false);
+  assert.equal(validReservation({ ...reservation, registered_at: "not-a-date" }), false);
+  assert.match(resetLabel(quota.reset_at), /МСК/);
+  assert.equal(resetLabel("invalid"), "Время уточняется");
+});
+
 test("APK URL only accepts absolute credential-free HTTPS URLs", () => {
   assert.equal(safeHttpsDownloadUrl("https://github.com/owner/repo/releases/latest"), "https://github.com/owner/repo/releases/latest");
   for (const candidate of [undefined, "", "javascript:alert(1)", "http://example.com/app.apk", "//example.com/x", "https://a:b@example.com/app.apk", "/download"]) {
@@ -60,6 +221,7 @@ test("Auth errors cannot leak raw database, SMTP or account-enumeration details"
   }
   assert.equal(isRateLimited(Object.assign(new Error("temporary"), { status: 429 })), true);
   assert.match(safeAuthErrorMessage(Object.assign(new Error("Too many requests"), { status: 429 })), /Слишком много/);
+  assert.match(safeAuthErrorMessage(new Error("CORTEX_REQUEST_TIMEOUT")), /слишком долго/);
   assert.equal(safeAuthErrorMessage(new Error("Invalid login credentials")), "Неверная почта или пароль.");
   assert.match(safeAuthErrorMessage(new Error("Token has expired")), /запросите новый код/);
   assert.match(safeAuthErrorMessage(new Error('gomail: could not send email: 550 non-local recipient verification failed')), /Почтовый сервер/);
@@ -129,4 +291,14 @@ test("Security headers restrict third-party origins and prohibit API caching", a
   assert.equal(common["Cross-Origin-Resource-Policy"], "same-origin");
   assert.equal(api["Cache-Control"], "no-store");
   assert.equal(api["X-Robots-Tag"], "noindex, nofollow");
+});
+
+test("Account quota RPC never accepts arbitrary user IDs from a browser", () => {
+  const sql = readFileSync(new URL("../../supabase/migrations/20261117180500_cortex_web_account_usage.sql", import.meta.url), "utf8");
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /account_id uuid := \(select auth\.uid\(\)\)/);
+  assert.match(sql, /public\.cortex_ai_usage\(account_id::text\)/);
+  assert.match(sql, /revoke all on function public\.cortex_web_account_usage\(\) from public, anon, authenticated/i);
+  assert.match(sql, /grant execute on function public\.cortex_web_account_usage\(\) to authenticated/i);
+  assert.ok(!/cortex_web_account_usage\(p_subject/i.test(sql));
 });
