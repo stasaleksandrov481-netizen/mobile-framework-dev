@@ -14,7 +14,7 @@ import { completeVerifiedAccount } from "@/lib/verified-account";
 import { isEmailOtp } from "@/lib/email-otp";
 import { RegistrationValidationError, registrationValidationError } from "@/lib/registration-validation";
 
-type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "done";
+type Mode = "signup" | "verify" | "signin" | "signin_code" | "signin_code_verify" | "recovery" | "recovery_sent" | "done";
 type SuccessKind = "signup" | "signin" | "existing";
 const emailOtpReady = process.env.NEXT_PUBLIC_CORTEX_EMAIL_OTP_READY === "true";
 
@@ -31,6 +31,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
   const [error, setError] = useState("");
   const [successKind, setSuccessKind] = useState<SuccessKind>("existing");
   const [resendWait, setResendWait] = useState(0);
+  const [confirmationRequested, setConfirmationRequested] = useState(false);
   const { checking: accountChecking, email: activeEmail } = useCortexAccount();
   const authSubmission = useRef(false);
   const resendSubmission = useRef(false);
@@ -49,6 +50,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
     if (requestedMode === "signin") setMode("signin");
     if (requestedMode === "code" && emailOtpReady) setMode("signin_code");
+    if (requestedMode === "recovery") setMode("recovery");
   }, []);
 
   useEffect(() => {
@@ -139,10 +141,32 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     finally { resendSubmission.current = false; setBusy(false); }
   }
 
+  async function resendSignupConfirmation() {
+    if (busy || resendWait > 0 || resendSubmission.current) return;
+    const address = email.trim().toLowerCase();
+    const validationError = registrationValidationError({ mode: "recovery", email: address, password: "", accepted: false, acceptedTerms: false });
+    if (validationError) { setError(validationError); return; }
+    resendSubmission.current = true;
+    setBusy(true);
+    setError("");
+    setConfirmationRequested(false);
+    try {
+      const { error: sendError } = await settleWithTimeout(cortexAuth.auth.resend({
+        type: "signup", email: address, options: { emailRedirectTo: window.location.origin + "/auth/callback" },
+      }), 15_000);
+      if (sendError) throw sendError;
+      setResendWait(60);
+      setConfirmationRequested(true);
+    } catch (failure) {
+      if (isRateLimited(failure)) setResendWait(300);
+      setError(safeAuthErrorMessage(failure));
+    } finally { resendSubmission.current = false; setBusy(false); }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy || authSubmission.current || resendSubmission.current) return;
-    if (mode === "signup" && resendWait > 0) {
+    if ((mode === "signup" || mode === "recovery") && resendWait > 0) {
       setError(`Повторная попытка будет доступна через ${resendWait} с. Не отправляйте запросы подряд.`);
       return;
     }
@@ -150,7 +174,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     setBusy(true);
     setError("");
     try {
-      if (mode !== "done") {
+      if (mode !== "done" && mode !== "recovery_sent") {
         const validationError = registrationValidationError({ mode, email, password, accepted, acceptedTerms });
         if (validationError) throw new RegistrationValidationError(validationError);
       }
@@ -223,6 +247,14 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         setPassword("");
         setSuccessKind("signin");
         setMode("done");
+      } else if (mode === "recovery") {
+        const { error: recoveryError } = await settleWithTimeout(cortexAuth.auth.resetPasswordForEmail(
+          email.trim().toLowerCase(),
+          { redirectTo: window.location.origin + "/auth/callback?flow=recovery" },
+        ), 15_000);
+        if (recoveryError) throw recoveryError;
+        setResendWait(60);
+        setMode("recovery_sent");
       }
     } catch (failure) {
       if (isRateLimited(failure)) {
@@ -241,6 +273,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     setPassword("");
     setCode("");
     setResendWait(0);
+    setConfirmationRequested(false);
     setMode(next);
   }
 
@@ -264,6 +297,12 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       <div className="auth-kicker"><span className="auth-kicker-dot" /> CORTEX · РАННИЙ ДОСТУП</div>
       {accountChecking ? (
         <div className="auth-checking" role="status">Проверяем аккаунт…</div>
+      ) : mode === "recovery_sent" ? (
+        <div className="auth-success" role="status">
+          <h1 id="auth-title">Проверьте почту.</h1>
+          <p className="auth-success-description">Если для этого адреса существует аккаунт, мы отправили ссылку для восстановления. Проверьте также папку «Спам». Письмо может прийти не сразу.</p>
+          <button className="button button--primary auth-submit" type="button" onClick={() => switchMode("signin")}>Вернуться ко входу</button>
+        </div>
       ) : mode === "done" ? (
         <div className="auth-success" role="status">
           <div className="auth-success-mark"><UiIcon name="check" size={27} /></div>
@@ -283,9 +322,11 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         </div>
       ) : (
         <>
-          <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" || mode === "signin_code_verify" ? "Проверь почту." : "С возвращением."}</h1>
+          <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" || mode === "signin_code_verify" ? "Проверь почту." : mode === "recovery" ? "Восстановление доступа." : "С возвращением."}</h1>
           <p className="auth-description">{mode === "signup"
             ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
+            : mode === "recovery"
+              ? "Укажите почту, с которой регистрировались. Если аккаунт существует, отправим ссылку для смены пароля."
             : mode === "verify"
               ? emailOtpReady
                 ? "Мы отправили шестизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
@@ -312,7 +353,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
                   {resendWait > 0 ? `Отправить ещё раз через ${resendWait} с` : "Отправить код повторно"}
                 </button>
               </>
-            ) : mode !== "signin_code" ? (
+            ) : mode !== "signin_code" && mode !== "recovery" ? (
               <>
                 <label htmlFor="registration-password">Пароль</label>
                 <input id="registration-password" autoComplete={mode === "signup" ? "new-password" : "current-password"}
@@ -345,14 +386,15 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             {mode === "signup" && <p className="auth-legal-note">О раннем доступе и бонусах: <Link href="/terms" target="_blank" rel="noopener noreferrer">условия программы</Link>.</p>}
 
             {error && <p role="alert" aria-live="assertive" className="form-error">{error}</p>}
-            <button className="button button--primary auth-submit" type="submit" disabled={busy || (mode === "signup" && resendWait > 0)}>
-              <span>{busy ? "Подождите..." : mode === "signup" && resendWait > 0 ? `Повторить через ${resendWait} с` : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : "Войти"}</span>
+            <button className="button button--primary auth-submit" type="submit" disabled={busy || ((mode === "signup" || mode === "recovery") && resendWait > 0)}>
+              <span>{busy ? "Подождите..." : (mode === "signup" || mode === "recovery") && resendWait > 0 ? `Повторить через ${resendWait} с` : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : mode === "recovery" ? "Восстановить доступ" : "Войти"}</span>
               {!busy && <UiIcon name="arrow-right" size={18} />}
             </button>
           </form>
 
           <div className="auth-switch">
             {mode === "signup" ? <>Уже есть аккаунт? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
+              : mode === "recovery" ? <>Вспомнили пароль? <button type="button" onClick={() => switchMode("signin")}>Войти</button></>
               : mode === "verify" ? <>Аккаунт уже есть? <button type="button" onClick={() => switchMode("signin")}>Войти</button> <button type="button" onClick={() => switchMode("signup")}>Другой адрес</button></>
                 : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
                   : signupEnabled ? <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></> : <span>Новые регистрации пока недоступны.</span>}
@@ -361,6 +403,15 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             <button type="button" className="auth-code-switch" onClick={() => switchMode(mode === "signin" ? "signin_code" : "signin")}>
               {mode === "signin" ? "Войти по коду из почты" : "Войти с паролем"}
             </button>
+          )}
+          {mode === "signin" && <button type="button" className="auth-code-switch" onClick={() => switchMode("recovery")}>Забыли пароль?</button>}
+          {mode === "signin" && (
+            <>
+              <button type="button" className="auth-code-switch" disabled={busy || resendWait > 0} onClick={() => void resendSignupConfirmation()}>
+                {resendWait > 0 ? `Повторить подтверждение через ${resendWait} с` : "Не пришло письмо подтверждения?"}
+              </button>
+              {confirmationRequested && <p role="status" className="auth-legal-note">Если для этой почты есть неподтверждённый аккаунт, мы повторно отправили письмо. Проверьте также «Спам».</p>}
+            </>
           )}
         </>
       )}
