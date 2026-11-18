@@ -5,7 +5,17 @@ import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
 import { isRateLimited, safeAuthErrorMessage } from "../lib/auth-error.ts";
 import { dataOperators, paymentMerchant, operatorDetailsComplete } from "../lib/merchant-details.ts";
 import { registrationIsOpen } from "../lib/registration-gate.ts";
+import { EMAIL_OTP_LENGTH, isEmailOtp } from "../lib/email-otp.ts";
 import nextConfig from "../next.config.ts";
+
+test("email verification always has exactly six digits", () => {
+  assert.equal(EMAIL_OTP_LENGTH, 6);
+  for (const value of ["12345678", "12345", "12 456", "abcdef", "0000000"]) {
+    assert.equal(isEmailOtp(value), false);
+  }
+  assert.equal(isEmailOtp("000000"), true);
+  assert.equal(isEmailOtp("123456"), true);
+});
 
 test("health probes coalesce parallel requests and cache success", async () => {
   let requests = 0;

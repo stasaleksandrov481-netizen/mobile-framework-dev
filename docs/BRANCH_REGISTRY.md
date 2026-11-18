@@ -1,5 +1,32 @@
 # Карта GitHub-веток CORTEX
 
+## Актуальная сверка: 18.11.2026, `main` `7a92fea`
+
+Подтверждено через GitHub API и `git fetch` всех refs: **76 веток** (включая `main`).
+
+| Группа | Количество | Действие |
+| --- | ---: | --- |
+| `main` — Android 1.0.17 | 1 | Основная ветка; production Vercel на `7a92fea` |
+| Уже полностью входят в `main` | 20 | Кандидаты на архивирование только после проверки внешних зависимостей |
+| Отличаются от `main` собственными коммитами | 41 | Сохранять, разбирать через отдельные PR |
+| Dependabot | 14 | Обновлять/закрывать поштучно только после CI |
+
+Открыто **19 PR**, в том числе 5 не от Dependabot:
+
+- [#64 — регистрация / шесть цифр / Redis](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/64) — draft; содержит нужную правку веб-кода, но **не сливать вместе с пропавшими компонентами опубликованного UI**.
+- [#61 — кабинет после регистрации и баланс ИИ](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/61) — открыт, проверять вместе с одобренным web UI.
+- [#57 — Android-история, навигация и поддержка](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/57) — draft; нельзя перезаписывать Android 1.0.17 старой веткой.
+- [#41 — локальные команды 1.0.14](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/41) — старый Android, требует выборочного переноса.
+- [#11 — аудит стабильности](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/11) — draft; отдельно от релизных изменений.
+
+Новые полностью вошедшие в `main` ветки: `release/cortex-1-0-17`, `fix/cortex-glass-voice-117`, `fix/cortex-verified-actions-116`, `fix/cortex-island-version-and-actions`, `fix/cortex-island-controls-20261118`, `feat/cortex-control-remembered-login-20261117`, `feat/cortex-private-pricing-credits-20261117` — помимо перечисленных в старом снимке ниже.
+
+Крупные разошедшиеся ветки без автоматического слияния: `fix/cortex-web-safe-recovery-20261118` (+19 коммитов), `feat/cortex-web-approved-account-20261118` (+17), `release/cortex-unified-20261117` (+21), `security/sync-edge-runtime-v44-20261117` (+12), `chore/agent-handoff-release-guard-20261117` (+11). Числа — собственные коммиты относительно текущего `main`, а не оценка качества.
+
+Правила наведения порядка: один дефект — один небольшой PR; сначала исправление шести OTP-ячеек, отдельно — Android 1.0.17/Gemini/отключение гостей, отдельно — сохранение дизайна сайта и платежи. Не делать массовых merge/delete/force-push. Отсутствие активного PR ещё не доказывает, что ветку можно удалить.
+
+## Исторический снимок: 17.11.2026
+
 Снимок 17.11.2026, сравнение каждой ветки с `main` (`7b7c6393`). **53 ветки всего**, включая `main`: 13 полностью уже входящих в `main`, 3 только впереди `main`, 22 разошедшиеся и 14 автоматических Dependabot. На момент проверки ничего не удалено.
 
 ## Нельзя потерять: впереди `main` (3)
