@@ -1012,6 +1012,17 @@ test("universal visual planner validates long press and rejects malformed varian
     value: "script", expect: "", confirm: false }], question: "", answer: "", done: false })));
 });
 
+test("visual planner accepts only the known function envelope", () => {
+  const valid = { steps: [{ action: "open", target: "YouTube", value: "", expect: "", confirm: false }],
+    question: "", answer: "", done: false };
+  const envelope = { name: "plan_android_screen", arguments: JSON.stringify(valid) };
+  assert.deepEqual(checkedVisualPlan(JSON.stringify(envelope)), valid);
+  assert.throws(() => checkedVisualPlan(JSON.stringify({ ...envelope, name: "delete_everything" })));
+  assert.throws(() => checkedVisualPlan(JSON.stringify({
+    name: "plan_android_screen", arguments: { ...valid, steps: [{ action: "shell", target: "rm" }] },
+  })));
+});
+
 test("status and support inbox have bounded shared budgets", async () => {
   const { call, reservations } = fixture();
   assert.equal((await call("status")).status, 200);
