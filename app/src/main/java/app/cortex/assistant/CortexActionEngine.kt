@@ -33,6 +33,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val phone by lazy { CortexPhoneActions(this.context) }
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
+    private val turnContext = CortexTurnContext()
+
+    fun observeAssistantAnswer(answer: String) {
+        turnContext.observeAnswer(answer, CortexScenarios.currentOwner(context).ifBlank { "guest" }, SystemClock.uptimeMillis())
+    }
 
     data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false)
 
@@ -49,7 +54,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         explicitScenario: CortexScenarios.Scenario? = null,
         finished: (Result) -> Unit
     ): Boolean {
-        val text = raw.trim().take(2400)
+        val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
+        val now = SystemClock.uptimeMillis()
+        val text = turnContext.resolve(raw.trim().take(2400), owner, now)
+        turnContext.observeUser(text, owner, now)
         CortexActionState.gateMessage()?.let { finished(Result(it, false)); return true }
         if (!scheduled && !force && explicitScenario == null) {
             CortexNotificationJournal(context).answer(text)?.let {
@@ -224,6 +232,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 CortexActionState.log(context, if (result.ok) "Команда выполнена · шагов экрана: ${task.completed}"
                     else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
                 CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible)
+                turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
                 finished(result)
             }
         }
@@ -968,25 +977,18 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         // provider quotas, authorization, or malformed plans.
         var result: JSONObject? = null
         // A frozen provider must not hold the island for nearly a minute per attempt.
-        val planTimeout = if (task.schoolSite) 12_000L else 14_000L
-        for (attempt in 0..1) {
-            result = withTimeoutOrNull<JSONObject>(planTimeout) {
-                var id: String? = null
-                try {
-                    suspendCancellableCoroutine { pending ->
-                        id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
-                    }
-                } finally {
-                    id?.let(gateway::cancel)
+        // The server already tries one tool-compatible model and a structured fallback.
+        // Avoid duplicating the request in the app and exhausting the shared free quota.
+        val planTimeout = 22_000L
+        result = withTimeoutOrNull<JSONObject>(planTimeout) {
+            var id: String? = null
+            try {
+                suspendCancellableCoroutine { pending ->
+                    id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
                 }
+            } finally {
+                id?.let(gateway::cancel)
             }
-            if (attempt == 0 && (result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS)) {
-                if (task.schoolSite) break
-                report("Восстанавливаю соединение с ИИ…")
-                delay(300L)
-                continue
-            }
-            break
         }
         val outcome = result ?: return null to "ИИ не ответил вовремя. Можно продолжить с текущего экрана."
         val error = outcome.optString("error")
