@@ -1,5 +1,12 @@
 # Инвентаризация релизов CORTEX
 
+## 18.11.2026 19:20 UTC — противодействие DDoS, Edge v47 → кандидат v48
+
+- На `cortexapp.ru` Vercel обнаружил активный DDoS-эпизод с `18:45Z`: **1 206 282 запроса** за указанную минуту, системная защита `sys_dos_mitigation:challenge`; проверенные страницы и `/api/status` возвращают HTTP 200. WAF v10 продолжает deny 14 exploit-paths и rate-limit статуса 120/мин/IP, наблюдает POST endpoints оплаты в режиме `log`. Cloudflare DNS-only, не является активным WAF этого домена.
+- Живой Supabase `cortex` **ACTIVE v47**, `verify_jwt:false`. Считаны и сравнены все **11** файлов: после PR #73 в текущем `main` они совпадают с v47. Ранее обнаруженное расхождение `visual.ts`/таймаутов `handler.ts` теперь включено в `main`, не терять его. Изменений SQL в данном патче нет.
+- В PR #76 подготовлен только глобальный финансовый предохранитель: `chat:all:minute` 2000/мин и `chat:all:day` 50000/сут в существующем атомарном SQL `cortex_reserve` перед вызовом OpenRouter. Он действует на все аккаунты, не затрагивает регистрацию, платежи, UI и Android. `CORTEX_CHAT_GLOBAL_MINUTE_LIMIT`/`CORTEX_CHAT_GLOBAL_DAILY_LIMIT` имеют безопасные ограниченные диапазоны. 73/73 Edge-тестов; `git diff --check` чистый.
+- **В production ещё не опубликован**: текущая live версия остаётся v47 до повторной сверки всех 11 исходников, наличия нужного RPC и проверки CI. Rollback: v47 из main `be5eab98bdb0421489440f44fe7680a5c6a13361`; нельзя перекатить старый Edge v46. Дизайн сайта должен оставаться на Vercel `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` до восстановления web source.
+
 ## 18.11.2026 — подготовка beta brain PR #73 (не production)
 
 - Supabase `cortex` Edge ACTIVE **v46**, на момент проверки файлы `handler.ts`, `provider.ts`, `visual.ts`, `singleflight.ts`, `device.ts`, `settings.ts` идентичны ветке `main` SHA `3d8c81eb`. Проверка выполнена до правок PR #73.
