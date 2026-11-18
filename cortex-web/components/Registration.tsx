@@ -6,6 +6,7 @@ import Link from "next/link";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
+import { isEmailOtp } from "@/lib/email-otp";
 import { isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
 import { useCortexAccount } from "@/lib/use-cortex-account";
 
@@ -139,7 +140,7 @@ export function RegistrationForm() {
         setPassword("");
       } else if (mode === "verify") {
         if (activeEmail !== email.trim().toLowerCase()) {
-          if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
+          if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
           const { error: verifyError } = await cortexAuth.auth.verifyOtp({
             email: email.trim().toLowerCase(), token: code.replace(/\s/g, ""), type: "email",
           });
@@ -160,7 +161,7 @@ export function RegistrationForm() {
         setResendWait(60);
         setMode("signin_code_verify");
       } else if (mode === "signin_code_verify") {
-        if (!/^\d{8}$/.test(code)) throw new Error("Введите восьмизначный код из письма.");
+        if (!isEmailOtp(code)) throw new Error("Введите шестизначный код из письма.");
         const { error: verifyError } = await cortexAuth.auth.verifyOtp({
           email: email.trim().toLowerCase(), token: code, type: "email",
         });
@@ -241,10 +242,10 @@ export function RegistrationForm() {
             ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
             : mode === "verify"
               ? emailOtpReady
-                ? "Мы отправили восьмизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
+                ? "Мы отправили шестизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
                 : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
             : mode === "signin_code_verify"
-              ? "Мы отправили восьмизначный код. Введи его из письма, чтобы продолжить."
+              ? "Мы отправили шестизначный код. Введи его из письма, чтобы продолжить."
               : mode === "signin_code"
                 ? "Войди без пароля. Отправим одноразовый код на твою почту."
               : "Войди в свой аккаунт CORTEX."}</p>
