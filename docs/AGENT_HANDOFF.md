@@ -1,5 +1,17 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-18 UTC · Проверенный production: 6 OTP, Gemini TTS, авторизация
+
+- Коммит `6260e7814cf2660eeb80e032d89556feaa2da2ab` из PR #69 опубликован: исправлено 8 → 6 OTP в React, CSS и проверке формы. Production CSS `.otp-code` проверен на `https://cortexapp.ru/register`: шесть колонок, восемь отсутствуют; страница HTTP 200.
+- PR #70 слит в `main` коммитом `2c80b5a7f149a89c2e2735a89b487fa9a5c84005`. Слияние проверено как бесконфликтное, web-стили не изменены относительно PR #69. Android 1.0.17 сохраняет UI и native actions; добавлены PCM streaming OpenRouter Gemini и блокировка гостевого доступа на Android и сервере.
+- Проверки: GitHub Android Build, Edge/Billing, CodeQL и security — зелёные; локально Edge 71/71; проверено точное совпадение итогового git tree с проверенной веткой.
+- Vercel production: проект `mobile-framework-dev`, команда `syndicate13`, деплой `dpl_DAoZopNGd3AD7B8jajXhVg46A2hG` **READY**, исходник `main` / `2c80b5a`. `cortexapp.ru/register` возвращает HTTP 200; итоговый CSS имеет `repeat(6,minmax(0,1fr))`.
+- Supabase project `jjcqrjztxohnifmziksy`, Edge `cortex` **ACTIVE v46**, `verify_jwt:false` сохранён (внутренняя авторизация). Все 11 файлов live v45 сначала точно совпали с базой main; для v46 заменён только `handler.ts`. После деплоя заново считаны все 11 файлов: точное совпадение с `main` `2c80b5a`. SQL voice preferences `20261118165958` и `20261118171520` уже были применены, повторно **не применялись**. Edge логи на момент проверки: 61 запись за 20 минут, ни одна не содержит явных строк `error`/HTTP 500/502/503 (не заменяет E2E).
+- Rollback: предыдущая рабочая Edge v45 точно соответствует коммиту `7a92feaa42beca2d8c6769e4015a4eb026e942e0`; предыдущий Vercel READY `dpl_62i8PQrxNCa5NzHDD2Jms1q9NrFk` (OTP исправлен).
+- **Не выполнено автоматически:** подписанный APK 1.0.17 с Gemini TTS не выпущен пользователям; требуется подтверждение интерфейса и тест на Android. Настройки голосов в веб-кабинете ещё не восстановлены. Старые ветки не удалены: некоторые имеют уникальные коммиты, GitHub connector не предоставляет API удаления refs. В отдельном локальном worktree есть незакоммиченные изменения Telegram Stars — не перетирать.
+- Следующий шаг: проверить голос на Android-устройстве под реальной учётной записью, после одобрения подписать/выпустить APK, затем отдельно разбирать остаточные ветки и тарифы. Не деплоить старую копию Edge или UI.
+
+
 ## 2026-11-18 UTC · Актуализация GitHub и шестизначный OTP
 
 - Исходный `main`: `7a92feaa42beca2d8c6769e4015a4eb026e942e0` (Android 1.0.17, Vercel READY `dpl_C5Q1YYHYeA63j6YWZUv4Y4qrdUJp`). Прежние данные по 1.0.14 не являются текущим релизом.
