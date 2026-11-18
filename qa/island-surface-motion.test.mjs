@@ -30,10 +30,11 @@ test("island customization controls rendering and first-step feedback", () => {
   assert.match(surface, /canvas\.drawText\("Выполняю"/);
   assert.match(surface, /if \(style\.progress && compactAlpha/);
   const engine = native("CortexActionEngine.kt");
-  assert.match(engine, /if \(CortexActionState\.firstCommand\) \{\s+CortexActionState\.firstCommand = false\s+delay\(1_000L\)/);
+  assert.match(engine, /CortexActionState\.firstCommand = false/);
+  assert.doesNotMatch(engine, /delay\(1_000L\)/);
   assert.match(engine, /direct != null && reply == null -> \{\s*firstStep\(::report\)\s*executeSystem/);
   assert.match(engine, /!visualAllowed ->/);
-  assert.match(native("CortexPhoneActions.kt"), /attempts = if \(kind == "app"\) 60 else 12, interval = 180L/);
+  assert.match(native("CortexPhoneActions.kt"), /attempts = if \(kind == "app"\) 30 else 12, interval = 160L/);
 });
 
 test("Android Assistant invocation opens the island without loading MainActivity or waking the microphone", () => {
