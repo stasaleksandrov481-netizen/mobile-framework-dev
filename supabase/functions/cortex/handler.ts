@@ -964,11 +964,11 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         };
         const upstream = new AbortController();
         const quick = input.visual || input.settings || input.profile !== "deep";
-        const firstTokenMs = input.visual || input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
+        const firstTokenMs = input.visual ? 5_500 : input.settings ? 7_000 : input.webSearch ? 25_000 : quick ? 4_500 : 13_000;
         // A mirrored generation survives the first request disconnecting while
         // another caller is still consuming it. All flights remain time-bound.
         const signal = AbortSignal.any([...(flightKey ? [] : [request.signal]), upstream.signal,
-          AbortSignal.timeout(input.visual || input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
+          AbortSignal.timeout(input.visual ? 20_000 : input.settings ? 46_000 : input.webSearch ? 105_000 : quick ? 42_000 : 69_000)]);
         const scope = input.visual ? "visual:" : input.settings ? "settings:" : (chosen || input.profile || "default") + (input.device ? ":tools:" : ":chat:");
         const choices = [...new Set(candidates)];
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());

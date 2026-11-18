@@ -21,6 +21,22 @@ function fixture(persisted) {
   return { model: context.CortexTest, ui: context.CortexUITest, planner: context.PlannerTest, saved };
 }
 
+test("recent native app commands inform pronouns but not private messages", () => {
+  const { model } = fixture();
+  const chat = model.createChat();
+  chat.messages = [
+    { role: "user", text: "Открой YouTube", local: true },
+    { role: "assistant", text: "Android подтвердил открытие", local: true },
+    { role: "user", text: "Напиши другу секрет: 123456", local: true },
+    { role: "assistant", text: "Не подтверждено", local: true },
+    { role: "user", text: "Почему он открылся?" }
+  ];
+  const context = model.turns(chat, "");
+  assert.match(context[0].content, /Недавно пользователь просил открыть приложения.*YouTube/);
+  assert.doesNotMatch(context[0].content, /Напиши другу секрет/);
+  assert.equal(context.at(-1).content, "Почему он открылся?");
+});
+
 test("chat composer keeps only model picker and quota below the input", () => {
   const { ui } = fixture();
   const html = ui.composer();

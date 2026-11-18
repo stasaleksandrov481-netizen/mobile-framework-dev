@@ -38,11 +38,15 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
             .getString("addressName", "").orEmpty().trim().take(60)
         fun finish(answer: String, ok: Boolean) {
             if (turn != generation) return
+            engine.observeAssistantAnswer(answer)
             if (ok && unlocked) memory.remember(text, answer)
             finished(answer, ok)
         }
         if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress) { result ->
-                if (turn == generation) finished(result.text, result.ok)
+                if (turn == generation) {
+                    engine.observeAssistantAnswer(result.text)
+                    finished(result.text, result.ok)
+                }
             }) return
         if (ConversationRequest.wantsMessage(text) || VisualRequest.isAction(text)) {
             finished("Уточните приложение и действие. Пока ни одного шага Android не подтверждено.", false)

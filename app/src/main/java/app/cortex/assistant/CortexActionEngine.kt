@@ -30,9 +30,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val context = context.applicationContext
     private val gateway = CortexServerBridge(this.context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val phone by lazy { CortexPhoneActions(this.context) }
+    // Warm the application index while the island is idle, not on the first command.
+    private val phone = CortexPhoneActions(this.context)
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
+    private val turnContext = CortexTurnContext()
+
+    fun observeAssistantAnswer(answer: String) {
+        turnContext.observeAnswer(answer, CortexScenarios.currentOwner(context).ifBlank { "guest" }, SystemClock.uptimeMillis())
+    }
 
     data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false)
 
@@ -49,7 +55,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         explicitScenario: CortexScenarios.Scenario? = null,
         finished: (Result) -> Unit
     ): Boolean {
-        val text = raw.trim().take(2400)
+        val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
+        val now = SystemClock.uptimeMillis()
+        val text = turnContext.resolve(raw.trim().take(2400), owner, now)
+        turnContext.observeUser(text, owner, now)
         CortexActionState.gateMessage()?.let { finished(Result(it, false)); return true }
         if (!scheduled && !force && explicitScenario == null) {
             CortexNotificationJournal(context).answer(text)?.let {
@@ -224,6 +233,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 CortexActionState.log(context, if (result.ok) "Команда выполнена · шагов экрана: ${task.completed}"
                     else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
                 CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible)
+                turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
                 finished(result)
             }
         }
@@ -363,10 +373,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     private suspend fun firstStep(report: (String) -> Unit) {
         report("Выполняю…")
-        if (CortexActionState.firstCommand) {
-            CortexActionState.firstCommand = false
-            delay(1_000L)
-        }
+        // Never pause the first user command just for a visual loading effect.
+        CortexActionState.firstCommand = false
     }
 
     private suspend fun executeSystem(
@@ -969,25 +977,19 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         // a verified multi-step task. Only retry transient failures, never
         // provider quotas, authorization, or malformed plans.
         var result: JSONObject? = null
-        val planTimeout = if (task.schoolSite) 18_000L else 48_000L
-        for (attempt in 0..1) {
-            result = withTimeoutOrNull<JSONObject>(planTimeout) {
-                var id: String? = null
-                try {
-                    suspendCancellableCoroutine { pending ->
-                        id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
-                    }
-                } finally {
-                    id?.let(gateway::cancel)
+        // A frozen provider must not hold the island for nearly a minute per attempt.
+        // The server already tries one tool-compatible model and a structured fallback.
+        // Avoid duplicating the request in the app and exhausting the shared free quota.
+        val planTimeout = 22_000L
+        result = withTimeoutOrNull<JSONObject>(planTimeout) {
+            var id: String? = null
+            try {
+                suspendCancellableCoroutine { pending ->
+                    id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
                 }
+            } finally {
+                id?.let(gateway::cancel)
             }
-            if (attempt == 0 && (result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS)) {
-                if (task.schoolSite) break
-                report("Восстанавливаю соединение с ИИ…")
-                delay(850L)
-                continue
-            }
-            break
         }
         val outcome = result ?: return null to "ИИ не ответил вовремя. Можно продолжить с текущего экрана."
         val error = outcome.optString("error")
@@ -1003,14 +1005,16 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 "server", "server_busy" -> "Сервер ИИ временно перегружен."
                 "offline" -> "Связь с ИИ потеряна."
                 "timeout" -> "Следующий шаг не удалось получить вовремя."
-                "invalid_plan" -> "Уточните название пункта или приложения, с которого нужно начать."
+                "invalid_plan" -> "Модель не смогла составить допустимый план действий. Попробуйте указать первый шаг точнее."
                 "update", "maintenance" -> "Сервер CORTEX временно недоступен."
                 else -> "Не удалось получить следующий шаг от ИИ."
             }
             return null to "$text Можно продолжить с текущего экрана."
         }
-        val plan = VisualPlan.parse(outcome.optJSONObject("result")?.optString("text").orEmpty())
-        return plan to "Укажите, что открыть или нажать на этом экране."
+        val raw = outcome.optJSONObject("result")?.optString("text").orEmpty()
+        val plan = VisualPlan.parse(raw)
+        return plan to if (plan != null) "" else
+            "ИИ вернул инструкцию, которую нельзя безопасно выполнить. Попробуйте уточнить следующий шаг на текущем экране."
     }
 
     private fun manual() = Result("Этот экран защищён Android. Выполните нужный шаг вручную, затем продолжите задачу.", false, true)
