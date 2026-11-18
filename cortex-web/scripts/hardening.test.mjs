@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createCachedHealthCheck } from "../lib/health-cache.ts";
 import { safeHttpsDownloadUrl } from "../lib/safe-url.ts";
@@ -10,6 +11,13 @@ import nextConfig from "../next.config.ts";
 
 test("email verification always has exactly six digits", () => {
   assert.equal(EMAIL_OTP_LENGTH, 6);
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const slots = readFileSync(new URL("../components/OtpCodeInput.tsx", import.meta.url), "utf8");
+  const registration = readFileSync(new URL("../components/Registration.tsx", import.meta.url), "utf8");
+  assert.match(styles, /\.otp-code\s*\{[^}]*grid-template-columns:\s*repeat\(6,/);
+  assert.match(slots, /const CODE_LENGTH = EMAIL_OTP_LENGTH/);
+  assert.match(slots, /Array\.from\(\{ length: CODE_LENGTH \}/);
+  assert.doesNotMatch(registration, /восьмизнач|\^\\d\{8\}/i);
   for (const value of ["12345678", "12345", "12 456", "abcdef", "0000000"]) {
     assert.equal(isEmailOtp(value), false);
   }
