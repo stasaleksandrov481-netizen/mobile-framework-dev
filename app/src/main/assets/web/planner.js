@@ -3,7 +3,7 @@
 const CortexPlanner = (() => {
   const M = Cortex, U = CortexUI;
   const { esc, detail, icon } = U;
-  const routes = new Set(["schedule", "scenarios", "energy"]);
+  const routes = new Set(["schedule", "scenarios", "island-editor", "energy"]);
   const fieldTypes = {
     open: "Открыть приложение", tap: "Нажать элемент", point: "Нажать записанную точку", type: "Ввести текст",
     swipe: "Свайп", wait: "Ждать элемент", pause: "Пауза", if: "Условие", repeat: "Повторение",
@@ -41,6 +41,7 @@ const CortexPlanner = (() => {
   let app, items = [], tasks = [], exact = false, notifications = false;
   let selectedTask = "", scheduleDraft, scenarioDraft, pointPath, scenarioBusy = false;
   let scheduleReady = false, scenarioReady = false;
+  let scenarioProgress = "";
   let expandedStep = "", pickerBranch = "", gesture;
   const colorNames = { background: "Фон", text: "Текст", border: "Граница", accent: "Прогресс", faceColor: "Смайлик" };
   let formOperation = "";
@@ -60,7 +61,7 @@ const CortexPlanner = (() => {
   };
 
   function schedule() {
-    if (!app.native) return detail("Расписание", "", '<p class="muted">Расписание работает в Android-приложении.</p>');
+    if (!app.native) return detail("Напоминания", "", '<p class="muted">Напоминания доступны в Android-приложении.</p>');
     const permissions = (!notifications ? action("Разрешить уведомления", "native", "notification-permission") : "") +
       (!exact ? action("Включить точные напоминания", "native", "schedule-exact") : "");
     const taskCard = task => {
@@ -81,21 +82,22 @@ const CortexPlanner = (() => {
     if (scheduleDraft) {
       const { kind, text, local, repeat } = scheduleDraft;
       editor = `<form class="panel stack" id="plan-schedule-form">
-        <h2>${scheduleDraft.id ? "Изменить поручение" : "Запланировать поручение"}</h2>
-        ${label("Что сделать", `<select name="kind">${options({ reminder: "Напомнить", action: "Выполнить действие" }, kind)}</select>`)}
+        <h2>${scheduleDraft.id ? (kind === "reminder" ? "Изменить напоминание" : "Изменить действие") : "Новое напоминание"}</h2>
         ${label("Текст", `<textarea name="text" rows="2" maxlength="2400" required>${esc(text)}</textarea>`)}
         ${label("Местные дата и время", `<input name="local" type="datetime-local" value="${esc(local)}" required>`)}
         ${label("Повторять", `<select name="repeat">${options({ none: "Один раз", daily: "Каждый день", weekly: "Каждую неделю" }, repeat)}</select>`)}
         <div class="actions">${submit("Сохранить")}${action("Закрыть", "schedule-close", "", "quiet")}</div>
       </form>`;
     }
-    const active = tasks.filter(task => ["scheduled", "due", "blocked", "running"].includes(task.status));
-    const history = tasks.filter(task => !active.includes(task));
-    return detail("Расписание", "Напоминания и действия", `<div class="actions">${action("Добавить", "schedule-edit", "", "primary")}</div>` +
+    // Previously scheduled actions remain accessible from their notifications.
+    const visible = tasks.filter(task => task.kind === "reminder" || task.id === selectedTask);
+    const active = visible.filter(task => ["scheduled", "due", "blocked", "running"].includes(task.status));
+    const history = visible.filter(task => !active.includes(task));
+    return detail("Напоминания", "", `<div class="actions">${action("Добавить напоминание", "schedule-edit", "", "primary")}</div>` +
       (scheduleReady && permissions ? `<section class="panel stack"><p class="muted">${!notifications ?
         "Разрешите уведомления для напоминаний при выключенном экране." : "Android может доставлять напоминания с задержкой."}</p>
         <div class="actions">${permissions}</div></section>` : "") + editor +
-      (active.length ? active.map(taskCard).join("") : `<p class="muted">${scheduleReady ? "Скажите «Напомни через десять минут достать курицу»." : "Загружаю расписание…"}</p>`) +
+      (active.length ? active.map(taskCard).join("") : `<p class="muted">${scheduleReady ? "Пока пусто. Скажите: «Кортекс, напомни через десять минут достать курицу»." : "Загружаю напоминания…"}</p>`) +
       (history.length ? `<h2 class="group-label">История</h2>${history.map(taskCard).join("")}` : ""));
   }
 
@@ -225,7 +227,7 @@ const CortexPlanner = (() => {
   function scenarios() {
     if (!app.native) return detail("Сценарии", "", '<p class="muted">Запуск сценариев доступен в Android-приложении.</p>');
     if (!scenarioReady && !scenarioDraft) return detail("Сценарии", "", '<p class="muted">Загружаю сценарии…</p>');
-    if (scenarioDraft) return detail("Конструктор", "", `<form class="panel stack" id="plan-scenario-form" novalidate>
+    if (scenarioDraft) return detail("Конструктор", "Добавьте шаги и фразу запуска", `<form class="panel stack" id="plan-scenario-form" novalidate>
       ${label("Название", `<input name="name" maxlength="90" required value="${esc(scenarioDraft.name)}">`)}
       ${label("Голосовые фразы, по одной в строке", `<textarea name="triggers" rows="2" maxlength="1200">${esc(scenarioDraft.triggers.join("\n"))}</textarea>`)}
       <p class="muted">Вставляйте переменную в текст или название элемента в виде \${имя}. Имена переменных задавайте латиницей.</p>
@@ -253,7 +255,9 @@ const CortexPlanner = (() => {
         </div><h2>Соберите цепочку действий</h2>
         <p>Добавьте шаги и фразу для запуска голосом.</p>${newScenario}
       </section>`;
-    return detail("Сценарии", "", list +
+    const progress = scenarioProgress ? `<section class="panel scenario-progress" role="status">
+      <p>${esc(scenarioProgress)}</p>${action("Остановить", "native", "action-stop")}</section>` : "";
+    return detail("Сценарии", "Запускайте цепочки действий с экрана или голосом", progress + list +
       (draft ? `<div class="scenario-draft">${icon("note", 20)}<span><strong>Черновик</strong><small>${esc(draft.name || "Без названия")}</small></span>
         ${action("Продолжить", "draft-open")}</div>` : "") +
       `<details class="scenario-assist"${scenarioBusy ? " open" : ""}><summary>
@@ -289,7 +293,8 @@ const CortexPlanner = (() => {
           --island-accent:${data.accent};--island-opacity:${clamp(data.opacity, 40, 100)}%;
           --island-width:${72 * size * clamp(data.widthScale, 80, 125) / 10000}px;--island-height:${36 * size * clamp(data.heightScale, 90, 125) / 10000}px;
           --island-radius:${clamp(data.corner, 12, 32)}px;--island-weight:${clamp(data.borderWidth, 0, 3)}px">
-          <span class="plan-logo" aria-hidden="true"></span></div>
+          ${data.face ? `<span class="plan-face" style="background:${data.faceColor};color:${data.background}" aria-hidden="true"><i></i><i></i><b></b></span>` :
+            '<span class="plan-logo" aria-hidden="true"></span>'}</div>
         <span class="plan-size-grip" aria-hidden="true"></span>
       </div>`;
   }
@@ -303,20 +308,21 @@ const CortexPlanner = (() => {
       <input type="range" id="range-${key}" min="${min}" max="${max}" step="${increments}" data-style="${key}" value="${esc(data[key])}">
     </div>`;
     const widget = (key, title) => planSwitch(title, `data-style="${key}"`, data[key]);
-    return detail("Островок", "Оформление", `<div class="plan-island-preview glass-card" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
-      <p class="muted plan-hint">Перетащите островок. Потяните за угол, чтобы изменить размер.</p>
-      <div class="actions">${Object.keys(islandPresets).map(title => action(title, "island-preset", title)).join("")}</div>
-      <section class="panel stack"><h2>Положение и форма</h2>${slider("size", "Общий масштаб", 80, 125)}
+    return detail("Оформление островка", "Настройте внешний вид и положение", `<section class="island-custom-preview">
+      <div class="plan-island-preview glass-card" data-island-preview aria-label="Предпросмотр островка">${preview()}</div>
+      <p class="muted plan-hint">Перетащите островок или потяните за угол.</p>
+      <div class="actions">${Object.keys(islandPresets).map(title => action(title, "island-preset", title)).join("")}</div></section>
+      <details class="panel island-custom-group"><summary>Положение и форма</summary><div class="stack">${slider("size", "Общий масштаб", 80, 125)}
         ${slider("widthScale", "Ширина", 80, 125)}${slider("heightScale", "Высота", 90, 125)}
         ${slider("offsetX", "Сдвиг влево и вправо", -75, 75)}${slider("offsetY", "Сдвиг вниз", 0, 80)}
         ${slider("corner", "Скругление", 12, 32)}${slider("borderWidth", "Толщина границы", 0, 3, .1)}
         ${slider("opacity", "Непрозрачность", 40, 100)}
-        ${label("Анимация", `<select data-style="motion">${options({ liquid: "Плавная", soft: "Короткая", none: "Мгновенная" }, data.motion)}</select>`)}</section>
-      <section class="panel stack"><h2>Цвета</h2><div class="plan-color-grid">${Object.entries(colorNames).map(([key, title]) =>
+        ${label("Анимация", `<select data-style="motion">${options({ liquid: "Плавная", soft: "Короткая", none: "Мгновенная" }, data.motion)}</select>`)}</div></details>
+      <details class="panel island-custom-group"><summary>Цвета</summary><div class="plan-color-grid">${Object.entries(colorNames).map(([key, title]) =>
         `<button type="button" class="plan-swatch" data-plan="palette" data-value="${key}">
-          <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></section>
-      <section class="panel stack"><h2>Содержимое</h2>${widget("face", "Анимированный символ")}${widget("status", "Статус")}
-        ${widget("progress", "Полоса прогресса")}${widget("results", "Результат действий")}</section>`);
+          <i style="--swatch:${data[key]}" aria-hidden="true"></i>${esc(title)}</button>`).join("")}</div></details>
+      <section class="panel stack island-custom-content"><h2>Содержимое</h2>${widget("face", "Анимированный символ")}${widget("status", "Статус")}
+        ${widget("progress", "Анимация прогресса")}${widget("results", "Результат действий")}</section>`);
   }
 
   function hsvFromHex(hex) {
@@ -423,7 +429,7 @@ const CortexPlanner = (() => {
       </section>`);
   }
 
-  const pages = { schedule, scenarios, energy };
+  const pages = { schedule, scenarios, "island-editor": islandEditor, energy };
 
   function handle(message) {
     switch (message.type) {
@@ -451,7 +457,15 @@ const CortexPlanner = (() => {
         scenarioReady = true;
         if (app.route() === "scenarios") app.render();
         return true;
+      case "scenario-progress":
+        scenarioProgress = typeof message.text === "string" ? message.text : "";
+        if (app.route() === "scenarios") app.render();
+        return true;
       case "scenario-result":
+        if (message.operation === "run") {
+          scenarioProgress = "";
+          if (app.route() === "scenarios") app.render();
+        }
         if (message.ok && message.operation === "save") {
           scenarioDraft = null;
           expandedStep = "";
@@ -531,7 +545,7 @@ const CortexPlanner = (() => {
       return;
     }
     if (command === "scenario-run") {
-      app.confirm("Запустить тест?", "CORTEX выполнит шаги на экране и запишет результат в журнал.", () => app.send("scenario-run", { id: value }));
+      app.confirm("Запустить сценарий?", "CORTEX выполнит сохранённые шаги и запишет результат в журнал.", () => app.send("scenario-run", { id: value }));
       return;
     }
     if (command === "palette" && Object.hasOwn(colorNames, value)) { palette(value); return; }

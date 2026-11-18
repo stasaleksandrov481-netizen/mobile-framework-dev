@@ -137,6 +137,9 @@ internal object VisualRequest {
         }
     }
 
+    fun opensFirst(text: String): Boolean =
+        open.matches(cleanCommand(text).split(separators, limit = 2).first())
+
     fun readsScreen(text: String): Boolean = screenQuestion.matches(cleanCommand(text)) || Regex(
         """(?:прочитай|что на экране|проанализируй|реши|учи[. ]?ру|read screen|on screen)""", RegexOption.IGNORE_CASE
     ).containsMatchIn(text)

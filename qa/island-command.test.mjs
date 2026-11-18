@@ -41,10 +41,10 @@ test("questions and unrelated commands cannot silently change the island", () =>
   assert.match(parse("Поставь размер островка на 200%").reply, /80% до 125%/);
 });
 
-test("island editor is removed from navigation and background voice uses native settings", () => {
-  assert.doesNotMatch(source("screens.js"), /tile\("Оформление островка"/);
+test("island editor and background voice share native settings", () => {
+  assert.match(source("screens.js"), /tile\("Оформление островка"[^\n]+island-editor/);
   assert.doesNotMatch(source("setup.js"), /<h2>Оформление островка<\/h2>/);
-  assert.match(source("planner.js"), /routes = new Set\(\["schedule", "scenarios", "energy"\]\)/);
+  assert.match(source("planner.js"), /routes = new Set\(\["schedule", "scenarios", "island-editor", "energy"\]\)/);
   assert.match(source("app.js"), /islandCommand\(text\)/);
   assert.doesNotMatch(source("app.js"), /memoryReply/);
   assert.match(source("app.js"), /sendDevice\("island-style-ack"\)/);

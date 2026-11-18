@@ -18,6 +18,34 @@ test("CORTEX compact island defaults to solid black and logo-only artwork", () =
   assert.match(surface, /postInvalidateDelayed\(if \(isActivePhase\(\)\)/);
 });
 
+test("island customization controls rendering and first-step feedback", () => {
+  const surface = native("LiquidIslandView.kt");
+  assert.match(surface, /if \(style\.face\) drawCompactFace/);
+  assert.match(surface, /style\.status && phase == "executing"/);
+  assert.match(surface, /canvas\.drawText\("Выполняю"/);
+  assert.match(surface, /if \(style\.progress && compactAlpha/);
+  const engine = native("CortexActionEngine.kt");
+  assert.match(engine, /report\("Выполняю…"\)\s+delay\(1_000L\)/);
+  assert.match(engine, /direct != null && reply == null -> \{\s*firstStep\(::report\)\s*executeSystem/);
+  assert.match(engine, /!visualAllowed ->/);
+  assert.match(native("CortexPhoneActions.kt"), /attempts = 6, interval = 105L/);
+});
+
+test("Android Assistant invocation opens the island without loading MainActivity or waking the microphone", () => {
+  const manifest = readFileSync(new URL("../app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+  assert.match(manifest, /android:name="\.CortexAssistActivity"[\s\S]*?android.intent.action.ASSIST/);
+  const activity = native("CortexAssistActivity.kt");
+  assert.match(activity, /intent\.action != Intent\.ACTION_ASSIST \|\| !selected\(this\)/);
+  assert.match(activity, /Settings\.canDrawOverlays\(this\)/);
+  assert.match(activity, /startForegroundService[\s\S]+ACTION_SYSTEM_ASSIST/);
+  assert.doesNotMatch(activity, /MainActivity|ACTION_WAKE|intent\.extras|VoiceInteractionService/);
+  const service = native("CortexIslandService.kt");
+  assert.match(service, /if \(systemRequested\)[\s\S]*?openFromSystem\(\)/);
+  assert.match(service, /systemInvocation = true[\s\S]*?setExpanded\(true\)/);
+  assert.match(service, /ACTION_SCREEN_OFF && systemInvocation/);
+  assert.match(service, /if \(systemInvocation && !busy && !actionBusy\)[\s\S]*?dismissIsland\(power = true\)/);
+});
+
 test("window placement is observed before morphs and pending transitions are cancelable", () => {
   const service = native("CortexIslandService.kt");
   const surface = native("LiquidIslandView.kt");

@@ -126,7 +126,7 @@ const CortexWave = (() => {
     const elapsed = previous ? Math.min(70, now - previous) : 16.7;
     previous = now;
     age += elapsed / 1000;
-    clock += elapsed / 1000;
+    clock += elapsed / 1000 * (kind === "chat" ? .40 : 1);
     average += (elapsed - average) * .06;
     slowFrames = average > 24 ? slowFrames + 1 : Math.max(0, slowFrames - 2);
     if (slowFrames > 38 && adaptive < 2) {
@@ -135,7 +135,8 @@ const CortexWave = (() => {
       arrange();
     }
     if (pulseSource && clock - pulseSource.time >= 1.05) pulseSource = null;
-    const interval = mode === "voice" || quality === "full" ? 0 : quality === "simple" ? 31 : 22;
+    const interval = kind === "chat" ? (quality === "simple" ? 62 : 42)
+      : mode === "voice" || quality === "full" ? 0 : quality === "simple" ? 31 : 22;
     if (now - lastPaint >= interval) {
       paint(lastPaint ? Math.min(70, now - lastPaint) : elapsed);
       lastPaint = now;

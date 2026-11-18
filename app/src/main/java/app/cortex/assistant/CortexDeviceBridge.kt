@@ -2,6 +2,7 @@ package app.cortex.assistant
 
 import android.Manifest
 import android.app.Activity
+import android.app.role.RoleManager
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -40,7 +41,10 @@ internal class CortexDeviceBridge(
         when (body.optString("operation")) {
             "permissions" -> refreshPermissions()
             "open-settings" -> sendAction("settings") { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
-            "assistant-permission" -> open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+            "assistant-permission" -> sendAction("assistant-permission") {
+                requestAssistantRole() || open(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) ||
+                    open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            }
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
@@ -83,7 +87,8 @@ internal class CortexDeviceBridge(
                 if (item == null) scenarioStatus("Сначала сохраните сценарий.", false, "run")
                 else engine.start(item.name, "fast", force = true, explicitScenario = item,
                     beforeScreen = { activity.moveTaskToBack(true) },
-                    allowPhone = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("phoneActions", true)) {
+                    allowPhone = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("phoneActions", true),
+                    progress = { emit(JSONObject().put("type", "scenario-progress").put("text", it)) }) {
                     scenarioStatus(it.text, it.ok, "run")
                 }
             }
@@ -245,6 +250,16 @@ internal class CortexDeviceBridge(
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun requestAssistantRole(): Boolean {
+        if (Build.VERSION.SDK_INT < 29 || CortexAssistActivity.selected(context)) return false
+        val roles = context.getSystemService(RoleManager::class.java) ?: return false
+        if (!roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) return false
+        return runCatching {
+            activity.startActivityForResult(roles.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT), 505)
+        }.isSuccess
+    }
+
     private fun requestPermission(name: String) {
         if (Build.VERSION.SDK_INT >= 23 && activity.checkSelfPermission(name) != PackageManager.PERMISSION_GRANTED) {
             if (name == Manifest.permission.POST_NOTIFICATIONS && Build.VERSION.SDK_INT < 33) return
@@ -253,6 +268,8 @@ internal class CortexDeviceBridge(
     }
     fun refreshPermissions() {
         val obj = JSONObject().put("type", "permissions")
+            .put("assistantSupported", CortexAssistActivity.available(context))
+            .put("assistant", CortexAssistActivity.selected(context))
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("manufacturer", Build.MANUFACTURER)
@@ -271,6 +288,10 @@ internal class CortexDeviceBridge(
         emit(obj)
     }
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == 505) {
+            refreshPermissions()
+            return
+        }
         if (requestCode == 501 && pendingImage) {
             pendingImage = false
             val e = JSONObject().put("type", "image")

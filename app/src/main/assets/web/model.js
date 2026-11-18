@@ -37,7 +37,7 @@ const Cortex = (() => {
   const defaults = {
     quality: "balanced", reduceMotion: false, rememberSaved: true,
     language: "auto", haptics: true, voiceContinue: true,
-    phoneActions: true, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
+    phoneActions: true, visualAutomation: false, visualBetaSeen: false, visualLaunch: false, model: "auto", aiModel: "auto", notifyReplies: false,
     overlayMode: "off", hideLandscape: true, hotwordEnabled: false, energy: "balanced", addressName: ""
   };
   const array = input => Array.isArray(input) ? input : [];
@@ -105,9 +105,10 @@ const Cortex = (() => {
       .filter(item => item?.saved && Array.isArray(item.messages)).map(migrateChat),
     memories: object(persisted.memories),
     instructions: { ...object(persisted.instructions), cortex: object(persisted.instructions?.cortex) },
-    notes: array(persisted.notes).filter(item => item && typeof item.id === "string"),
     account: account(persisted.account)
   };
+  // Preserve older local records across upgrades without exposing the retired feature.
+  let legacyNotes = array(persisted.notes);
   let owner = state.account?.id || "";
   let guestImported = persisted.guestImported === true || Boolean(owner);
   const accountData = Object.assign(Object.create(null), object(persisted.accountData));
@@ -118,8 +119,7 @@ const Cortex = (() => {
       chats: array(value.chats).filter(item => item && (!savedOnly || item.saved))
         .map(item => ({ ...item, messages: array(item.messages).filter(message => !message.ephemeral) })),
       memories: object(value.memories),
-      instructions: { ...object(value.instructions), cortex: object(value.instructions?.cortex) },
-      notes: array(value.notes).filter(item => item && typeof item.id === "string")
+      instructions: { ...object(value.instructions), cortex: object(value.instructions?.cortex) }
     };
   }
 
@@ -130,8 +130,10 @@ const Cortex = (() => {
         guestImported = true;
         state.chats = state.chats.filter(chat => chat.saved);
       } else {
-        accountData[owner] = localData(state, true);
-        const incoming = localData(object(accountData[selected]), true);
+        accountData[owner] = { ...localData(state, true), ...(legacyNotes.length ? { notes: legacyNotes } : {}) };
+        const stored = object(accountData[selected]);
+        const incoming = localData(stored, true);
+        legacyNotes = array(stored.notes);
         incoming.chats = incoming.chats.filter(chat => Array.isArray(chat.messages)).map(migrateChat);
         delete accountData[selected];
         Object.assign(state, incoming);
@@ -146,7 +148,7 @@ const Cortex = (() => {
       localStorage.setItem(key, JSON.stringify({
         ...state, chats: state.chats.filter(chat => chat.saved)
           .map(chat => ({ ...chat, messages: chat.messages.filter(message => !message.ephemeral) })),
-        accountData, guestImported
+        ...(legacyNotes.length ? { notes: legacyNotes } : {}), accountData, guestImported
       }));
       return true;
     } catch {
@@ -157,11 +159,12 @@ const Cortex = (() => {
   function clearLocalData() {
     const cleared = {
       preferences: { ...defaults }, islandStyle: {}, edits: { cortex: {} }, chats: [], memories: {},
-      instructions: { cortex: {} }, notes: [], account: state.account
+      instructions: { cortex: {} }, account: state.account
     };
     try {
       localStorage.removeItem("cortex.interface.v1");
       localStorage.setItem(key, JSON.stringify({ ...cleared, accountData, guestImported }));
+      legacyNotes = [];
       Object.assign(state, cleared);
       return true;
     } catch { return false; }
@@ -212,23 +215,6 @@ const Cortex = (() => {
     if (!explicit) return null;
     return addMemoryFact(explicit[1], "По просьбе пользователя") ? "Запомнил. Этот факт можно удалить в разделе «Память»." :
       "Не сохранил: память выключена либо запись содержит секретные данные.";
-  }
-
-  function noteCommand(text) {
-    const input = String(text).trim();
-    if (/^(?:кортекс[, ]*)?(?:покажи|прочитай|перечисли) (?:мои )?заметки[.!?]*$/iu.test(input)) {
-      return state.notes.length ? state.notes.map(item => `• ${item.title}: ${item.body.slice(0, 180)}`).join("\n") : "Заметок пока нет.";
-    }
-    const match = /^(?:кортекс[, ]*)?(?:создай|запиши|добавь) заметку\s+([^:\n]{2,90})\s*:\s*([\s\S]{2,2200})$/iu.exec(input);
-    if (!match) return null;
-    const title = match[1].trim().slice(0, 90);
-    const body = match[2].trim().slice(0, 2200);
-    if (/(?:парол|токен|секрет|api[-_ ]?key)/iu.test(title + " " + body)) {
-      return "Не сохраняю в заметках пароли, ключи и другие секреты.";
-    }
-    state.notes.unshift({ id: uid("note"), title, body, updated: new Date().toISOString() });
-    state.notes = state.notes.slice(0, 120);
-    return `Создал заметку «${title}».`;
   }
 
   function learnFromUser(text) {
@@ -352,6 +338,6 @@ const Cortex = (() => {
   if (old && Object.keys(old).length) save();
   return {
     state, defaults, motion, languages, styles, models, aiModels, instructionFields, profile, memory, chat, account,
-    createChat, touch, turns, canSharePublicQuestion, save, useAccount, clearLocalData, memoryCommand, noteCommand, learnFromUser, id: uid
+    createChat, touch, turns, canSharePublicQuestion, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

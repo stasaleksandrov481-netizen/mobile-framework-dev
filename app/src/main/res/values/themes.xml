@@ -11,4 +11,12 @@
         <item name="android:colorControlHighlight">#33FFFFFF</item>
         <item name="android:textColorHighlight">#55FFFFFF</item>
     </style>
+    <style name="Theme.Cortex.Assist" parent="Theme.Cortex">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

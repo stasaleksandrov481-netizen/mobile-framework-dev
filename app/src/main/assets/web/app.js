@@ -89,7 +89,8 @@
   }
 
   function syncIslandOptions() {
-    return sendDevice("island-options", { profile: S.preferences.model, modelId: S.preferences.aiModel, phoneActions: S.preferences.phoneActions, visualLaunch: S.preferences.visualLaunch,
+    return sendDevice("island-options", { profile: S.preferences.model, modelId: S.preferences.aiModel, phoneActions: S.preferences.phoneActions,
+      visualAutomation: S.preferences.visualAutomation, visualLaunch: S.preferences.visualLaunch,
       reduceMotion: reduced(), haptics: S.preferences.haptics, energy: S.preferences.energy,
       addressName: S.preferences.addressName, appearance: Planner.style() });
   }
@@ -193,7 +194,7 @@
 
   function rootTab(page, id = chatId) {
     if (page === "chat") return M.chat(id)?.saved ? "chats" : "home";
-    while (U.parent[page]) page = U.parent[page];
+    while (U.parent[page] && !U.tabs.some(([name]) => name === page)) page = U.parent[page];
     return page;
   }
 
@@ -209,8 +210,7 @@
 
   function mountWave() {
     if (!splash.hidden || app.classList.contains("in-onboarding")) { Wave.stop(); return; }
-    // The empty chat is intentionally calm: do not render an invisible canvas.
-    const main = route === "home";
+    const main = route === "home" || route === "chat";
     const host = main ? ambient : screen.querySelector("[data-wave-host]");
     if (!host) { Wave.stop(); return; }
     const kind = host === ambient ? route : host.dataset.waveHost || "splash";
@@ -602,6 +602,7 @@
     closeSheet();
     placeDialogs();
     activeSheet = options;
+    sheet.classList.toggle("visual-beta-sheet", options.visualBeta === true);
     sheet.innerHTML = `<header class="sheet-head"><h2 id="sheet-title">${esc(title)}</h2>${iconButton("close", "Закрыть", "close")}</header>${body}`;
     sheet.showModal();
   }
@@ -612,6 +613,7 @@
     const cleanup = activeSheet?.cleanup;
     activeSheet = null;
     sheet.close();
+    sheet.classList.remove("visual-beta-sheet");
     sheet.replaceChildren();
     cleanup?.();
   }
@@ -932,7 +934,7 @@
   window.cortexAdminLogin = accountOptions;
 
   function logout() {
-    confirm("Выйти из аккаунта?", "Локальные чаты и заметки останутся на этом устройстве.", async () => {
+    confirm("Выйти из аккаунта?", "Локальные чаты останутся на этом устройстве.", async () => {
       if (pending) stopAnswer(false);
       ++statusEpoch;
       try {
@@ -1011,7 +1013,7 @@
     const deviceContext = {
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
-      screen_control: Boolean(device && S.preferences.phoneActions && permissions.screenAutomation),
+      screen_control: Boolean(device && S.preferences.phoneActions && S.preferences.visualAutomation && permissions.screenAutomation),
       microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
       ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
         deviceSnapshot ? { state: deviceSnapshot } : {})
@@ -1069,7 +1071,7 @@
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text) ?? M.noteCommand(text);
+      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
       const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
@@ -1229,18 +1231,6 @@
         else memory.entries.unshift({ id: M.id("fact"), enabled: true, ...values });
         closeSheet(); saved("Факт сохранён"); render();
       }, { extra: entry ? button("Удалить", "trash", "memory-delete", entry.id, "danger") : "" });
-  }
-
-  function noteEditor(id) {
-    const note = S.notes.find(item => item.id === id);
-    editor(note ? "Заметка" : "Новая заметка",
-      field("title", "Название", note?.title || "", { max: 65 }) +
-      field("body", "Текст", note?.body || "", { rows: 5, max: 5000, optional: true }),
-      values => {
-        if (note) Object.assign(note, values);
-        else S.notes.unshift({ id: M.id("note"), ...values });
-        closeSheet(); saved("Заметка сохранена"); render();
-      }, { extra: note ? button("Удалить", "trash", "note-delete", note.id, "danger") : "" });
   }
 
   function exportChats() {
@@ -1566,6 +1556,7 @@
       if (message.ok && typeof message.data === "string") attachment(message.data);
       else flash("Не удалось подготовить скриншот.");
     }
+    if (message.type === "assistant-permission" && !message.ok) flash("Не удалось открыть выбор помощника Android.");
     if (message.type === "export" && !message.cancelled) flash(message.ok ? "Чаты экспортированы" : "Не удалось сохранить файл");
   }
   if (device) device.onmessage = deviceEvent;
@@ -1582,8 +1573,31 @@
     S.preferences[key] = value;
     saved();
     appearance();
-    if (["model", "aiModel", "phoneActions", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
+    if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics"].includes(key)) syncIslandOptions();
     render();
+  }
+
+  function changeVisualBeta(checkbox) {
+    if (!checkbox.checked || S.preferences.visualBetaSeen) {
+      preference("visualAutomation", checkbox.checked);
+      if (!checkbox.checked) sendDevice("action-stop");
+      return;
+    }
+    checkbox.checked = false;
+    // A dismissed notice counts as seen; the checkbox only changes on approval.
+    S.preferences.visualBetaSeen = true;
+    saved();
+    showSheet("Визуальное управление · БЕТА", `<div class="visual-beta-content">
+      <svg class="visual-beta-face" viewBox="0 0 120 120" aria-hidden="true">
+        <rect x="8" y="8" width="104" height="104" rx="35" fill="#f2cf58"/>
+        <path d="M39 51v8m42-8v8m-34 19c7-6 19-6 26 0" fill="none" stroke="#252010" stroke-width="5" stroke-linecap="round"/>
+        <path d="M58 30h4" stroke="#252010" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+      <p>Функция экспериментальная. CORTEX может ошибаться при распознавании элементов и действиях на экране.</p>
+      <p>Следите за ходом задачи. Остановить её можно в чате или на островке.</p>
+      <div class="actions">${button("Включить", "", "confirm", "", "primary")}
+        ${button("Закрыть", "", "close", "", "quiet")}</div></div>`,
+      { visualBeta: true, confirm: () => preference("visualAutomation", true) });
   }
 
   function filterFaq() {
@@ -1595,6 +1609,9 @@
       const text = (row.dataset.faqCategory + " " + row.textContent).toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
       row.hidden = !text.includes(query);
       if (!row.hidden) found = true;
+    }
+    for (const group of faq.querySelectorAll("[data-faq-group]")) {
+      group.hidden = !group.querySelector("details:not([hidden])");
     }
     faq.querySelector("[data-faq-empty]").hidden = found;
   }
@@ -1647,7 +1664,7 @@
     },
     "delete-chat": id => confirm("Удалить чат?", "Переписка будет удалена с устройства.", () => deleteChats(chat => chat.id === id, "Чат удалён")),
     "clear-chats": () => confirm("Очистить сохранённые чаты?", "Эти беседы исчезнут из истории и памяти.", () => deleteChats(chat => chat.saved, "Сохранённые чаты удалены")),
-    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, заметки, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
+    "clear-local": () => confirm("Сбросить локальные данные?", "Чаты, память, журнал уведомлений и настройки будут удалены с устройства.", () => {
       if (!M.clearLocalData()) { flash("Не удалось удалить локальные данные."); return; }
       supportThread.length = 0;
       localStorage.removeItem(supportStore());
@@ -1759,11 +1776,6 @@
       memory.entries = memory.entries.filter(item => item.id !== id);
       saved("Факт удалён"); render();
     }),
-    "note-edit": noteEditor,
-    "note-delete": id => confirm("Удалить заметку?", "Запись будет удалена с устройства.", () => {
-      S.notes = S.notes.filter(item => item.id !== id);
-      saved("Заметка удалена"); render();
-    }),
     "personality-edit"() {
       const person = M.profile();
       editor("Манера общения", field("tone", "Тон", person.tone) +
@@ -1863,6 +1875,10 @@
   Planner.bind({ root: app, route: () => route, native: Boolean(device), open: navigate, send: sendDevice,
     render, confirm, sheet: showSheet, close: closeSheet, toast: flash,
     updateStyle() { saved(); syncIslandOptions(); }, power: applyEnergy });
+
+  app.addEventListener("change", event => {
+    if (event.target.matches("[data-visual-beta]")) changeVisualBeta(event.target);
+  });
 
   app.addEventListener("input", event => {
     const input = event.target;

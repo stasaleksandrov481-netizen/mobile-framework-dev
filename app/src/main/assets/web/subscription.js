@@ -21,6 +21,22 @@ const CortexSubscription = (() => {
     if (!Number.isFinite(+parsed)) return "—";
     return parsed.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
   }
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  function balance(quota, esc) {
+    const known = quota?.unit === "tokens" && count(quota.limit) && count(quota.remaining);
+    if (quota?.unit === "tokens" && quota.unlimited === true) {
+      return '<section class="cortex-quota-card glass-card"><h2>Лимит ИИ</h2><strong>Безлимит</strong></section>';
+    }
+    if (!known) return '<section class="cortex-quota-card glass-card"><h2>Лимит ИИ</h2><p>Остаток пока недоступен</p></section>';
+    const reset = date(quota.reset_at);
+    const remaining = Math.min(quota.remaining, quota.limit);
+    return `<section class="cortex-quota-card glass-card"><h2>Лимит ИИ</h2>
+      <p class="quota-amount"><strong>${esc(number.format(remaining))}</strong> из ${esc(number.format(quota.limit))} токенов</p>
+      <progress aria-label="Остаток токенов ИИ" value="${remaining}" max="${Math.max(1, quota.limit)}"></progress>
+      ${reset === "—" ? "" : `<p>Обновление · ${esc(reset)} МСК</p>`}
+    </section>`;
+  }
+
   function page(ctx, ui) {
     const { detail, esc, button } = ui;
     const subscription = ctx.connection.subscription;
@@ -30,7 +46,7 @@ const CortexSubscription = (() => {
     const paid = ["start", "pro", "ultra"].includes(current);
     const canBuy = subscription?.checkout === true;
     const loadError = ctx.connection.subscriptionError;
-    const hero = `<section class="sub-hero"><header><span>Текущий тариф</span><strong>${esc(names[current])}</strong></header>
+    const hero = `${balance(quota, esc)}<section class="sub-hero"><header><span>Текущий тариф</span><strong>${esc(names[current])}</strong></header>
       ${paid && quota?.ends_at ? `<p class="sub-note">Подписка до ${esc(date(quota.ends_at))} МСК</p>` : ""}
       ${paid ? `<p class="sub-note">Продление вручную</p>` : ""}</section>`;
     const catalogue = plans.map(plan => {
@@ -41,7 +57,11 @@ const CortexSubscription = (() => {
           selected ? "subscription-renew" : "subscription-checkout", plan.code, "outline") : "";
       return `<article class="sub-plan${selected ? " sub-current" : ""}"><header><h3>${names[plan.code]}</h3>
         <span>${plan.price_kopecks ? esc(money.format(plan.price_kopecks / 100)) + " / мес." : "Бесплатно"}</span></header>
-        <p>${descriptions[plan.code]}</p>${action}</article>`;
+        <p>${descriptions[plan.code]}</p>
+        ${count(plan.daily_tokens) ? `<strong>${esc(number.format(plan.daily_tokens))} токенов в день</strong>` : ""}
+        ${count(plan.advanced_tokens) && plan.advanced_tokens > 0 ?
+          `<small>Из них ${esc(number.format(plan.advanced_tokens))} для продвинутых моделей</small>` : ""}
+        ${action}</article>`;
     }).join("");
     const payments = Array.isArray(subscription?.payments) ? subscription.payments : [];
     const history = payments.length ? `<ul class="sub-payments">${payments.map(payment =>
@@ -60,5 +80,5 @@ const CortexSubscription = (() => {
         ${button("Поддержка", "", "subscription-info", "support", "quiet")}
       </nav></div>`);
   }
-  return { page };
+  return { page, balance };
 })();

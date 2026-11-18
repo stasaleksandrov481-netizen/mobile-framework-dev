@@ -51,9 +51,12 @@ internal class CortexPhoneActions(private val context: Context) {
         when (kind) {
             "app" -> {
                 if (normalized(target) in CAMERA_NAMES) return openCamera()
-                val app = resolveApp(target) ?: return status("not_installed")
-                val intent = context.packageManager.getLaunchIntentForPackage(app.pkg) ?: return status("not_installed")
-                return started(intent).put("name", app.name).put("package", app.pkg).put("verified", false)
+                val manager = context.packageManager
+                val direct = manager.getLaunchIntentForPackage(target)
+                val pkg = if (direct != null) target else resolveApp(target)?.pkg ?: return status("not_installed")
+                val intent = direct ?: manager.getLaunchIntentForPackage(pkg) ?: return status("not_installed")
+                val label = runCatching { manager.getApplicationLabel(manager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+                return started(intent).put("name", label).put("package", pkg).put("verified", false)
             }
             "close_app" -> {
                 val app = resolveApp(target) ?: return status("not_installed")
@@ -245,9 +248,15 @@ internal class CortexPhoneActions(private val context: Context) {
 
     private fun normalized(text: String) = text.lowercase(Locale.ROOT).replace('ё', 'е').trim()
 
-    fun resolveApp(target: String): App? {
+    fun commandAppResolver(): (String) -> String? {
+        val apps by lazy { launchableApps() }
+        return { target -> resolveApp(target, apps)?.pkg }
+    }
+
+    fun resolveApp(target: String): App? = resolveApp(target, launchableApps())
+
+    private fun resolveApp(target: String, apps: List<App>): App? {
         val clean = normalized(target)
-        val apps = launchableApps()
         apps.firstOrNull { it.pkg == clean }?.let { return it }
         val exact = apps.filter { normalized(it.name) == clean }
         if (exact.size == 1) return exact[0]
@@ -319,25 +328,28 @@ internal class CortexPhoneActions(private val context: Context) {
         val expected = result.optString("package")
         if (kind in setOf("app", "close_app") && result.optString("status") == "opened" &&
             expected.isNotBlank() && CortexScreenService.connected != null) {
-            awaitState(active, {
+            awaitState(active, attempts = 6, interval = 105L, condition = {
                 val foreground = CortexScreenService.connected?.activePackage()
                 foreground != null && if (kind == "close_app") foreground != expected else foreground == expected
             }) { confirmed -> done(result.put("verified", confirmed)) }
         } else if (kind == "lock_screen" && result.optString("status") == "requested") {
             val keyguard = context.getSystemService(KeyguardManager::class.java)
-            awaitState(active, { keyguard.isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive }) {
+            awaitState(active, condition = { keyguard.isKeyguardLocked || !context.getSystemService(PowerManager::class.java).isInteractive }) {
                 done(result.put("status", if (it) "done" else "requested"))
             }
         } else done(result)
     }
 
-    private fun awaitState(active: () -> Boolean, condition: () -> Boolean, done: (Boolean) -> Unit) {
-        var remaining = 9
+    private fun awaitState(
+        active: () -> Boolean, attempts: Int = 9, interval: Long = 220L,
+        condition: () -> Boolean, done: (Boolean) -> Unit
+    ) {
+        var remaining = attempts
         fun check() {
             if (!active()) return
             if (condition()) done(true)
             else if (remaining-- == 0) done(false)
-            else main.postDelayed(::check, 220)
+            else main.postDelayed(::check, interval)
         }
         check()
     }

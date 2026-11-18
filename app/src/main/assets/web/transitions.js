@@ -43,10 +43,10 @@ const CortexMotion = (() => {
   }
 
   function reply(body) {
-    body.animate([
-      { opacity: .76, transform: "translateY(3px)" },
-      { opacity: 1, transform: "none" }
-    ], { duration: 155, easing: ease });
+    body.classList.add("reply-reveal");
+    body.addEventListener("animationend", event => {
+      if (event.animationName === "cortex-ink-reveal") body.classList.remove("reply-reveal");
+    }, { once: true });
   }
 
   const presses = new WeakMap();
