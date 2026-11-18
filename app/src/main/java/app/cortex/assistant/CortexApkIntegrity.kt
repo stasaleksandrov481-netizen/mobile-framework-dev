@@ -13,6 +13,10 @@ import java.security.MessageDigest
  * can patch the check. The server must never treat this as device authenticity.
  */
 internal object CortexApkIntegrity {
+    /** Never attach the legacy device hint when the local APK signature fails. */
+    fun deviceHeaderValue(signatureApproved: Boolean, deviceId: String?): String? =
+        deviceId?.takeIf { signatureApproved }
+
     fun releaseSignerMatches(context: Context): Boolean {
         if (BuildConfig.DEBUG) return true
         val expected = BuildConfig.CORTEX_RELEASE_SIGNER_SHA256

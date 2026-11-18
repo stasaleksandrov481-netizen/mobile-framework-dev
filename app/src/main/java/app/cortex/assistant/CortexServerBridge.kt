@@ -52,6 +52,11 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val cortexPackage = runCatching { context.packageManager.getPackageInfo(context.packageName,0) }.getOrNull()
     private val approvedApkSignature = CortexApkIntegrity.releaseSignerMatches(context)
 
+    private fun attachDeviceHint(connection: HttpURLConnection) {
+        CortexApkIntegrity.deviceHeaderValue(approvedApkSignature, deviceId)
+            ?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+    }
+
     fun handle(raw: String, reply: JavaScriptReplyProxy) {
         if (raw.length > 270_000) {
             val id = Regex("\\\"id\\\"\\s*:\\s*\\\"(request-[0-9]{10,16}-[0-9]{1,9})\\\"")
@@ -117,7 +122,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Audio-Stream", CortexAudioCodec.PCM_FORMAT)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("X-Cortex-Install", installId)
-            if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            attachDeviceHint(connection)
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
             store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true
@@ -303,7 +308,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Install", installId)
             // Detect accidental re-signing or tampering in an unmodified release.
             // A patched client can bypass this: server-side attestation is required.
-            if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            attachDeviceHint(connection)
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")
@@ -367,7 +372,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Audio-Accept", CortexAudioCodec.ADPCM_FORMAT)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("X-Cortex-Install", installId)
-            deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
+            attachDeviceHint(connection)
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
             store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true

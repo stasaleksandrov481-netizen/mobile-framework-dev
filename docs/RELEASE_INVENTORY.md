@@ -1,5 +1,12 @@
 # Инвентаризация релизов CORTEX
 
+## 18.11.2026 UTC — подтверждённый Edge v48 и ограниченная Android security-правка
+
+- GitHub `main` SHA `af48b0edfa71e31cacfe5c1ac1b1b2d3697c4f05`, PR #76 слит. Supabase Edge `cortex` **ACTIVE v48**, `verify_jwt:false`: скачаны все 11 live-файлов, 11/11 побайтово совпали с main. Предыдущая v47 остаётся rollback-кандидатом; более ранний пункт «v48 пока не опубликован» ниже — историческая запись, **неактуальная**. Существующий SQL `cortex_reserve` реализует общий 2000/min и 50000/day предохранитель AI.
+- Vercel Firewall active v10, системная защита DDoS `challenge` сработала на эпизод 18:45Z 18.11.2026; проверенный сайт и `/api/status` отдавали HTTP 200, Redis `cache:ok`. Веб-интерфейс и Android APK не переиздавались.
+- В [PR #77](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/77) подготовлен **только** guard на передачу legacy Android device ID через три HTTP-пути (включая fallback TTS) плюс 2 unit-теста; это **не production Android APK**, не серверная attestation и не новая подпись.
+- Live история БД 32 миграции, Git содержит 21 SQL-файл, часть версий пересекается под разными номерами. Архив 15 точных SQL-текстов сохранён отдельно локально, без автоприменения. **Полный clean restore не проверен**, не применять эти миграции на действующей БД.
+
 ## 18.11.2026 19:20 UTC — противодействие DDoS, Edge v47 → кандидат v48
 
 - На `cortexapp.ru` Vercel обнаружил активный DDoS-эпизод с `18:45Z`: **1 206 282 запроса** за указанную минуту, системная защита `sys_dos_mitigation:challenge`; проверенные страницы и `/api/status` возвращают HTTP 200. WAF v10 продолжает deny 14 exploit-paths и rate-limit статуса 120/мин/IP, наблюдает POST endpoints оплаты в режиме `log`. Cloudflare DNS-only, не является активным WAF этого домена.
