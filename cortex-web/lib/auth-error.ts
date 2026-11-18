@@ -18,7 +18,7 @@ export function safeAuthErrorMessage(error: unknown): string {
     return "Не удалось связаться с сервером. Проверьте интернет, попробуйте другую сеть или повторите позже.";
   }
   if (error instanceof RegistrationValidationError) return message;
-  if (/invalid login credentials/i.test(message)) return "Неверная почта или пароль.";
+  if (/invalid login credentials/i.test(message)) return "Не удалось войти. Проверьте почту и пароль или воспользуйтесь восстановлением доступа.";
   if (/email not confirmed/i.test(message)) return "Сначала подтвердите адрес электронной почты.";
   if (/token has expired|invalid token|otp_expired/i.test(message)) return "Код неверный или уже истёк. Проверьте последнее письмо либо запросите новый код ниже.";
   if (/error sending (confirmation |magic link )?email|failed to send (confirmation |magic link )?email|could not send email|non-local recipient/i.test(message)) {
