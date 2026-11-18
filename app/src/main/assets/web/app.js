@@ -17,6 +17,7 @@
   const device = window.CortexDevice;
   const systemMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const routes = new Set([...U.tabs.map(([name]) => name), ...Object.keys(U.parent)]);
+  const publicRoutes = new Set(["account", "about", "privacy"]);
   const drafts = new Map(), errors = new Map(), actionReplies = new Map();
   const supportStore = () => "cortex.support.chat.v1:" + (S.account?.id || "guest");
   const loadSupport = () => {
@@ -243,6 +244,10 @@
   }, true);
 
   function render({ bottom = false, messageEnter = false } = {}) {
+    if (!S.account && !publicRoutes.has(route)) {
+      route = "account";
+      history.replaceState(null, "", "#account");
+    }
     const before = screen.querySelector(".scroll");
     const previousTop = before?.scrollTop || 0;
     const previousRoute = screen.dataset.route;
@@ -268,7 +273,7 @@
     }
     updateCodeCells();
     renderNav();
-    nav.hidden = route === "account";
+    nav.hidden = route === "account" || !S.account;
     composition.hidden = route !== "home" && route !== "chat";
     if (!composition.hidden) {
       const draft = drafts.get(draftKey()) || "";
@@ -311,6 +316,7 @@
 
   function navigate(next, { id, replace = false, origin, newChat = false, messageEnter = false, cinematic = false, animate = true } = {}) {
     if (!routes.has(next)) return;
+    if (!S.account && !publicRoutes.has(next)) next = "account";
     const previous = route;
     const previousId = chatId;
     if (next === "chat") id = id && M.chat(id) ? id : current()?.id || M.createChat().id;
@@ -367,6 +373,7 @@
     const [name, id] = location.hash.slice(1).split("/");
     const resolved = { appearance: "motion", connection: "settings", voice: "phone-tools" }[name] || name;
     route = routes.has(resolved) ? resolved : "home";
+    if (!S.account && !publicRoutes.has(route)) route = "account";
     if (route !== "chat" && document.activeElement === input) input.blur();
     if (route !== "chat") app.classList.remove("composer-active");
     if (route === "chat") {
@@ -395,6 +402,7 @@
     if (sheet.open) { dismissSheet(); return true; }
     if (drawer.open) { closeHistory(); return true; }
     if (voice) { closeVoice(); return true; }
+    if (route === "account" && !S.account) return false;
     if (route === "home") return false;
     navigate(route === "chat" && current()?.saved ? "chats" : U.parent[route] || "home", { replace: true });
     return true;
@@ -682,7 +690,7 @@
       }
       // Place onboarding underneath the splash BEFORE fading it out.
       // Otherwise the home screen flashes for one frame.
-      window.CortexSetup?.autoStart();
+      if (S.account) window.CortexSetup?.autoStart();
       splash.classList.add("leaving");
       screen.inert = nav.inert = composition.inert = app.classList.contains("in-onboarding");
       splashTimer = setTimeout(() => {
@@ -700,8 +708,20 @@
     const account = M.account(value);
     const changed = previousId !== account?.id;
     if (changed && pending) stopAnswer(false);
+    if (changed && !account) {
+      closeVoice();
+      sendDevice("action-stop");
+    }
     M.useAccount(account);
     if (changed) {
+      if (account) {
+        sendDevice("overlay-config", { mode: S.preferences.overlayMode,
+          hideLandscape: S.preferences.hideLandscape, resume: true });
+        sendDevice("wake-config", { enabled: S.preferences.hotwordEnabled, restore: true });
+      } else {
+        sendDevice("wake-config", { enabled: false });
+        sendDevice("overlay-config", { mode: "off" });
+      }
       supportEpoch++;
       supportPending = false;
       supportThread.splice(0, supportThread.length, ...loadSupport());
@@ -731,12 +751,14 @@
       connection.status = "ready";
       connection.emailRegistration = data.email_auth === true;
       connection.email = data.email_login === true || connection.emailRegistration;
-      connection.guest = data.guest === true;
-      connection.guestId = S.account ? "" : typeof data.guest_id === "string" && /^@g\d{6,17}$/.test(data.guest_id)
-        ? data.guest_id : connection.guestId || "";
       connection.profiles = data.device_profiles === true;
+      const restoredSession = !S.account && Boolean(data.account);
       setAccount(data.account);
       connection.quota = data.quota || null;
+      if (restoredSession && route === "account") {
+        navigate("home", { replace: true, animate: false });
+        window.CortexSetup?.autoStart();
+      } else if (!S.account && !publicRoutes.has(route)) navigate("account", { replace: true });
       syncComposer();
     } catch {
       if (epoch !== statusEpoch) return;
@@ -799,15 +821,10 @@
 
   addEventListener("cortex-quota", event => {
     const quota = event.detail;
-    if (!quota?.id || (S.account ? S.account.id !== quota.id : !quota.id.startsWith("guest_"))) return;
+    if (!S.account || quota?.id !== S.account.id) return;
     connection.quota = quota;
     syncComposer();
     if (["profile", "models", "subscription"].includes(route)) render();
-  });
-  addEventListener("cortex-guest-id", event => {
-    if (S.account || typeof event.detail !== "string" || !/^@g\d{6,17}$/.test(event.detail)) return;
-    connection.guestId = event.detail;
-    if (route === "about") render();
   });
 
   function accountOptions() {
@@ -909,9 +926,10 @@
       if (result.state === "signed_in" && M.account(result.account)) {
         ++statusEpoch;
         setAccount(result.account);
-        if (form.isConnected) navigate("profile", { replace: true });
+        if (route === "account") navigate("profile", { replace: true });
         refreshConnection();
         window.CortexControl?.refresh();
+        window.CortexSetup?.autoStart();
         flash("Вход выполнен");
       } else if (result.state === "check_email" && form.isConnected) {
         emailResendCooldown();
@@ -1152,6 +1170,7 @@
 
   function submitMessage(text, control) {
     if (!text) return;
+    if (!S.account) { navigate("account"); return; }
     if (pending) { flash("Сначала дождитесь текущего ответа."); return; }
     const home = route === "home";
     const chat = home ? homeChat() : current();
@@ -1362,6 +1381,7 @@
   }
 
   function startVoice(dictation, control) {
+    if (!S.account) { navigate("account"); return; }
     if (!device || pending) return;
     closeVoice();
     const selection = [input.selectionStart, input.selectionEnd];
@@ -1959,7 +1979,7 @@
   });
   systemMotion.addEventListener("change", () => { clearVisuals(); appearance(); syncIslandOptions(); mountWave(); });
   addEventListener("cortex-onboarding-end", event => {
-    if (event.detail?.configured) {
+    if (event.detail?.configured && S.account) {
       syncIslandOptions();
       sendDevice("overlay-config", { mode: S.preferences.overlayMode, hideLandscape: S.preferences.hideLandscape });
       if (S.preferences.hotwordEnabled) sendDevice("wake-config", { enabled: true });
@@ -1998,8 +2018,11 @@
   sendDevice("visual-privacy");
   syncIslandOptions();
   sendDevice("support-notify-config", { enabled: S.preferences.notifyReplies });
-  if (S.preferences.hotwordEnabled && S.preferences.overlayMode !== "off") {
+  if (S.account && S.preferences.hotwordEnabled && S.preferences.overlayMode !== "off") {
     sendDevice("wake-config", { enabled: true, restore: true });
+  } else {
+    sendDevice("wake-config", { enabled: false });
+    if (!S.account) sendDevice("overlay-config", { mode: "off" });
   }
   sendDevice("screen-context");
   connectionLoad = refreshConnection();

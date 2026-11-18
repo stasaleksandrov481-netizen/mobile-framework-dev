@@ -21,6 +21,7 @@ const FREE_MODEL = /^[a-z0-9._-]+\/[a-z0-9._-]+:free$/;
 const JSON_HEADERS = {
   "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
 };
+const GEMINI_VOICES = new Set(["Kore", "Puck", "Charon"]);
 
 type Env = Record<string, string | undefined>;
 type Limit = { bucket: string; seconds: number; maximum: number };
@@ -164,7 +165,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
   const guestGlobalMinute = Math.max(30, Math.min(1000,
     Math.floor(Number(env.CORTEX_GUEST_GLOBAL_MINUTE_LIMIT) || 180)));
   const allow = new Set((env.CORTEX_ALLOWED_EMAILS || "").split(",").map(value => value.trim().toLowerCase()).filter(Boolean));
-  const guests = !allow.size && env.CORTEX_GUEST_ACCESS !== "false";
+  // Guest AI is off for all new releases, including installations whose old
+  // environment still explicitly sets CORTEX_GUEST_ACCESS=true.
+  const guests = !allow.size && env.CORTEX_GUEST_ACCESS === "true" &&
+    env.CORTEX_ALLOW_LEGACY_GUESTS === "true";
   const allowed = (email: string) => !allow.size || allow.has(email.toLowerCase());
 
   async function database<T>(path: string, method = "GET", payload?: unknown, preference = ""): Promise<T> {
@@ -702,16 +706,24 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           { bucket: "speech:all", seconds: 86_400, maximum: Math.max(50, Math.min(5000,
             Math.floor(Number(env.CORTEX_SPEECH_GLOBAL_DAILY_LIMIT) || 500))) },
         );
-        const key = paidKey || await providerKey().catch(() => "");
+        const wantsStream = request.headers.get("x-cortex-audio-stream") === "pcm_s16le_24000_mono";
+        const [key, voiceSettings, identity, access] = await Promise.all([
+          paidKey ? Promise.resolve(paidKey) : providerKey().catch(() => ""),
+          wantsStream ? database<Array<{ voice_id: string }>>(
+            "cortex_voice_preferences?select=voice_id&user_id=eq." + caller.account.id + "&limit=1")
+            .catch(() => []) : Promise.resolve([]),
+          aiIdentity(request, caller.account),
+          usage(request, caller.account),
+        ]);
         if (!key) throw new Failure("unconfigured", 503);
+        const requestedVoice = voiceSettings[0]?.voice_id;
+        const speechVoice = requestedVoice && GEMINI_VOICES.has(requestedVoice) ? requestedVoice : "Kore";
         // Charge TTS against the same daily token ledger as chat. TTS providers
         // do not expose text-model token counts, so this is a deterministic
         // service-token equivalent based on UTF-8 input length. Never accept
         // a price, model or reported usage figure from the client.
-        const identity = await aiIdentity(request, caller.account);
         const id = identity.id;
         if (!id) throw new Failure("sign_in", 401);
-        const access = await usage(request, caller.account);
         const paidSpeech = Boolean(paidKey && ["start", "pro", "ultra"].includes(access?.plan || ""));
         if (!paidSpeech && !identity.device) throw new Failure("client_version", 426);
         if (!paidSpeech && identity.otherAccount) throw new Failure("free_device_account_limit", 403);
@@ -736,7 +748,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
             upstream = await network("https://openrouter.ai/api/v1/audio/speech", {
               method: "POST", redirect: "error", signal: AbortSignal.timeout(index ? 12_000 : 15_000),
               headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
-              body: JSON.stringify({ model, input: text.trim(), voice: "Kore", response_format: "pcm" }),
+              body: JSON.stringify({ model, input: text.trim(), voice: speechVoice, response_format: "pcm" }),
             });
           } catch {
             if (!index) continue;
@@ -758,6 +770,48 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         if ((upstream.headers.get("content-type") || "").includes("json")) {
           await upstream.body?.cancel();
           throw new Failure("speech_unavailable", 502);
+        }
+        if (wantsStream) {
+          const reader = upstream.body?.getReader();
+          if (!reader) throw new Failure("speech_unavailable", 502);
+          let bytes = 0;
+          let settled = false;
+          const settle = async () => {
+            if (settled) return;
+            settled = true;
+            const generated = bytes > 0;
+            const audioSeconds = bytes / 48_000;
+            const cost = Math.ceil(audioSeconds * 25 * (synthesisModel === speechModel ? 6 : 9) + inputUnits * 0.5);
+            await database(paidSpeech ? "rpc/cortex_paid_finish" : "rpc/cortex_ai_finish", "POST",
+              paidSpeech ? { p_attempt: hold.attempt, p_input: generated ? inputUnits : null,
+                p_output: generated ? outputUnits : null, p_cost: generated ? cost : null }
+                : { p_attempt: hold.attempt, p_input: generated ? inputUnits : null,
+                  p_output: generated ? outputUnits : null }).catch(() => {});
+          };
+          const stream = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              try {
+                const part = await reader.read();
+                if (part.done) {
+                  if (!bytes || bytes % 2) throw new Error("invalid_pcm");
+                  await settle();
+                  controller.close();
+                  return;
+                }
+                bytes += part.value.byteLength;
+                if (bytes > 2_400_000) throw new Error("oversized_pcm");
+                controller.enqueue(part.value);
+              } catch (error) {
+                controller.error(error);
+                await reader.cancel().catch(() => {});
+                await settle();
+              }
+            },
+            async cancel() { await reader.cancel().catch(() => {}); await settle(); },
+          }, { highWaterMark: 0 });
+          synthesized = true;
+          return new Response(stream, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+            "X-Cortex-Audio-Format": "pcm_s16le_24000_mono", "X-Cortex-Speech-Provider": "openrouter-gemini" } });
         }
         const parts: Uint8Array[] = [];
         let size = 0;

@@ -231,8 +231,8 @@ const CortexUI = (() => {
       <div class="scroll profile-scroll stack">
         <section class="profile-identity glass-card">
           ${portrait(account, "large")}
-          <div class="account-copy"><strong>${esc(account?.name || "Гость")}</strong>
-            <p>${esc(account?.email || "Данные хранятся на устройстве")}</p>
+          <div class="account-copy"><strong>${esc(account?.name || "Войдите в CORTEX")}</strong>
+            <p>${esc(account?.email || "Для работы нужен аккаунт")}</p>
             ${type ? `<small class="muted">${esc(type)}</small>` : ""}
           </div>
           ${!account && ctx.native ? `<div class="profile-signin actions">
@@ -275,7 +275,7 @@ const CortexUI = (() => {
     const password = (name, caption) => `<label class="field"><span>${caption}</span><span class="account-password">
       <input name="${name}" type="password" required maxlength="72" ${newPassword ? 'minlength="10" autocomplete="new-password"' : 'autocomplete="current-password"'}>
       ${iconButton("eye", "Показать пароль", "password-visibility")}</span></label>`;
-    return `<header class="section-header account-top">${iconButton("back", "К профилю", "back", "", "section-back")}
+    return `<header class="section-header account-top">${M.state.account ? iconButton("back", "К профилю", "back", "", "section-back") : ""}
       <span class="brand">${sign}<span>CORTEX</span></span></header>
       <div class="scroll account-scroll"><div class="account-page">
         <div class="account-hero"><div class="account-art glass-card" aria-hidden="true">${sign}<i></i><i></i></div>
@@ -513,7 +513,7 @@ const CortexUI = (() => {
     </section>`);
   }
   function about(ctx) {
-    const publicId = M.state.account?.public_id || ctx.connection?.guestId || "";
+    const publicId = M.state.account?.public_id || "";
     const idType = M.state.account ? "ID аккаунта" : "ID гостя";
     return detail("О приложении", "", `<section class="panel about-card">
       <div class="brand">${sign}<span>CORTEX</span></div><p class="muted">Версия ${version}</p>

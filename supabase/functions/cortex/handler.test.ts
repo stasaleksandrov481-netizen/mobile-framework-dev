@@ -15,7 +15,8 @@ const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 
 function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50,
   emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
-  enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4])) {
+  enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4]), streamedGemini = false,
+  guestEnabled = true, oldGuestFlag = false) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -40,6 +41,8 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
     SUPABASE_ANON_KEY: "test-publishable",
     SUPABASE_SERVICE_ROLE_KEY: "test-service",
     OPENROUTER_API_KEY: "test-key",
+    ...(guestEnabled || oldGuestFlag ? { CORTEX_GUEST_ACCESS: "true" } : {}),
+    ...(guestEnabled ? { CORTEX_ALLOW_LEGACY_GUESTS: "true" } : {}),
     ...(paid ? { CORTEX_PAID_OPENROUTER_KEY: "test-paid-key" } : {}),
     YANDEX_CLIENT_ID: "yandex-test-app",
     YANDEX_CLIENT_SECRET: "yandex-test-secret",
@@ -56,8 +59,17 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/audio/speech") {
       assert.equal(new Headers(init?.headers).get("Authorization"), paid ? "Bearer test-paid-key" : "Bearer test-key");
       assert.ok(["google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts"].includes(body.model));
-      assert.deepEqual({ ...body, model: undefined }, { model: undefined, input: "Привет", voice: "Kore", response_format: "pcm" });
+      assert.deepEqual({ ...body, model: undefined }, { model: undefined, input: "Привет",
+        voice: streamedGemini ? "Puck" : "Kore", response_format: "pcm" });
       if (speechLiteStatus && body.model === "google/gemini-3.8-flash-lite-tts") return new Response(null, { status: speechLiteStatus });
+      if (streamedGemini) {
+        const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
+        return new Response(new ReadableStream({ pull(controller) {
+          const chunk = chunks.shift();
+          if (chunk) controller.enqueue(chunk);
+          else controller.close();
+        } }), { headers: { "content-type": "application/octet-stream" } });
+      }
       return new Response(speechPcm, { headers: { "content-type": "application/octet-stream" } });
     }
 
@@ -122,6 +134,8 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         return Response.json(url.searchParams.has("expires_at") && !expiredSession ? [
           { account: { id: accountId, email: "admin@example.test", name: "QA", provider: "Google", avatar: "" } },
         ] : []);
+      case "/rest/v1/cortex_voice_preferences":
+        return Response.json([{ voice_id: "Puck" }]);
       case "/rest/v1/cortex_release_versions": return Response.json([]);
       case "/rest/v1/cortex_admin_roles": return Response.json([{ role: "admin" }]);
 
@@ -422,7 +436,20 @@ test("Opus, Fable and the newest providers reserve credits proportional to their
   assert.ok(paidHolds[1].p_output > paidHolds[0].p_output);
 });
 
-test("a guest cannot select a paid model or inject an arbitrary OpenRouter ID", async () => {
+test("legacy guest access remains disabled with only the old environment flag", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, true, false, 0, "", false,
+    false, new Uint8Array([1, 2, 3, 4]), false, false, true);
+  const status = await (await call("status")).json();
+  assert.equal(status.guest, false);
+  assert.equal(status.guest_id, null);
+  const chat = await call("chat", chatPayload("Привет", false));
+  assert.equal(chat.status, 401);
+  assert.equal((await chat.json()).error, "sign_in");
+  assert.equal((await call("speech", { text: "Привет" })).status, 401);
+  assert.ok(!requests.includes("POST /api/v1/audio/speech"));
+});
+
+test("a legacy guest cannot select a paid model or inject an arbitrary OpenRouter ID", async () => {
   const { call, models } = fixture();
   const premium = await call("chat", { ...chatPayload("Привет", false), model_id: "openai/gpt-6-luna" });
   assert.equal(premium.status, 403);
@@ -464,6 +491,38 @@ test("speech is server-authenticated, throttled and returns only validated PCM",
   "personal speech usage should be bounded by tokens, not an extra daily request count");
   assert.ok(reservations.some(limits => limits.some(limit => limit.bucket === "speech:all" &&
     limit.seconds === 86_400 && limit.maximum === 500)));
+});
+
+test("Gemini streams PCM through OpenRouter and applies account voice settings", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, true, false, 0, "", false, false,
+    new Uint8Array([1, 2, 3, 4]), true);
+  const headers = { Authorization: "Bearer " + "T".repeat(43),
+    "X-Cortex-Audio-Stream": "pcm_s16le_24000_mono" };
+  const response = await call("speech", { text: "Привет" }, headers);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("X-Cortex-Speech-Provider"), "openrouter-gemini");
+  assert.equal(response.headers.get("X-Cortex-Audio-Format"), "pcm_s16le_24000_mono");
+  const reader = response.body!.getReader();
+  assert.deepEqual((await reader.read()).value, new Uint8Array([1, 2]));
+  assert.ok(!requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
+  assert.deepEqual((await reader.read()).value, new Uint8Array([3, 4]));
+  assert.equal((await reader.read()).done, true);
+  assert.ok(requests.includes("GET /rest/v1/cortex_voice_preferences"));
+  assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
+});
+
+test("cancelled paid streaming speech settles the reservation once", async () => {
+  const { call, requests } = fixture(false, undefined, 15000, 50, true, true, 0, "", false, false,
+    new Uint8Array([1, 2, 3, 4]), true);
+  const response = await call("speech", { text: "Привет" }, {
+    Authorization: "Bearer " + "T".repeat(43), "X-Cortex-Audio-Stream": "pcm_s16le_24000_mono",
+  });
+  assert.equal(response.status, 200);
+  const reader = response.body!.getReader();
+  assert.deepEqual((await reader.read()).value, new Uint8Array([1, 2]));
+  await reader.cancel();
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_reserve").length, 1);
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_finish").length, 1);
 });
 
 test("paid voice synthesis uses the existing subscription token allowance", async () => {

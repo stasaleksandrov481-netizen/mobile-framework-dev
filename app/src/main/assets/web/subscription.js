@@ -1,13 +1,12 @@
 "use strict";
 
 const CortexSubscription = (() => {
-  const names = { guest: "Guest", free: "Free", start: "Start", pro: "Pro", ultra: "Ultra" };
-  const descriptions = { guest: "ИИ без аккаунта", free: "Для повседневных вопросов",
+  const names = { free: "Free", start: "Start", pro: "Pro", ultra: "Ultra" };
+  const descriptions = { free: "Для повседневных вопросов",
     start: "Расширенный контекст и сложные запросы", pro: "Продвинутые модели, анализ экрана и многошаговые задачи",
     ultra: "Максимальный контекст и приоритет облачных запросов" };
   const states = { pending: "Ожидает оплаты", confirmed: "Оплачен", canceled: "Отменён", refunded: "Возвращён" };
   const defaults = [
-    { code: "guest", price_kopecks: 0, daily_tokens: 16000, advanced_tokens: 0 },
     { code: "free", price_kopecks: 0, daily_tokens: 35000, advanced_tokens: 0 },
     { code: "start", price_kopecks: 19900, daily_tokens: 40000, advanced_tokens: 4000 },
     { code: "pro", price_kopecks: 39900, daily_tokens: 100000, advanced_tokens: 20000 },
@@ -41,8 +40,9 @@ const CortexSubscription = (() => {
     const { detail, esc, button } = ui;
     const subscription = ctx.connection.subscription;
     const quota = ctx.connection.quota || subscription?.quota;
-    const current = quota?.plan || (Cortex.state.account ? "free" : "guest");
-    const plans = Array.isArray(subscription?.plans) ? subscription.plans : defaults;
+    const current = quota?.plan === "guest" ? "free" : quota?.plan || "free";
+    const plans = (Array.isArray(subscription?.plans) ? subscription.plans : defaults)
+      .filter(plan => plan.code !== "guest");
     const paid = ["start", "pro", "ultra"].includes(current);
     const canBuy = subscription?.checkout === true;
     const loadError = ctx.connection.subscriptionError;
@@ -52,8 +52,7 @@ const CortexSubscription = (() => {
     const catalogue = plans.map(plan => {
       if (!Object.hasOwn(names, plan.code)) return "";
       const selected = plan.code === current;
-      const action = plan.code === "free" && current === "guest" ? button("Войти для Free", "", "go", "account", "outline") :
-        canBuy && plan.price_kopecks > 0 ? button(selected ? "Продлить" : paid ? "Сменить на " + names[plan.code] : "Выбрать " + names[plan.code], "",
+      const action = canBuy && plan.price_kopecks > 0 ? button(selected ? "Продлить" : paid ? "Сменить на " + names[plan.code] : "Выбрать " + names[plan.code], "",
           selected ? "subscription-renew" : "subscription-checkout", plan.code, "outline") : "";
       return `<article class="sub-plan${selected ? " sub-current" : ""}"><header><h3>${names[plan.code]}</h3>
         <span>${plan.price_kopecks ? esc(money.format(plan.price_kopecks / 100)) + " / мес." : "Бесплатно"}</span></header>
@@ -70,9 +69,9 @@ const CortexSubscription = (() => {
        ${payment.state === "pending" ? button("Проверить", "", "subscription-status", payment.id, "quiet") : ""}</li>`).join("")}</ul>` : "<p>Платежей пока нет.</p>";
     return detail("Подписка", "", `<div class="sub-page">${hero}
       ${loadError ? `<p class="sub-status" role="status">${esc(loadError)} ${button("Обновить", "", "subscription-refresh", "", "quiet")}</p>` : ""}
-      <section class="sub-section"><h2>Тарифы</h2>${!canBuy ? `<p class="sub-status">${current === "guest" ? "Для покупки понадобится аккаунт." : "Оплата подписок пока закрыта."}</p>` : ""}
+      <section class="sub-section"><h2>Тарифы</h2>${!canBuy ? `<p class="sub-status">Оплата подписок пока закрыта.</p>` : ""}
       <div class="sub-plans">${catalogue}</div></section>
-      <p class="sub-note">Локальные команды, сценарии, напоминания и настройки островка бесплатны и безлимитны.</p>
+      <p class="sub-note">Локальные команды, сценарии, напоминания и настройки островка не расходуют токены ИИ.</p>
       <section class="sub-section"><h2>История платежей</h2>${history}</section>
       <nav class="sub-legal" aria-label="Документы и помощь">
         ${button("Политика конфиденциальности", "", "subscription-info", "privacy", "quiet")}
