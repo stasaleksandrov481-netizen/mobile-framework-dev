@@ -109,7 +109,8 @@ internal class FirstExperienceCalculator(
             val numeric = text.isBlank() || FirstExperienceReadback.integer(text) != null ||
                 FirstExperienceMath.expression(text).matches(Regex("""[0-9.+*/-]{1,40}"""))
             !node.clickable && !node.scrollable &&
-                node.role in setOf("TextView", "EditText", "TextInputEditText") &&
+                (node.role in setOf("TextView", "EditText", "TextInputEditText") ||
+                    node.role.endsWith("TextView") || node.role.endsWith("Display")) &&
                 !node.bounds.isEmpty && node.bounds.bottom <= keypadTop &&
                 node.bounds.width() >= frame.bounds.width() * .18f &&
                 node.bounds.top > frame.bounds.top + frame.bounds.height() * .06f &&
