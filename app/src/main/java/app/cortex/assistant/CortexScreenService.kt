@@ -43,6 +43,7 @@ class CortexScreenService : AccessibilityService() {
         super.onServiceConnected()
         connected = this
         if (!CortexRuntime.firstExperienceActive) FirstExperienceBrightness.restorePending(this)
+        CortexFirstExperience.availabilityChanged(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {

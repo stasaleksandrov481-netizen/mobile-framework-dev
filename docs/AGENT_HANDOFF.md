@@ -1,5 +1,14 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · FIRST EXPERIENCE false permission stop · beta.4 fix
+
+- User supplied a Samsung screenshot of the beta.3 demo stopping with the generic «экран или разрешения больше недоступны» message despite granted access. This is a real-device failure report; earlier APK/CI checks did not validate device behavior.
+- Root race found in code: report() can render an opaque existing island synchronously, then startForegroundService queues ACTION_FIRST_EXPERIENCE. The old ready check accepted that view before onStartCommand ran. onStartCommand subsequently set alpha=0 for the 340ms entrance, while the watchdog used that same alpha-sensitive readiness every 180ms and cancelled as though permissions were lost.
+- Separate branch `fix/cortex-demo-lifecycle-20261119`, baseline main `9cd81d2684d29abdc6eda1228004add2fa57e949`. Android beta.4 / code121 prepared. `FirstExperienceIslandSession` requires acknowledgement of the current session intent before startup readiness; stale/duplicate intents cannot revive or reanimate another session. Ongoing availability ignores cosmetic opacity while still requiring an attached Stop island.
+- Normal saved-mode off synchronization defers shutdown during the demo lease, and cleanup reapplies the stored mode. Genuine accessibility disconnect, lock, overlay revocation, orientation hiding or island loss still cancel with distinct truthful messages and the existing brightness restoration. Accessibility connection events refresh the offer instead of telling a user with already-granted access to grant it again.
+- Added 8 deterministic JVM regressions for the exact queued-start/fade race, duplicate/stale session intents and each true loss reason. Existing local UI/onboarding/island Node checks 24/24 and Python release/WebView checks 11/11 passed. Native compile/JVM/lint and beta.4 release still pending; do not claim the Samsung scenario is confirmed fixed on hardware until tested.
+- Read-only preflight: main CI green; Supabase cortex ACTIVE v48; Vercel production READY `dpl_HRA7RyqX7unzAG4QuMWSVHiFavrY` on old web source `3d8c81e`. No server/DB/website change. Keep beta.3 as rollback. Next: PR CI, signed beta.4 publication, independent APK identity/checksum check, then retest the original Samsung flow with the existing permissions.
+
 ## 2026-11-19 UTC · APK beta.3 published and verified
 
 - PR #84 merged as release commit `b079f1e786edc1545359ead13e524d8294e5e1ee`; main workflow `44478498107` completed **SUCCESS**, including preflight, debug/release builds, JVM tests, lint, signing, publish and actual downloaded-file verification. PR workflow `44477747468`, UI, CodeQL and handoff gate were also successful. Manual integration checks additionally covered 6 release-intent cases.

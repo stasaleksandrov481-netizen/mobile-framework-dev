@@ -21,6 +21,15 @@ speech synthesis or simulated calculator is used by the feature.
   is off. Saved island appearance, mode and placement preferences are preserved.
   Wake recognition pauses during the session and resumes using the previous settings.
 
+## Service startup ordering (beta.4)
+
+The controller waits for the current session ID to be acknowledged by the island's
+onStartCommand before accepting an attached, fully visible Stop control. A view
+created by report() before the queued intent is handled is not a startup acknowledgement.
+After startup, cosmetic opacity is not a permission or service-health signal. Ordinary
+saved-mode off synchronization is deferred until the demo lease ends. Real loss causes
+remain immediate cancellations and are reported separately; brightness cleanup is unchanged.
+
 ## Real calculator
 
 `FirstExperienceCalculator` resolves an installed native calculator, uses the existing

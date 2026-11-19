@@ -161,7 +161,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val systemRequested = intent?.action == ACTION_SYSTEM_ASSIST
-        val demoRequested = intent?.action == ACTION_FIRST_EXPERIENCE && demonstrating
+        val demoSession = intent?.getStringExtra(EXTRA_DEMO_SESSION).orEmpty()
+        val demoRequested = intent?.action == ACTION_FIRST_EXPERIENCE && demonstrating && demoLease.accepts(demoSession)
         if (poweringOff) {
             if (!systemRequested && !demoRequested && preferences.getBoolean(WAKE_PAUSED, false)) return START_NOT_STICKY
             poweringOff = false
@@ -201,8 +202,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             if (exiting) { exiting = false; removeIsland() }
             task = CortexActionState.status
             render()
+            val firstStart = demoLease.acknowledge(demoSession)
             island?.let { visible ->
-                if (!preferences.getBoolean("reduceMotion", false) && style.motion != "none") {
+                if (firstStart && !preferences.getBoolean("reduceMotion", false) && style.motion != "none") {
                     visible.alpha = 0f
                     visible.animate().alpha(1f).setDuration(340L).start()
                 }
@@ -774,6 +776,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         const val ACTION_ENSURE = "app.cortex.assistant.island.ENSURE"
         internal const val ACTION_SYSTEM_ASSIST = "app.cortex.assistant.island.SYSTEM_ASSIST"
         private const val ACTION_FIRST_EXPERIENCE = "app.cortex.assistant.island.FIRST_EXPERIENCE"
+        private const val EXTRA_DEMO_SESSION = "firstExperienceSession"
         const val ACTION_WAKE = "app.cortex.assistant.island.WAKE"
         const val ACTION_WAKE_CLOSED = "app.cortex.assistant.island.WAKE_CLOSED"
         const val ACTION_SUBMIT = "app.cortex.assistant.island.SUBMIT"
@@ -789,22 +792,34 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         private const val CHANNEL = "cortex-island"
         private const val NOTIFICATION = 2810
         private var running: CortexIslandService? = null
+        private val demoLease = FirstExperienceIslandSession()
 
-        internal fun beginFirstExperience(context: Context): Boolean {
+        internal fun beginFirstExperience(context: Context, session: String): Boolean {
             if (running?.busy == true || !CortexRuntime.firstExperienceActive) return false
+            demoLease.request(session)
             return runCatching {
-                context.startForegroundService(Intent(context, CortexIslandService::class.java).setAction(ACTION_FIRST_EXPERIENCE))
+                context.startForegroundService(Intent(context, CortexIslandService::class.java)
+                    .setAction(ACTION_FIRST_EXPERIENCE).putExtra(EXTRA_DEMO_SESSION, session))
                 true
-            }.getOrDefault(false)
+            }.getOrElse { demoLease.release(session); false }
         }
 
-        internal fun firstExperienceReady() = running?.let {
-            it.demonstrating && it.island?.let { view -> view.alpha >= .95f } == true && !it.exiting && !it.poweringOff && it.canShow()
+        internal fun firstExperienceReady(session: String) = running?.let {
+            it.demonstrating && it.canShow() && demoLease.ready(session,
+                it.island?.isAttachedToWindow == true, it.exiting || it.poweringOff, it.island?.alpha ?: 0f)
+        } == true
+
+        /** Ongoing availability is independent of cosmetic opacity/animation progress. */
+        internal fun firstExperienceAvailable(session: String) = running?.let {
+            it.demonstrating && it.canShow() && demoLease.available(session,
+                it.island?.isAttachedToWindow == true, it.exiting || it.poweringOff)
         } == true
 
         internal fun pulseFirstExperience() { running?.island?.experiencePulse() }
 
-        internal fun endFirstExperience() {
+        internal fun endFirstExperience(session: String) {
+            running?.let { it.mode = it.preferences.getString("mode", "off") ?: "off" }
+            if (!demoLease.release(session)) { running?.render(); return }
             running?.apply {
                 task = null
                 ui.removeCallbacks(clearTask)
@@ -832,6 +847,12 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         }
 
         fun shutdownFromApp(context: Context) {
+            // Late normal-mode configuration must not remove the demo's only Stop control.
+            // The saved off/paused mode is applied by endFirstExperience after cleanup.
+            if (CortexRuntime.firstExperienceActive) {
+                running?.apply { mode = preferences.getString("mode", "off") ?: "off"; render() }
+                return
+            }
             val service = running
             if (service != null) service.dismissIsland(power = true)
             else context.stopService(Intent(context, CortexIslandService::class.java))
