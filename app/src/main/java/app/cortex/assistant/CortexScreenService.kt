@@ -99,10 +99,18 @@ class CortexScreenService : AccessibilityService() {
     internal fun locked(): Boolean = !getSystemService(PowerManager::class.java).isInteractive ||
         getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
-    internal fun homePackages(): Set<String> = packageManager.queryIntentActivities(
-        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY
-    ).filterNot { it.activityInfo.name.substringAfterLast('.') == "FallbackHome" }
-        .mapTo(mutableSetOf()) { it.activityInfo.packageName }
+    internal fun homePackages(): Set<String> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val queried = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        val oemHomeActivities = mutableListOf<android.content.pm.ResolveInfo>()
+        // Some launchers are hidden from the normal intent query on vendor ROMs.
+        val chosen = runCatching { packageManager.getHomeActivities(oemHomeActivities) }.getOrNull()
+        return (queried + oemHomeActivities).filterNot {
+            it.activityInfo.name.substringAfterLast('.') == "FallbackHome"
+        }.mapTo(mutableSetOf()) { it.activityInfo.packageName }.apply {
+            chosen?.packageName?.let(::add)
+        }
+    }
 
     internal fun frame(fresh: Boolean = false): VisualFrame? {
         if (locked()) return null
