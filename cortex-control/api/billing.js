@@ -148,10 +148,6 @@ export function createBillingHandler(env = process.env, network = fetch) {
         email.indexOf("@") > 64 || email.startsWith(".") || email.includes("..") || email.includes(".@")) {
       throw new BillingError(400, "invalid_email");
     }
-    const method = Number(env.PLATEGA_PAYMENT_METHOD || 2);
-    if (mode === "live" && (!Number.isInteger(method) || method < 1)) {
-      throw new BillingError(503, "payments_disabled");
-    }
     const order = await database("rpc/cortex_billing_order", {
       p_subject: input.subject, p_plan: input.plan, p_mode: mode
     });
@@ -160,19 +156,25 @@ export function createBillingHandler(env = process.env, network = fetch) {
     if (order.existing) {
       if (order.plan !== input.plan) throw new BillingError(409, "payment_pending");
       if (order.state === "creating") throw new BillingError(409, "payment_creating");
-      return present(mode === "live" ? await sync(order.provider_id, order) : order);
+      return present(order);
     }
     if (mode === "test") {
       return present(await record(order, randomUUID(), "pending"));
     }
-    const response = await provider("/transaction/process", "POST", {
-      paymentMethod: method, paymentDetails: { amount: order.amount / 100, currency: "RUB" },
-      description: "CORTEX " + order.plan, return: returnUrl, failedUrl: returnUrl, payload: "cortex:" + order.id,
-      metadata: { user_email: email }
-    });
-    const url = httpsUrl(response.redirect, true);
-    if (!uuid.test(response.transactionId || "") || !url) throw new BillingError(502, "payment_provider");
-    const saved = await record(order, response.transactionId, "pending", url);
+    const sum = (order.amount / 100).toFixed(2);
+    const invoice = invoiceId(order.id);
+    const signature = digest([merchant, sum, invoice, password1, "Shp_order=" + order.id].join(":"));
+    const paymentUrl = new URL("/Merchant/Index.aspx", checkoutHost);
+    paymentUrl.search = new URLSearchParams({
+      MerchantLogin: merchant, OutSum: sum, InvId: invoice,
+      Description: "CORTEX " + order.plan + " subscription for one month",
+      Email: email, Culture: "ru", Shp_order: order.id, SignatureValue: signature
+    }).toString();
+    const url = httpsUrl(paymentUrl.href, true);
+    if (!url) throw new BillingError(502, "payment_provider");
+    // The database provider_id column is a UUID. Use the signed order UUID as its stable
+    // internal reference; Robokassa's numeric invoice is independently checked on callback.
+    const saved = await record(order, order.id, "pending", url);
     if (!saved) throw new BillingError(409, "payment_mismatch");
     return present(saved);
   }
@@ -187,12 +189,9 @@ export function createBillingHandler(env = process.env, network = fetch) {
       const isWebhook = req.query?.webhook === "1";
       if (isWebhook) {
         if (!liveReady) throw new BillingError(503, "payments_disabled");
-        if (!matches(req.headers["x-merchantid"], merchant) || !matches(req.headers["x-secret"], secret)) {
-          throw new BillingError(401, "forbidden");
-        }
-        const event = jsonObject(req);
-        await sync(event.id);
-        return res.status(200).json({ ok: true });
+        const invoice = await confirmCallback(req);
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        return res.status(200).send("OK" + invoice);
       }
       if (mode !== "test" && !liveReady) throw new BillingError(503, "payments_disabled");
       const input = jsonObject(req);
@@ -203,15 +202,9 @@ export function createBillingHandler(env = process.env, network = fetch) {
           throw new BillingError(401, "forbidden");
         }
         await database("rpc/cortex_admin_billing", { p_action: "authorize_refund", p_data: { id: input.id } }, auth.slice(7));
-        const order = await lookup(input.id, "live");
-        if (!order || !order.provider_id) throw new BillingError(404, "payment_not_found");
-        const refreshed = await sync(order.provider_id, order);
-        if (refreshed.state === "refunded") return res.status(200).json(present(refreshed));
-        if (refreshed.state !== "confirmed") throw new BillingError(409, "refund_unavailable");
-        const eligibility = await provider("/transaction/" + order.provider_id + "/cancel-supported");
-        if (eligibility.supported !== true) throw new BillingError(409, "refund_unavailable");
-        await provider("/transaction/" + order.provider_id + "/cancel", "POST");
-        return res.status(200).json(present(await sync(order.provider_id, order)));
+        // Merchant-initiated refunds require Robokassa Password #3 and verified operation IDs.
+        // Until configured, direct administrators to the provider dashboard.
+        throw new BillingError(409, "refund_unavailable");
       }
       if (!matches(req.headers.authorization, gatewaySecret && "Bearer " + gatewaySecret)) {
         throw new BillingError(401, "forbidden");
@@ -224,7 +217,7 @@ export function createBillingHandler(env = process.env, network = fetch) {
       const order = await lookup(input.id, mode, input.subject);
       if (!order) throw new BillingError(404, "payment_not_found");
       if (input.operation === "status") {
-        return res.status(200).json(present(mode === "live" && order.provider_id ? await sync(order.provider_id, order) : order));
+        return res.status(200).json(present(order));
       }
       if (input.operation === "simulate" && mode === "test" &&
           matches(req.headers["x-cortex-billing-test-key"], env.CORTEX_BILLING_TEST_KEY) &&
