@@ -101,19 +101,6 @@ export function createBillingHandler(env = process.env, network = fetch) {
     return response.json();
   }
 
-  async function provider(path, method = "GET", payload) {
-    const response = await network(providerHost + path, {
-      method, headers: { "X-MerchantId": merchant, "X-Secret": secret, "Content-Type": "application/json" },
-      body: payload ? JSON.stringify(payload) : undefined, redirect: "error", signal: AbortSignal.timeout(7000)
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new BillingError(502, "payment_provider");
-    }
-    const text = await response.text();
-    return text ? JSON.parse(text) : {};
-  }
-
   function record(order, providerId, state, url) {
     return database("rpc/cortex_billing_payment", {
       p_id: order.id, p_mode: order.mode, p_provider: providerId,
@@ -134,26 +121,23 @@ export function createBillingHandler(env = process.env, network = fetch) {
       test: order.mode === "test" };
   }
 
-  async function sync(providerId, order) {
-    if (!uuid.test(providerId || "")) throw new BillingError(400, "invalid");
-    const transaction = await provider("/transaction/" + providerId);
-    if (transaction.id !== providerId || (transaction.merchantId || transaction.mechantId) &&
-        (transaction.merchantId || transaction.mechantId) !== merchant) {
+  async function confirmCallback(req) {
+    const data = formBody(req);
+    const { OutSum: amount, InvId: invoice, SignatureValue: signature, Shp_order: id } = data;
+    if (!uuid.test(id || "") || typeof invoice !== "string" || !/^[1-9][0-9]{0,18}$/.test(invoice) ||
+        typeof signature !== "string" || !/^[a-f0-9]{32,64}$/i.test(signature) ||
+        amountInKopecks(amount) < 1) throw new BillingError(400, "invalid");
+    const expected = digest([amount, invoice, password2, "Shp_order=" + id].join(":"));
+    if (!matches(signature.toLowerCase(), expected)) throw new BillingError(401, "forbidden");
+    if (invoiceId(id) !== invoice) throw new BillingError(409, "payment_mismatch");
+    const order = await lookup(id, "live");
+    if (!order || order.mode !== "live" || order.amount !== amountInKopecks(amount) ||
+        (order.provider_id && order.provider_id !== id)) {
       throw new BillingError(409, "payment_mismatch");
     }
-    const payload = transaction.payload;
-    if (typeof payload !== "string" || !payload.startsWith("cortex:")) throw new BillingError(409, "payment_mismatch");
-    const orderId = payload.slice(7);
-    const original = order || await lookup(orderId, "live");
-    if (!original || original.id !== orderId || (original.provider_id && original.provider_id !== providerId) ||
-        transaction.paymentDetails?.currency !== "RUB" || kopecks(transaction.paymentDetails?.amount) !== original.amount) {
-      throw new BillingError(409, "payment_mismatch");
-    }
-    const state = paymentStates[transaction.status];
-    if (!state) return original;
-    const saved = await record(original, providerId, state);
-    if (!saved) throw new BillingError(409, "payment_mismatch");
-    return saved;
+    const saved = await record(order, id, "confirmed");
+    if (!saved || saved.state !== "confirmed") throw new BillingError(409, "payment_mismatch");
+    return invoice;
   }
 
   async function checkout(input) {
