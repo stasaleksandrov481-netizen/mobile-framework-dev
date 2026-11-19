@@ -113,7 +113,7 @@ internal class FirstExperienceCalculator(
                 !node.bounds.isEmpty && node.bounds.bottom <= keypadTop &&
                 node.bounds.width() >= frame.bounds.width() * .18f &&
                 node.bounds.top > frame.bounds.top + frame.bounds.height() * .06f &&
-                resource.none { it == '/' } && !resource.contains("history") &&
+                !resource.contains("history") &&
                 !resource.contains("preview") && !resource.contains("trace") &&
                 numeric
         }.take(3)
@@ -141,13 +141,16 @@ internal class FirstExperienceCalculator(
 
     private fun displayFields(frame: VisualFrame): List<Pair<VisualNode, FirstExperienceReadback.Role>> {
         val identified = frame.tree.filter { FirstExperienceMath.isDisplay(it.resource) }
-        val fields = identified + inferredDisplays(frame).filter { inferred ->
-            identified.none { it.path == inferred.path }
+        val inferred = inferredDisplays(frame).filter { node ->
+            identified.none { it.path == node.path }
         }
+        val fields = identified + inferred
         val hasFormula = fields.any { it.editable || FirstExperienceMath.isExpression(it.resource) }
         return fields.map { node -> node to when {
             node.resource.substringAfterLast('/') == "result_final" -> FirstExperienceReadback.Role.FINAL
-            node.editable || FirstExperienceMath.isExpression(node.resource) || !hasFormula -> FirstExperienceReadback.Role.PRIMARY
+            node in inferred -> FirstExperienceReadback.Role.PRIMARY
+            node.editable || FirstExperienceMath.isExpression(node.resource) || !hasFormula && inferred.isEmpty() ->
+                FirstExperienceReadback.Role.PRIMARY
             else -> FirstExperienceReadback.Role.PREVIEW
         } }
     }
