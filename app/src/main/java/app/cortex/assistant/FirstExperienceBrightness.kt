@@ -47,6 +47,64 @@ internal class FirstExperienceBrightness(private val context: Context, private v
         } != null
     }
 
+    /**
+     * Demonstrate brightness while the actual launcher is visible. Many OEMs do
+     * not provide a readable SystemUI SeekBar; WRITE_SETTINGS is a supported
+     * Android API and avoids guessing slider coordinates on those devices.
+     */
+    suspend fun runOnHome(): Outcome {
+        if (!Settings.System.canWrite(context)) return Outcome(false,
+            "Нет разрешения на изменение системной яркости.")
+        if (!restorePending(context)) throw RestoreFailed()
+        if (service.activePackage() !in navigation.home) return Outcome(false,
+            "Главный экран ещё не открылся. Не меняю яркость в другом приложении.")
+        val resolver = context.contentResolver
+        val level = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+            .takeIf { it in 0..65_535 } ?: return Outcome(false, "Android не сообщил текущую яркость.")
+        val mode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
+            .takeIf { it in 0..1 } ?: return Outcome(false, "Android не сообщил режим яркости.")
+        val adjustment = Settings.System.getString(resolver, AUTO_BRIGHTNESS_ADJUSTMENT)
+        // The provider brightness range varies across Android vendors.
+        val scale = when {
+            level <= 255 -> 255
+            level <= 1023 -> 1023
+            level <= 4095 -> 4095
+            else -> 65_535
+        }
+        val target = (FirstExperienceMath.brightnessTarget(level.toFloat() / scale) * scale).toInt()
+            .coerceIn(1, scale)
+        if (!context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().clear()
+                .putBoolean("pending", true).putInt("level", level).putInt("mode", mode)
+                .putString("adjustment", adjustment).commit()) return Outcome(false,
+            "Не получилось сохранить исходные настройки яркости.")
+        try {
+            if (!Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL) ||
+                Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1) !=
+                    Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL) return Outcome(false,
+                "Производитель запретил изменение режима яркости.")
+            val write: (Int) -> Boolean = { value ->
+                Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, value)
+            }
+            val reduced = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
+                .getBoolean("reduceMotion", false)
+            val forward = if (reduced) write(target) else
+                FirstExperienceTempo.brightnessRampFast(level, target, write)
+            if (!forward || Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1) != target)
+                return Outcome(false, "Android не подтвердил изменение яркости.")
+            delay(400L)
+            val backward = if (reduced) write(level) else
+                FirstExperienceTempo.brightnessRampFast(target, level, write)
+            if (!backward || Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1) != level)
+                return Outcome(false, "Android не подтвердил возвращение исходной яркости.")
+            return Outcome(true, "Я изменил яркость прямо на главном экране — и вернул её назад.")
+        } finally {
+            withContext(NonCancellable) {
+                if (!restorePending(context)) throw RestoreFailed()
+            }
+        }
+    }
+
     suspend fun run(): Outcome {
         if (!Settings.System.canWrite(context)) return Outcome(false,
             "Фокус с яркостью пропущен: нет разрешения на изменение системных настроек.")
