@@ -48,7 +48,16 @@ internal class CortexPhoneActions(private val context: Context) {
 
     private fun cachedApps(): List<App> {
         scheduleAppIndex()
-        return appIndex
+        val indexed = appIndex
+        if (indexed.isNotEmpty()) return indexed
+        // A voice command can arrive before the background index finishes.
+        // Do one direct launcher query instead of falsely saying the app is absent.
+        val initial = runCatching { launchableApps() }.getOrDefault(emptyList())
+        if (initial.isNotEmpty()) {
+            appIndex = initial
+            indexUpdatedAt = SystemClock.elapsedRealtime()
+        }
+        return initial
     }
 
     private val audio by lazy { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -306,8 +315,9 @@ internal class CortexPhoneActions(private val context: Context) {
         for ((pkg, names) in ALIASES) {
             if (clean in names) {
                 apps.firstOrNull { it.pkg == pkg }?.let { return it }
-                // Handle a very first voice command before the background app index is ready.
-                if (apps.isEmpty()) return App(pkg, target)
+                // A package alias is not proof that the app is installed.
+                if (apps.isEmpty() && context.packageManager.getLaunchIntentForPackage(pkg) != null)
+                    return App(pkg, target)
             }
         }
         return when (clean) {
