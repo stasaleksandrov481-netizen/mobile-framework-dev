@@ -23,7 +23,7 @@ internal object ConversationMatch {
         val target = VisualLabels.normalize(name)
         if (!singleRussianWord.matches(target)) return name
         return when {
-            target.endsWith('е') || target.endsWith('у') -> target.dropLast(1)
+            target.endsWith('е') || target.endsWith('у') || target.endsWith('ю') -> target.dropLast(1)
             target.endsWith("ой") || target.endsWith("ей") -> target.dropLast(2)
             else -> name
         }
@@ -35,21 +35,16 @@ internal object ConversationMatch {
         val target = VisualLabels.normalize(name)
         if (!singleRussianWord.matches(target)) return setOf(target)
         val stem = when {
-            target.endsWith('е') || target.endsWith('у') -> target.dropLast(1)
+            target.endsWith('е') || target.endsWith('у') || target.endsWith('ю') -> target.dropLast(1)
             target.endsWith("ой") || target.endsWith("ей") -> target.dropLast(2)
             else -> return setOf(target)
         }
         return buildSet {
             add(target)
-            if (target.endsWith("ей")) {
-                add(stem + "я")
-            } else if (target.endsWith("ой")) {
-                add(stem + "а")
-                add(stem + "я")
-            } else {
-                add(stem + "а")
-                add(stem + "я")
-            }
+            add(stem) // Антоне → Антон; require the complete contact title to match.
+            add(stem + "а")
+            add(stem + "я")
+            if (target.endsWith('ю')) add(stem + "й") // Андрею → Андрей.
         }
     }
 
