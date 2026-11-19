@@ -148,6 +148,22 @@ class FirstExperienceDeviceTest {
         assertTrue(service.localText(frame, trace).orEmpty().endsWith("×"))
     }
 
+    @Test fun homeBrightnessWorksWithoutAnAccessibleSystemUiSlider() = runBlocking(Dispatchers.Main) {
+        val service = service()
+        val navigation = VisualNavigation(context, service)
+        assertTrue(service.global(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+        assertNotNull(navigation.await(8_000L) { it.pkg in navigation.home })
+        captureName = "home-brightness"
+        val resolver = context.contentResolver
+        val level = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS)
+        val mode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE)
+        val outcome = FirstExperienceBrightness(context, service).runOnHome()
+        assertTrue(outcome.message, outcome.performed)
+        assertEquals(level, Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS))
+        assertEquals(mode, Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE))
+        assertFalse(FirstExperienceBrightness.hasPending(context))
+    }
+
     @Test fun stopDuringRealBrightnessRampRestoresSettings() = runBlocking(Dispatchers.Main) {
         calculator("normal")
         captureName = "brightness-restored"
