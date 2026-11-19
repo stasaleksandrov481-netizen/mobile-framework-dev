@@ -1,5 +1,12 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · beta.4 false-stop fix published and verified
+
+- PR #85 merged as `8175e925e962b7deb32960bdcd93efa3d7f7e489`, tree `aa30360b804be099426262d61cc9a7125bdcf5fa`, exactly matching the validated feature branch. PR Android run `44482037805` and main signed release run `44482541491` both **SUCCESS**; compile/debug/release, JVM regressions, lint, UI, CodeQL and handoff checks passed. Main signing, publish and downloaded-release verification all succeeded; old-release removal was skipped.
+- Published prerelease `v1.0.18-beta.4`, release ID `451026924`, package `app.cortex.assistant`, code **121**. Public APK independently downloaded: **19,034,320 bytes**, SHA256 `43be570bbcb2c65358a899dbdc2156b4d3390484ccf450bdb56199c7b77ea3c6`; matches GitHub asset digest and SHA256SUMS.txt. `apksigner verify` passed with permanent certificate `dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274`, independently matched to beta.3. `aapt` confirmed identity/version. All 25 WebView files match source; DEX includes demo calculator/brightness, session acknowledgement and health classes.
+- Fix scope: queued island startup acknowledgement, ongoing availability independent of animation opacity, mode-off shutdown deferred until cleanup, and truthful distinct failure causes. Existing Stop and brightness recovery remain active. No UI layout, AI calls, speech, server, website or DB changes. Original Samsung screenshot remains a real failure report for beta.3; **hardware success with beta.4 is not yet established**. Next: install beta.4 over the existing app and replay from Settings with the existing permissions; if it stops, use its specific reason to diagnose the remaining device condition.
+- Download: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/download/v1.0.18-beta.4/CORTEX-1.0.18-beta.4.apk . Keep beta.3/beta.1/stable tags and assets; never retarget the beta.4 tag to this documentation update. This post-release commit changes documentation only and does not request another publication.
+
 ## 2026-11-19 UTC · FIRST EXPERIENCE false permission stop · beta.4 fix
 
 - User supplied a Samsung screenshot of the beta.3 demo stopping with the generic «экран или разрешения больше недоступны» message despite granted access. This is a real-device failure report; earlier APK/CI checks did not validate device behavior.
