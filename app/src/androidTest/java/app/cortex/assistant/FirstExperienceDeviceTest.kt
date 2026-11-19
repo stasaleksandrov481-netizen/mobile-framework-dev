@@ -3,6 +3,7 @@ package app.cortex.assistant
 import android.app.UiAutomation
 import android.content.ComponentName
 import android.content.Intent
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.Dispatchers
@@ -10,10 +11,13 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TestName
 import java.io.File
 
 /** Drives separate real Android windows through the production service/gesture/readback adapters. */
@@ -23,10 +27,23 @@ class FirstExperienceDeviceTest {
     private val automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
     private val fixture = "qa.cortex.calculator"
     private var captureName = "device"
+    @get:Rule val testName = TestName()
 
-    private suspend fun service(): CortexScreenService = withTimeout(20_000L) {
-        while (CortexScreenService.connected == null) delay(100L)
-        requireNotNull(CortexScreenService.connected)
+    private suspend fun service(): CortexScreenService {
+        if (CortexScreenService.connected == null) withContext(Dispatchers.IO) {
+            // am instrument force-stops the target before starting its runner. Enabling
+            // the service outside instrumentation is therefore lost; bind it AFTER start.
+            for (command in listOf("settings delete secure enabled_accessibility_services",
+                "settings put secure accessibility_enabled 0",
+                "settings put secure enabled_accessibility_services app.cortex.assistant/.CortexScreenService",
+                "settings put secure accessibility_enabled 1")) {
+                ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
+            }
+        }
+        return withTimeout(20_000L) {
+            while (CortexScreenService.connected == null) delay(100L)
+            requireNotNull(CortexScreenService.connected)
+        }
     }
 
     private suspend fun calculator(mode: String): FirstExperienceCalculator {
@@ -47,7 +64,7 @@ class FirstExperienceDeviceTest {
         val folder = context.getExternalFilesDir("device-tests") ?: return
         folder.mkdirs()
         val bitmap = automation.takeScreenshot() ?: return
-        try { File(folder, "$captureName.png").outputStream().use {
+        try { File(folder, "${testName.methodName}-$captureName.png").outputStream().use {
             bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
         } } finally { bitmap.recycle() }
     }
