@@ -21,7 +21,10 @@ class FirstExperienceReadbackTest {
         assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "84×7"), value(preview, "588")), 588))
         assertTrue(FirstExperienceReadback.confirmed(listOf(value(primary, "84×7"), value(final, "588")), 588))
         assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "5"), value(final, "6")), 5))
+        assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "5"), value(final, "")), 5))
+        assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "5"), value(final, "Вычисляю")), 5))
         assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "5"), value(primary, "6")), 5))
+        assertFalse(FirstExperienceReadback.confirmed(listOf(value(primary, "5"), value(primary, "3+3")), 5))
         assertFalse(FirstExperienceReadback.confirmed(emptyList(), 5))
     }
 

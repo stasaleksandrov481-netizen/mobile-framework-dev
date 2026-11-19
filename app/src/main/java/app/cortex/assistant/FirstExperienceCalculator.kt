@@ -113,8 +113,8 @@ internal class FirstExperienceCalculator(
 
     private fun confirmed(frame: VisualFrame, expected: Int): Boolean {
         if (!safeFrame(frame)) return false
-        val values = displayFields(frame).mapNotNull { (node, role) ->
-            service.localText(frame, node)?.let { FirstExperienceReadback.Value(role, it) }
+        val values = displayFields(frame).map { (node, role) ->
+            FirstExperienceReadback.Value(role, service.localText(frame, node).orEmpty())
         }
         return FirstExperienceReadback.confirmed(values, expected)
     }
