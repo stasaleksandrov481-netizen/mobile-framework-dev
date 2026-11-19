@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { projectUrl, publishableKey } from "./project.js";
 import { SUPPORT_PAGE_SIZE, supportPageBounds } from "./support-paging.js";
+import { BETA_APK_BUCKET, BETA_SHARE_SECONDS, BetaInputError, parseBetaEmails,
+  betaExpiryFromDays, isBetaInviteActive, betaApkNameIsSafe, validateBetaApk } from "./beta-utils.js";
 
 const db = createClient(projectUrl, publishableKey, {
   auth: { flowType: "pkce", persistSession: true, storage: window.sessionStorage,
@@ -11,7 +13,7 @@ const feedback = document.querySelector("#feedback");
 const redirectTo = "https://cortex-control-phi.vercel.app/";
 const labels = {
   overview: "Обзор", site: "Сайт", support: "Обращения", updates: "Версии", maintenance: "Техработы",
-  roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
+  beta: "ЗБТ", roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
 const roles = { owner: "Владелец", admin: "Администратор", support: "Поддержка" };
@@ -20,6 +22,7 @@ let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
 let quotaId = "", supportFilter = "active", ownId = "";
 let supportPage = 0, supportTotal = 0;
+let betaShareLink = null, betaUploadReceipt = null;
 const IDLE_LIMIT_MS = 30 * 60 * 1000;
 let lastInteraction = Date.now(), signingOut = false;
 
@@ -52,6 +55,7 @@ function flash(text) {
 }
 
 const safeError = (error, context = "operation") => {
+  if (error instanceof BetaInputError) return error.message;
   const code = String(error?.code || "");
   if (code === "invalid_credentials" || code === "invalid_grant") return "Неверная почта или пароль.";
   if (code === "over_request_rate_limit" || code === "over_email_send_rate_limit")
@@ -125,7 +129,7 @@ async function initialize() {
   const previous = user?.id;
   user = data(await db.auth.getUser()).user;
   if (!user) { ownId = ""; signIn(); return; }
-  if (previous !== user.id) { factor = enrollment = ticket = null; quotaId = ""; }
+  if (previous !== user.id) { factor = enrollment = ticket = null; quotaId = ""; betaShareLink = betaUploadReceipt = null; }
   if (!data(await db.rpc("cortex_control_signin"))) {
     role = null;
     showAuth("Доступ закрыт", '<p>Войдите с аккаунтом администратора.</p>' + button("Выйти", "logout"));
@@ -154,7 +158,7 @@ async function initialize() {
 
 function allowedTabs() {
   if (role === "owner") return Object.keys(labels);
-  if (role === "admin") return ["overview", "site", "support", "updates", "maintenance", "quota", "billing", "audit"];
+  if (role === "admin") return ["overview", "site", "support", "updates", "maintenance", "beta", "quota", "billing", "audit"];
   return ["overview", "support"];
 }
 
@@ -351,6 +355,89 @@ async function access() {
       '</select></label>', "Применить"));
 }
 
+async function closedBeta() {
+  // Privileged RPC, not a client SELECT from cortex_beta_testers/devices.
+  const [config, invites, storageResult] = await Promise.all([
+    controlConfig(), db.rpc("cortex_admin_beta", { p_operation: "list" }).then(data),
+    db.storage.from(BETA_APK_BUCKET).list("", { limit: 100, sortBy: { column: "created_at", order: "desc" } })
+  ]);
+  const people = Array.isArray(invites) ? invites : [];
+  const active = people.filter(person => isBetaInviteActive(person));
+  const connected = people.reduce((sum, person) => sum + Number(person.devices || 0), 0);
+  const files = storageResult.error ? [] : (storageResult.data || []).filter(file => betaApkNameIsSafe(file.name));
+  const summary = [
+    ["Закрытый доступ", config.beta_enabled ? "Включён" : "Выключен"],
+    ["Активные приглашения", dateNumber(active.length)],
+    ["Привязанные установки", dateNumber(connected)],
+    ["Загруженные APK", storageResult.error ? "—" : dateNumber(files.length)]
+  ].map(([label, value]) => '<section class="metric-card"><span class="metric-label">' + escape(label) +
+    '</span><strong class="count beta-count">' + escape(value) + '</strong></section>').join("");
+
+  const mode = card("Доступ к закрытому тесту", '<p class="muted">Когда ЗБТ включён, обычные пользователи без приглашения ' +
+    'не смогут обращаться к серверному API CORTEX. Сначала добавьте тестировщиков, потом включайте режим.</p>' +
+    form("beta-mode", '<label class="check"><input name="enabled" type="checkbox"' + checked(config.beta_enabled) +
+      '>Включить доступ только по приглашениям</label>' +
+      '<label>Сообщение при отказе<textarea name="message" maxlength="400" rows="2" required>' +
+      escape(config.beta_message || "") + '</textarea></label>', "Сохранить режим") +
+    '<p class="muted">Сейчас: <strong>' + (config.beta_enabled ? "ЗБТ включён" : "открытый режим") +
+    '</strong>. Это отдельная настройка от тарифов, сайта и распространения APK.</p>');
+
+  const invite = card("Пригласить тестировщиков", '<p class="muted">Вставьте до 50 почт через пробел, запятую или с новой строки. ' +
+    'При повторной выдаче срок и лимит устройств обновятся, доступ восстановится.</p>' +
+    form("beta-invite", '<label>Почты для приглашений<textarea name="emails" rows="4" maxlength="20000" ' +
+      'placeholder="tester@example.com" required autocomplete="off"></textarea></label>' +
+      field("devices", "Устройств на человека (1–5)", "number", 1, 'min="1" max="5" step="1" required') +
+      field("days", "Срок действия (1–90 дней)", "number", 14, 'min="1" max="90" step="1" required'), "Выдать приглашения") +
+    '<p class="muted">Приглашение даёт доступ к API в режиме ЗБТ, но не выдаёт платную подписку. ' +
+    'Тестовый тариф назначается отдельно во вкладке «Подписки».</p>');
+
+  const rows = people.map(person => {
+    const valid = isBetaInviteActive(person);
+    const status = person.state === "revoked" ? "Отозвано" : valid ? "Активно" : "Срок истёк";
+    const expiry = person.expires_at ? date(person.expires_at) + " МСК" : "без срока";
+    return '<li class="beta-person"><div><strong>' + escape(person.email) + '</strong>' +
+      '<small>' + escape(status) + ' · до ' + escape(expiry) + ' · ' +
+      dateNumber(person.devices) + ' из ' + dateNumber(person.max_devices) + ' устройств</small></div>' +
+      '<div class="actions">' + (person.state === "revoked" ? button("Восстановить", "beta-restore", person.email) :
+        button("Отозвать", "beta-revoke", person.email)) +
+      button("Сбросить устройства", "beta-reset", person.email) + '</div></li>';
+  }).join("");
+  const testerList = card("Участники ЗБТ", '<p class="muted">Показаны до 200 последних приглашений. ' +
+    'Изменения записываются в журнал действий администратора.</p>' +
+    (rows ? '<ul class="record-list">' + rows + '</ul>' : '<p>Пока никого не пригласили. Ждём список почт.</p>'));
+
+  const uploaded = betaUploadReceipt ? '<p class="beta-receipt">Последний загруженный файл: <strong>' +
+    escape(betaUploadReceipt.name) + '</strong><br>SHA-256: <code>' + escape(betaUploadReceipt.hash) + '</code></p>' : "";
+  const upload = card("Загрузить проверенный APK", '<p class="muted">Используйте только подписанный релизный APK. ' +
+    'Перед загрузкой SHA-256 файла должен совпасть с контрольной суммой, опубликованной для этого релиза.</p>' +
+    form("beta-apk", '<label>APK (до 150 МБ)<input type="file" name="apk" accept=".apk,application/vnd.android.package-archive" required></label>' +
+      field("sha256", "SHA-256 из релиза (64 символа)", "text", "", 'minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" required autocomplete="off"'),
+    "Проверить и загрузить") + uploaded +
+    '<p class="muted"><a href="https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases" ' +
+    'target="_blank" rel="noopener noreferrer">Официальные релизы и контрольные суммы</a>. ' +
+    'Сертификат подписи APK здесь автоматически не проверяется.</p>');
+
+  const buildList = files.map(file => '<li class="beta-file"><div><strong>' + escape(file.name) + '</strong>' +
+    '<small>Добавлен ' + date(file.created_at) + ' МСК · ' +
+    dateNumber(Math.round(Number(file.metadata?.size || 0) / 1048576 * 10) / 10) + ' МБ</small></div>' +
+    button("Ссылка на 60 минут", "beta-share", file.name) + '</li>').join("");
+  const sharing = betaShareLink ? '<div class="beta-receipt"><strong>Временная ссылка до ' +
+    escape(date(betaShareLink.expiresAt)) + ' МСК</strong><p>' + escape(betaShareLink.name) + '</p>' +
+    '<a href="' + escape(betaShareLink.url) + '" target="_blank" rel="noopener noreferrer">Открыть APK</a>' +
+    '<p class="muted">Ссылка работает у любого получателя до истечения времени. Передавайте её только приглашённым участникам.</p></div>' : "";
+  const builds = card("Выдача APK", '<p class="muted">Файлы хранятся в приватном хранилище. ' +
+    'Создайте ссылку на час и отправьте приглашённому тестировщику лично. Сама по себе ссылка не даёт доступ к API.</p>' +
+    (storageResult.error ? '<p>Не удалось получить список APK. Проверьте права хранилища и MFA.</p>' :
+      buildList ? '<ul class="record-list">' + buildList + '</ul>' : '<p>APK пока не загружен.</p>') + sharing);
+
+  return '<div class="dashboard-intro"><div><span class="overline">ЗАКРЫТОЕ БЕТА-ТЕСТИРОВАНИЕ</span>' +
+    '<h2>Приглашения и сборки</h2><p>Доступ к API, лимиты устройств и приватная выдача Android APK.</p>' +
+    '</div><span class="live-badge"><span class="status-dot"></span>' +
+    (config.beta_enabled ? "Только по приглашениям" : "Режим не включён") + '</span></div>' +
+    '<div class="metrics-grid">' + summary + '</div><div class="cards beta-cards">' + mode + invite +
+    '</div>' + testerList + '<div class="cards beta-cards">' + upload + builds + '</div>';
+}
+
 async function audit() {
   const events = data(await db.from("cortex_admin_audit").select("event,target,created_at").order("created_at", { ascending: false }).limit(80));
   return card("Последние действия", '<ul class="record-list">' + (events || []).map(event => '<li><span>' +
@@ -435,7 +522,8 @@ async function subscriptions() {
     card("Подписчики и платежи", entries ? '<ul class="record-list">' + entries + '</ul>' : '<p>Записей пока нет.</p>');
 }
 
-const views = { overview, site, support, maintenance, updates, roles: access, quota: quotas, billing: subscriptions, audit };
+const views = { overview, site, support, maintenance, updates, roles: access, beta: closedBeta,
+  quota: quotas, billing: subscriptions, audit };
 
 async function saveConfig(values) {
   data(await db.from("cortex_control_config").update({ ...values, updated_at: new Date().toISOString() })
@@ -490,6 +578,31 @@ app.addEventListener("click", async event => {
           ticket = null;
           await loadTab();
         }
+        break;
+      }
+      case "beta-revoke":
+      case "beta-restore":
+      case "beta-reset": {
+        if (!["owner", "admin"].includes(role)) break;
+        const operation = { "beta-revoke": "revoke", "beta-restore": "restore", "beta-reset": "reset_devices" }[action];
+        const question = { revoke: "Отозвать приглашение", restore: "Восстановить приглашение",
+          reset_devices: "Сбросить все привязки устройств" }[operation];
+        if (!confirm(question + " для " + value + "?")) break;
+        data(await db.rpc("cortex_admin_beta", { p_operation: operation, p_email: value }));
+        flash("Доступ тестировщика обновлён.");
+        await loadTab();
+        break;
+      }
+      case "beta-share": {
+        if (!["owner", "admin"].includes(role)) break;
+        if (!betaApkNameIsSafe(value)) throw new BetaInputError("Недопустимое имя APK.");
+        const result = data(await db.storage.from(BETA_APK_BUCKET).createSignedUrl(value, BETA_SHARE_SECONDS, { download: true }));
+        betaShareLink = { name: value, url: result.signedUrl, expiresAt: Date.now() + BETA_SHARE_SECONDS * 1000 };
+        await loadTab();
+        try {
+          await navigator.clipboard.writeText(betaShareLink.url);
+          flash("Ссылка на APK скопирована. Срок действия — 60 минут.");
+        } catch { flash("Ссылка создана: откройте её в разделе «Выдача APK»."); }
         break;
       }
       case "billing-revoke":
@@ -602,6 +715,69 @@ app.addEventListener("submit", async event => {
           " для " + read("email") + "?")) return;
         data(await db.rpc("cortex_set_admin_role", { p_email: read("email"), p_role: read("role") }));
         break;
+      case "beta-mode": {
+        if (!["owner", "admin"].includes(role)) return;
+        const enabled = formData.has("enabled");
+        const message = read("message");
+        if (!message || message.length > 400) throw new BetaInputError("Укажите сообщение об ограничении доступа (до 400 символов).");
+        const current = await controlConfig();
+        if (enabled !== current.beta_enabled) {
+          if (enabled) {
+            const people = data(await db.rpc("cortex_admin_beta", { p_operation: "list" }));
+            if (!people.some(person => isBetaInviteActive(person)))
+              throw new BetaInputError("Нельзя включить ЗБТ без активных приглашений. Сначала добавьте тестировщиков.");
+          }
+          const question = enabled ?
+            "Включить ЗБТ? Пользователи без приглашения потеряют доступ к API CORTEX." :
+            "Выключить ЗБТ? Доступ к API снова откроется всем пользователям согласно обычным ограничениям.";
+          if (!confirm(question)) return;
+        }
+        await saveConfig({ beta_enabled: enabled, beta_message: message });
+        break;
+      }
+      case "beta-invite": {
+        if (!["owner", "admin"].includes(role)) return;
+        const emails = parseBetaEmails(read("emails"));
+        const maxDevices = Number(read("devices"));
+        if (!Number.isInteger(maxDevices) || maxDevices < 1 || maxDevices > 5)
+          throw new BetaInputError("На одного участника можно разрешить от 1 до 5 устройств.");
+        const expiry = betaExpiryFromDays(read("days"));
+        if (!confirm("Выдать или продлить приглашения для " + emails.length + " почт?")) return;
+        let completed = 0;
+        try {
+          for (const email of emails) {
+            data(await db.rpc("cortex_admin_beta", {
+              p_operation: "grant", p_email: email, p_max_devices: maxDevices, p_expires_at: expiry
+            }));
+            completed++;
+          }
+        } catch {
+          await loadTab();
+          throw new BetaInputError("Приглашено " + completed + " из " + emails.length + ". Проверьте список и повторите для остальных.");
+        }
+        flash("Приглашения выданы: " + completed + ".");
+        await loadTab();
+        return;
+      }
+      case "beta-apk": {
+        if (!["owner", "admin"].includes(role)) return;
+        const file = formData.get("apk");
+        const expectedHash = validateBetaApk(file, read("sha256"));
+        const firstBytes = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+        if (firstBytes[0] !== 0x50 || firstBytes[1] !== 0x4b || firstBytes[2] !== 0x03 || firstBytes[3] !== 0x04)
+          throw new BetaInputError("Файл не похож на APK: отсутствует заголовок ZIP.");
+        const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+        const actualHash = Array.from(new Uint8Array(digest), item => item.toString(16).padStart(2, "0")).join("");
+        if (actualHash !== expectedHash) throw new BetaInputError("SHA-256 не совпал с релизом. APK не загружен.");
+        const name = "cortex-" + Date.now() + ".apk";
+        data(await db.storage.from(BETA_APK_BUCKET).upload(name, file, {
+          contentType: "application/vnd.android.package-archive", upsert: false
+        }));
+        betaUploadReceipt = { name, hash: actualHash };
+        flash("APK проверен по SHA-256 и загружен в закрытое хранилище.");
+        await loadTab();
+        return;
+      }
       case "ai-config":
         data(await db.rpc("cortex_admin_ai", { p_operation: "configure", p_limit: 15000,
           p_day: read("day") ? Number(read("day")) : null, p_minute: read("minute") ? Number(read("minute")) : null,
