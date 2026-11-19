@@ -1,5 +1,14 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · APK publication recovery
+
+- User reported the manually requested APK failed. Run `44474766061` on merged main `6d4bbbdc3f906c21043c0fc261be99e604904119` passed debug/release builds, tests, lint and permanent-certificate signing. It failed only in Prepare download: `v1.0.18-beta.1` already identifies an earlier commit. The old tag/release must remain intact.
+- Target branch: `fix/cortex-apk-release-20261119` from that exact main (PR #83 already merged by the user). Android source/UI retained; only version metadata becomes `1.0.18-beta.3` / 120. beta.2 / 119 is already proposed in separate draft PR #79, so this task skips that reserved number and does not include its unrelated runtime/backend changes. Published-versionCode validation will reject future downgrade attempts.
+- Release workflow now validates version/tag/code before costly builds, checks signed output against the same metadata, preserves immutable old tags and verifies beta by its own release/tag/asset data (GitHub stable `/releases/latest` excludes beta). Release intent is main + manual dispatch or an explicit publish subject matching the checked source version. All other pushes remain verification-only.
+- New helper `tools/android_release.py`, regression tests `tools/test_android_release.py`; 11/11 Python tests (8 release + 3 signed WebView packaging) passed locally. CI + signed publication pending. Do not claim a published new APK yet; current beta.1 and stable 1.0.17 remain rollback assets.
+- Read-only infrastructure preflight: Supabase cortex ACTIVE v48; Vercel production READY `dpl_HRA7RyqX7unzAG4QuMWSVHiFavrY`, source `3d8c81ebfe4f35e54988540a214620888bdc3bc3`. Backend/site/database are outside this Android release fix and will not be deployed. Physical first-experience device checks remain unverified, as previously documented.
+- Next: PR CI, confirm runtime source equality to approved merged Android tree, merge the isolated release fix with the explicit beta.3 publish title, wait for successful signing/upload/download verification, then check APK package/version/certificate/checksum before returning its link.
+
 ## 2026-11-19 UTC · FIRST EXPERIENCE · implementation / verification
 
 - **Final runtime verification:** `59464e9788f3dea15a7cfb09dc4f0edec97edccf`, PR #83, clean merge with current main. Android run `44472371133` completed SUCCESS: debug APK, all JVM tests, lintDebug and release build. Node CI 61/61; backend/billing + packaging + site/admin checks passed. CodeQL `44472371253`, handoff gate `44472371271` and UI `44472371315` SUCCESS. UI: 6 checks, 24 screenshots, artifact `14504816268`; inspected the corrected 320×568 number page and confirmed Continue/Stop are visible. Local/remote source tree equality checked before this documentation-only update.
