@@ -1,0 +1,78 @@
+name: CORTEX Android Device Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['app/**', 'qa-calculator/**', 'settings.gradle.kts', '.github/workflows/android-device-test.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device-regression:
+    name: Real Android service and calculator UI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare SDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Build application, test APK and separate calculator fixture
+        run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :qa-calculator:assembleDebug
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise actual AccessibilityService, gestures, display readback and cancellation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            adb install -r qa-calculator/build/outputs/apk/debug/qa-calculator-debug.apk
+            adb shell appops set app.cortex.assistant SYSTEM_ALERT_WINDOW allow
+            adb shell appops set app.cortex.assistant WRITE_SETTINGS allow
+            adb shell settings put secure enabled_accessibility_services app.cortex.assistant/.CortexScreenService
+            adb shell settings put secure accessibility_enabled 1
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell settings put system screen_off_timeout 1800000
+            timeout 10m adb shell am instrument -w -r app.cortex.assistant.test/androidx.test.runner.AndroidJUnitRunner | tee device-results.txt
+            adb logcat -d > device-logcat.txt
+            adb pull /sdcard/Android/data/app.cortex.assistant/files/device-tests device-screenshots || true
+            test -s device-results.txt
+            grep -q 'OK (8 tests)' device-results.txt
+            ! grep -E 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' device-results.txt
+      - name: Capture emulator logs
+        if: always()
+        run: |
+          if [[ ! -s device-logcat.txt ]]; then timeout 10s adb logcat -d > device-logcat.txt || true; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CORTEX-native-device-regression
+          path: |
+            device-results.txt
+            device-logcat.txt
+            device-screenshots/
+            app/build/reports/androidTests/
+          retention-days: 14

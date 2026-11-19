@@ -2,7 +2,13 @@ package app.cortex.assistant
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Build
 import android.view.Display
 import androidx.annotation.RequiresApi
@@ -20,6 +26,99 @@ internal data class OcrResult(val nodes: List<VisualNode> = emptyList(), val pro
 @RequiresApi(30)
 internal class VisualOcr(private val service: CortexScreenService) {
     private val mutex = Mutex()
+
+    /** Local numeric readback of an already identified display. No model request or full-screen text export. */
+    suspend fun readIntegerRegion(frame: VisualFrame, display: Rect, region: Rect): String? {
+        val area = Rect(region)
+        if (!area.intersect(frame.bounds) || !area.intersect(display)) return null
+        val capture = screenshot(frame)
+        val bitmap = capture.bitmap ?: return null
+        return try {
+            withContext(Dispatchers.Default) { mutex.withLock {
+                val origin = if (capture.window) frame.bounds else display
+                val left = ((area.left - origin.left).toLong() * bitmap.width / origin.width()).toInt().coerceIn(0, bitmap.width)
+                val top = ((area.top - origin.top).toLong() * bitmap.height / origin.height()).toInt().coerceIn(0, bitmap.height)
+                val right = ((area.right - origin.left).toLong() * bitmap.width / origin.width()).toInt().coerceIn(left, bitmap.width)
+                val bottom = ((area.bottom - origin.top).toLong() * bitmap.height / origin.height()).toInt().coerceIn(top, bitmap.height)
+                if (right <= left || bottom <= top) return@withLock null
+                val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+                val input = numericInput(crop)
+                if (input == null) { if (crop !== bitmap) crop.recycle(); return@withLock null }
+                val engine = TessBaseAPI()
+                try {
+                    val base = File(service.filesDir, "ocr")
+                    val data = File(base, "tessdata").apply { mkdirs() }
+                    val model = File(data, "eng.traineddata")
+                    if (model.length() == 0L) {
+                        val temp = File.createTempFile("eng", ".tmp", data)
+                        try {
+                            service.assets.open("ocr/eng.traineddata").use { source ->
+                                temp.outputStream().use { source.copyTo(it) }
+                            }
+                            check(temp.renameTo(model))
+                        } finally { temp.delete() }
+                    }
+                    if (!engine.init(base.absolutePath, "eng", TessBaseAPI.OEM_LSTM_ONLY)) return@withLock null
+                    engine.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_LINE)
+                    engine.setVariable("tessedit_char_whitelist", "0123456789+-=., ")
+                    engine.setImage(input)
+                    val text = engine.utF8Text?.trim().orEmpty()
+                    val iterator = engine.resultIterator ?: return@withLock null
+                    try {
+                        iterator.begin()
+                        val confidence = iterator.confidence(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
+                        if (BuildConfig.DEBUG) android.util.Log.d("CortexNumericOcr",
+                            "crop=${crop.width}x${crop.height}; input=${input.width}x${input.height}; value=${FirstExperienceReadback.integer(text)}; confidence=$confidence")
+                        text.takeIf { it.isNotEmpty() && confidence >= 70f }
+                    } finally { iterator.delete() }
+                } finally {
+                    engine.recycle()
+                    if (input !== crop && input !== bitmap) input.recycle()
+                    if (crop !== bitmap) crop.recycle()
+                }
+            } }
+        } finally { bitmap.recycle() }
+    }
+
+    /** Tight ink bounds and a white background prevent a right-aligned 5 becoming 0 in a large dark field. */
+    private fun numericInput(source: Bitmap): Bitmap? {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        fun luminance(color: Int) = (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000
+        val corners = intArrayOf(luminance(pixels[0]), luminance(pixels[width - 1]),
+            luminance(pixels[(height - 1) * width]), luminance(pixels.last())).sorted()
+        val background = (corners[1] + corners[2]) / 2
+        val dark = background < 128
+        var left = width; var top = height; var right = -1; var bottom = -1
+        for (y in 0 until height) for (x in 0 until width) {
+            val light = luminance(pixels[y * width + x])
+            if (if (dark) light - background >= 40 else background - light >= 40) {
+                left = minOf(left, x); top = minOf(top, y); right = maxOf(right, x); bottom = maxOf(bottom, y)
+            }
+        }
+        if (right < left || bottom < top) return null
+        val inkWidth = right - left + 1
+        val inkHeight = bottom - top + 1
+        val padding = (inkHeight / 6).coerceAtLeast(8)
+        val scale = minOf((80f / inkHeight).coerceIn(1f, 3f), 1600f / (inkWidth + padding * 2))
+        val output = Bitmap.createBitmap(((inkWidth + padding * 2) * scale).toInt().coerceAtLeast(1),
+            ((inkHeight + padding * 2) * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        canvas.drawColor(Color.WHITE)
+        val sign = if (dark) -1f else 1f
+        val offset = if (dark) 255f else 0f
+        val transform = ColorMatrix(floatArrayOf(
+            .299f * sign, .587f * sign, .114f * sign, 0f, offset,
+            .299f * sign, .587f * sign, .114f * sign, 0f, offset,
+            .299f * sign, .587f * sign, .114f * sign, 0f, offset,
+            0f, 0f, 0f, 1f, 0f))
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = ColorMatrixColorFilter(transform) }
+        canvas.drawBitmap(source, Rect(left, top, right + 1, bottom + 1), RectF(padding * scale, padding * scale,
+            (padding + inkWidth) * scale, (padding + inkHeight) * scale), paint)
+        return output
+    }
 
     suspend fun read(frame: VisualFrame, display: Rect): OcrResult {
         val capture = screenshot(frame)

@@ -42,16 +42,15 @@ planning are used.
 Keypad identity and enabled state are separate: Samsung/OEM calculators may disable
 equals or clear after C without ceasing to be recognized. Only the requested key must
 be enabled. An empty editable formula is not replaced by its accessibility help text;
-its clear acknowledgement takes precedence over an old live-preview result. Each digit
-must appear in the formula or current operand, and every equality must show the expected
-integer. Operator gestures are dispatched exactly once to the recognized control: an OEM
-may keep the left operand visible or render its operator in a separate span, so literal
-text such as N× is not a required checkpoint. The next operand and equality still need
-real display confirmation. Unicode operator glyphs and invisible formatting are normalized.
-Only the requested key, rather than the entire keypad, must remain available during input;
-the full keypad is recognized on launch. One digit retry is allowed only after positively
-observing the unchanged prior formula; operators and equals are never blindly repeated.
-Failures report the key/result that could not be confirmed, without exporting screen text.
+its clear acknowledgement takes precedence over an old live-preview result. A formula
+serialization is not an OEM-independent protocol: digits/operators use the actual
+identity-checked gesture acknowledgement and bounded context checks. No blind retries.
+Only the requested fresh key must remain enabled after initial full-keypad recognition.
+Every equality must independently show the expected real integer; preview/history/keypad
+values cannot confirm it. Read-only values refresh without requiring an unchanged label
+or an enabled TextView, while action-target validation remains strict. Final fields take
+precedence over primary values; localized descriptions are anchored whole-number results.
+Failures report the key/result that could not be confirmed without exporting screen text.
 Keys are spaced by 650 ms;
 each calculation has a two-second preparation and a 2.2-second result hold.
 
@@ -67,6 +66,17 @@ visible calculations for integers 1–99. Each equality result must be confirmed
 the next operation. The number prompt is independent of first-example success:
 prediction gets a fresh launch/clear. The sealed card remains visible for 2.4 seconds;
 the five card is only revealed after all four real confirmations.
+
+Each subsequent calculation clears and explicitly re-enters the previous VERIFIED result
+before its operator. Thus the visible sequence is 17×2=34, C→34+10=44, C→44÷2=22,
+C→22−17=5 even if the OEM discards its editing state after equality. This is actual UI input.
+
+If accessible result text is absent, the existing bundled local OCR engine reads only a
+recognized primary/final display rectangle that does not intersect any keypad control.
+Two separate confident captures must agree after the real = gesture. Captures are recycled,
+not exported or sent to a model. Numeric OCR uses Android 14+ window capture so the
+island's own digits/status cannot enter the crop; older Android retains accessible-text
+readback and skips if that is unavailable. Unknown/secure displays still skip safely.
 
 ## Brightness transaction
 
@@ -110,6 +120,12 @@ the five card is only revealed after all four real confirmations.
   **test fixture**; screenshots do not prove Android device actions work.
 - New GitHub UI workflow saves those screenshots. Existing Android workflow includes
   the feature's Node tests and all Android unit tests; security workflow remains enabled.
+- `CORTEX Android Device Regression` additionally builds a separate `qa-calculator` APK
+  and drives real Android windows through the production AccessibilityService/gesture
+  adapters on API34. Eight tests cover disabled/changing/description-only/opaque displays,
+  delayed equality, false preview, blocked keys, cancellation and real brightness recovery.
+  The fixture APK is never included in the production APK or installed as a fallback.
+  This exercises native integration, not Samsung firmware or measured device FPS.
 - Before declaring OEM compatibility: physically test Samsung A23 plus at least one Xiaomi and
   HONOR device; verify calculator controls/results, full Quick Settings visibility,
   auto/manual brightness, Stop during every stage, screen lock, accessibility/overlay
@@ -124,8 +140,7 @@ and fitted demo status text are cached until geometry/text changes. No new islan
 blur, extra effect or design change is introduced. Actual FPS must still be measured
 on the user's device; a frame-clock change alone is not a hardware FPS guarantee.
 
-The beta.6 / code123 operator follow-up does not deploy server code, database or production
-website. Its tests include hidden pending operators, current-operand displays for all 99
-choices, formatted formulas and rejected incorrect results. These are protocol fixtures,
-not physical Samsung validation. Keep prior APKs as immutable rollback/source references;
-beta.5 has a real-device report of stopping after multiplication in both calculator tricks.
+The beta.7 / code124 audit does not deploy server code, database or production website.
+Keep prior APKs as immutable source references; beta.6 still has a real-device report of
+failed confirmation after multiplication. Native fixture testing remains distinct from
+physical Samsung validation. Do not publish the beta.7 candidate before its device workflow passes.

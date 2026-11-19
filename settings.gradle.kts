@@ -13,3 +13,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "CORTEX"
 include(":app")
+include(":qa-calculator")

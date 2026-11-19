@@ -25,13 +25,11 @@ class FirstExperienceScriptTest {
         assertFalse(FirstExperienceCalculatorScript.Display(listOf("Поле ввода"), emptyList()).cleared)
     }
 
-    @Test fun `an operator and each digit require the actual formula rather than its numeric preview`() {
-        val entry = FirstExperienceCalculatorScript.Entry("×", "84", "84×", null)
-        assertTrue(FirstExperienceCalculatorScript.Display(listOf("\u200e84 ×\u200f"), emptyList()).matches(entry))
-        assertFalse(FirstExperienceCalculatorScript.Display(listOf("84"), listOf("84")).matches(entry))
-        val equals = FirstExperienceCalculatorScript.Entry("=", "84×7", null, 588)
-        assertFalse(FirstExperienceCalculatorScript.Display(listOf("84×7"), listOf("587")).matches(equals))
-        assertTrue(FirstExperienceCalculatorScript.Display(listOf("588"), emptyList()).matches(equals))
+    @Test fun `only the actual equality value can confirm a calculation`() {
+        val primary = FirstExperienceReadback.Role.PRIMARY
+        assertFalse(FirstExperienceReadback.confirmed(listOf(FirstExperienceReadback.Value(primary, "84×7")), 588))
+        assertFalse(FirstExperienceReadback.confirmed(listOf(FirstExperienceReadback.Value(primary, "587")), 588))
+        assertTrue(FirstExperienceReadback.confirmed(listOf(FirstExperienceReadback.Value(primary, "588")), 588))
     }
 
     private class Calculator : FirstExperienceCalculatorScript.Driver {
@@ -54,7 +52,8 @@ class FirstExperienceScriptTest {
                 if (entry.before.isEmpty()) display = ""
                 display += entry.key
             }
-            return FirstExperienceCalculatorScript.Display(listOf(display), emptyList()).matches(entry)
+            return entry.key != "=" || FirstExperienceReadback.confirmed(
+                listOf(FirstExperienceReadback.Value(FirstExperienceReadback.Role.PRIMARY, display)), requireNotNull(entry.result))
         }
     }
 
