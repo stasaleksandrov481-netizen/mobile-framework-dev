@@ -14,4 +14,7 @@ internal object FirstExperienceReadback {
         val actual = final.ifEmpty { values.filter { it.role == Role.PRIMARY }.mapNotNull { integer(it.text) } }
         return actual.isNotEmpty() && actual.all { it == expected }
     }
+
+    fun <T> resultFields(fields: List<Pair<T, Role>>): List<Pair<T, Role>> =
+        fields.filter { it.second == Role.FINAL }.ifEmpty { fields.filter { it.second == Role.PRIMARY } }
 }

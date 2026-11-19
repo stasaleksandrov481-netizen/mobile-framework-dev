@@ -74,7 +74,9 @@ C→22−17=5 even if the OEM discards its editing state after equality. This is
 If accessible result text is absent, the existing bundled local OCR engine reads only a
 recognized primary/final display rectangle that does not intersect any keypad control.
 Two separate confident captures must agree after the real = gesture. Captures are recycled,
-not exported or sent to a model. Unknown/secure displays still skip safely.
+not exported or sent to a model. Numeric OCR uses Android 14+ window capture so the
+island's own digits/status cannot enter the crop; older Android retains accessible-text
+readback and skips if that is unavailable. Unknown/secure displays still skip safely.
 
 ## Brightness transaction
 

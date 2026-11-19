@@ -129,13 +129,14 @@ internal class FirstExperienceCalculator(
             } != null) return true
         // Some OEM display spans do not expose their rendered value as accessible text.
         // Read only recognized display rectangles; never search the keypad/history for a 5.
-        repeat(2) { sample ->
+        var matchingCaptures = 0
+        repeat(4) {
             val frame = service.frame(fresh = true)?.takeIf(::safeFrame) ?: return false
             val keys = controls(frame).values
-            val regions = displayFields(frame).filter { (node, role) ->
-                role != FirstExperienceReadback.Role.PREVIEW && !node.bounds.isEmpty &&
+            val regions = FirstExperienceReadback.resultFields(displayFields(frame)).filter { (node, _) ->
+                !node.bounds.isEmpty &&
                     keys.none { Rect.intersects(it.bounds, node.bounds) }
-            }.sortedBy { (_, role) -> if (role == FirstExperienceReadback.Role.FINAL) 0 else 1 }.take(2)
+            }.take(2)
             var matched = false
             for ((node, _) in regions) {
                 val text = try { service.readCalculatorRegion(frame, node.bounds) }
@@ -144,10 +145,11 @@ internal class FirstExperienceCalculator(
                 if (FirstExperienceReadback.integer(text.orEmpty()) == expected) { matched = true; break }
                 delay(500L)
             }
-            if (!matched) return false
-            if (sample == 0) delay(500L)
+            matchingCaptures = if (matched) matchingCaptures + 1 else 0
+            if (matchingCaptures >= 2) return true
+            delay(500L)
         }
-        return true
+        return false
     }
 
     private fun failed(entry: FirstExperienceCalculatorScript.Entry): Boolean {

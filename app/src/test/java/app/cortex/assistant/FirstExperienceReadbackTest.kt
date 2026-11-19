@@ -25,6 +25,14 @@ class FirstExperienceReadbackTest {
         assertFalse(FirstExperienceReadback.confirmed(emptyList(), 5))
     }
 
+    @Test fun `pixel readback never falls back from a visible final field to a stale primary or preview`() {
+        assertEquals(listOf("final" to final), FirstExperienceReadback.resultFields(
+            listOf("old" to primary, "preview" to preview, "final" to final)))
+        assertEquals(listOf("primary" to primary), FirstExperienceReadback.resultFields(
+            listOf("primary" to primary, "preview" to preview)))
+        assertTrue(FirstExperienceReadback.resultFields(listOf("preview" to preview)).isEmpty())
+    }
+
     @Test fun `each chained operation clears and reenters the previously confirmed result`() = runBlocking {
         val formulas = mutableListOf<String>()
         var formula = ""

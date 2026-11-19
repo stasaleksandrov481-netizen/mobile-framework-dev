@@ -1,6 +1,7 @@
 <resources>
     <item name="calc_edt_formula" type="id" />
     <item name="calc_tv_result" type="id" />
+    <item name="result_final" type="id" />
     <item name="history_result" type="id" />
     <item name="fixture_trace" type="id" />
     <item name="digit_0" type="id" /><item name="digit_1" type="id" />

@@ -183,7 +183,9 @@ class CortexScreenService : AccessibilityService() {
     internal fun stopTouch() { touch?.clear() }
 
     internal suspend fun readCalculatorRegion(frame: VisualFrame, region: Rect): String? {
-        if (frame.secure || frame.hasPrivateFields || Build.VERSION.SDK_INT < 30 || !isCurrent(frame)) return null
+        // Window capture excludes CORTEX's own island/touch overlays. Full-display
+        // capture on older Android could mistake a status such as 1/4 for a number.
+        if (frame.secure || frame.hasPrivateFields || Build.VERSION.SDK_INT < 34 || !isCurrent(frame)) return null
         val recognizer = ocr ?: VisualOcr(this).also { ocr = it }
         return recognizer.readIntegerRegion(frame, displayBounds(), region).takeIf { isCurrent(frame) }
     }

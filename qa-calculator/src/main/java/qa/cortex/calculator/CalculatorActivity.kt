@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.LinearLayout
@@ -21,6 +22,7 @@ class CalculatorActivity : Activity() {
     private var generation = 0
     private lateinit var display: Display
     private lateinit var preview: TextView
+    private lateinit var finalDisplay: TextView
     private lateinit var trace: TextView
     private val buttons = mutableListOf<Button>()
 
@@ -51,6 +53,10 @@ class CalculatorActivity : Activity() {
         root.addView(display, LinearLayout.LayoutParams(-1, dp(118)))
         preview = text("", 24f, R.id.calc_tv_result).apply { gravity = Gravity.RIGHT }
         root.addView(preview, LinearLayout.LayoutParams(-1, dp(40)))
+        finalDisplay = text("", 24f, R.id.result_final).apply {
+            gravity = Gravity.RIGHT; isEnabled = false; visibility = View.INVISIBLE
+        }
+        root.addView(finalDisplay, LinearLayout.LayoutParams(-1, dp(40)))
         val grid = listOf(listOf("7", "8", "9", "÷"), listOf("4", "5", "6", "×"),
             listOf("1", "2", "3", "−"), listOf("C", "0", "=", "+"))
         val ids = mapOf("0" to R.id.digit_0, "1" to R.id.digit_1, "2" to R.id.digit_2,
@@ -83,6 +89,7 @@ class CalculatorActivity : Activity() {
         trace.text = (trace.text.toString() + key).takeLast(160)
         if (key == "C") {
             generation++; formula = ""; display.text = "0"; display.finalValue = false; preview.text = ""
+            finalDisplay.text = ""; finalDisplay.visibility = View.INVISIBLE
             buttons.forEach { it.isEnabled = true }; return
         }
         if (key == "=") {
@@ -91,7 +98,12 @@ class CalculatorActivity : Activity() {
             val result = if (mode == "wrong") actual + 1 else actual
             preview.text = actual.toString() // A correct preview must not hide an incorrect final result.
             val update = Runnable {
-                if (generation == ownGeneration) { display.finalValue = true; display.text = result.toString() }
+                if (generation == ownGeneration) {
+                    if (mode == "delayed" || mode == "wrong") {
+                        finalDisplay.text = result.toString(); finalDisplay.visibility = View.VISIBLE
+                        if (mode == "wrong") { display.finalValue = true; display.text = actual.toString() }
+                    } else { display.finalValue = true; display.text = result.toString() }
+                }
             }
             if (mode == "delayed") handler.postDelayed(update, 900L) else update.run()
             formula = "" // Continuation must explicitly re-enter the verified result.
