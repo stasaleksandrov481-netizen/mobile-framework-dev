@@ -76,7 +76,7 @@ internal object FirstExperienceMath {
                 Character.getType(symbol) == Character.FORMAT.toInt() || symbol in "\uFE0E\uFE0F") continue
             append(when (symbol) {
                 '×', '⨯', '✕', '✖', '∗', '⋅', '∙', '·', 'x', 'X', 'ｘ', 'Ｘ', '＊' -> '*'
-                '÷', '∕', '／', ':' -> '/'
+                '÷', '∕', '／' -> '/'
                 '−', '–', '—', '﹣', '－' -> '-'
                 '＋' -> '+'
                 ',' -> '.'
@@ -84,6 +84,10 @@ internal object FirstExperienceMath {
             })
         }
     }
+
+    // A colon is an operator only inside a calculator formula, not in
+    // descriptive labels such as "Результат: 588".
+    fun formula(text: String) = expression(text).replace(':', '/')
 
     fun cleared(text: String) = expression(text).isBlank() || displayedInteger(text) == 0
 
