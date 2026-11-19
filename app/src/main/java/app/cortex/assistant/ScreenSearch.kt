@@ -38,6 +38,9 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
         return editors.filter(::searchLabel).singleOrNull() ?: editors.filter { it.focused }.singleOrNull()
     }
 
+    /** True only once the app exposes a real search editor or search button. */
+    fun ready(frame: VisualFrame): Boolean = field(frame) != null || searchButton(frame) != null
+
     suspend fun open(frame: VisualFrame): VisualFrame? {
         if (field(frame) != null) return frame
         val tool = searchButton(frame)
@@ -62,13 +65,13 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
         // Wait for its search control, not just the package name or the splash screen.
         val start = navigation.await(15_000L) {
             it.pkg == app.pkg && !it.secure && !it.hasPrivateFields &&
-                (field(it) != null || searchButton(it) != null)
+                ready(it)
         } ?: screen.frame(fresh = true)?.takeIf {
             it.pkg == app.pkg && !it.secure && !it.hasPrivateFields && it.tree.isNotEmpty()
         } ?: return CortexActionEngine.Result("«${app.label}» открылось, но интерфейс поиска ещё загружается.", false)
         val ready = open(start) ?: navigation.await(5_000L) {
             it.pkg == app.pkg && !it.secure && !it.hasPrivateFields &&
-                (field(it) != null || searchButton(it) != null)
+                ready(it)
         }?.let { open(it) }
             ?: return CortexActionEngine.Result("В «${app.label}» не открылось поле поиска после ожидания загрузки.", false)
         report("Ввожу запрос в ${app.label}…")
