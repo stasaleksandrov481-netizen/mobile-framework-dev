@@ -7,7 +7,8 @@ internal data class AppSearchRequest(val app: String, val query: String) {
         private val find = Regex("""^$FIND\s+(.+?)\s+(?:в|на|через)\s+(.+)$""", RegexOption.IGNORE_CASE)
         private val aliases = mapOf("тт" to "TikTok", "тик ток" to "TikTok", "тикток" to "TikTok", "тиктоке" to "TikTok",
             "tiktok" to "TikTok", "вб" to "Wildberries", "вайлдберриз" to "Wildberries", "wildberries" to "Wildberries",
-            "ютубе" to "YouTube", "озоне" to "Ozon", "телеграме" to "Telegram", "тг" to "Telegram",
+            "ютубе" to "YouTube", "ютуб" to "YouTube", "youtube" to "YouTube",
+            "озоне" to "Ozon", "телеграме" to "Telegram", "тг" to "Telegram",
             "хром" to "Chrome", "хроме" to "Chrome")
         private val appFirst = Regex("""^$FIND\s+(?:в|на|через)\s+(.+?)\s+(.+)$""", RegexOption.IGNORE_CASE)
         private val secondAction = Regex("""(?:[,;]\s*|\s+(?:и|затем|потом)\s+)(?:купи|закажи|отправь|перешли|опубликуй|нажми|открой|закрой)\s""", RegexOption.IGNORE_CASE)
@@ -16,7 +17,8 @@ internal data class AppSearchRequest(val app: String, val query: String) {
             val text = (CortexHotword.command(raw) ?: raw).trim()
             fun request(app: String, query: String): AppSearchRequest? {
                 if (secondAction.containsMatchIn(query)) return null
-                val name = app.trim().trimEnd(',', '.', '!')
+                val name = app.trim().replace(Regex("""(?iu)^(?:(?:в|на|через)\s+)+"""), "")
+                    .trimEnd(',', '.', '!')
                 val target = aliases[VisualLabels.normalize(name)] ?: name.takeIf { installed(it) } ?: return null
                 val terms = query.trim().removeSurrounding("«", "»").removeSurrounding("\"")
                 return terms.takeIf { it.length in 1..220 }?.let { AppSearchRequest(target, it) }
@@ -46,7 +48,7 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
             !words.protected && label != null && screen.tap(frame, label)
         }
         if (!clicked) return null
-        return navigation.await(6_000L) {
+        return navigation.await(8_000L) {
             it.pkg == frame.pkg && !it.secure && !it.hasPrivateFields && field(it) != null
         }
     }
@@ -55,11 +57,20 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
         val app = navigation.resolve(request.app)
             ?: return CortexActionEngine.Result("На телефоне не найдено приложение «${request.app}».", false)
         if (!navigation.open(app, report)) return CortexActionEngine.Result("«${app.label}» не открылось за отведённое время.", false)
-        val start = navigation.await(6_000L) {
-            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields && (field(it) != null || searchButton(it) != null)
-        } ?: screen.frame(fresh = true)?.takeIf { it.pkg == app.pkg && !it.secure && !it.hasPrivateFields }
-            ?: return CortexActionEngine.Result("В «${app.label}» пока не вижу экран поиска.", false)
-        val ready = open(start) ?: return CortexActionEngine.Result("В «${app.label}» не открылось поле поиска.", false)
+        report("Жду, пока откроется поиск в ${app.label}…")
+        // An app can expose an accessibility tree while its home screen is still loading.
+        // Wait for its search control, not just the package name or the splash screen.
+        val start = navigation.await(15_000L) {
+            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields &&
+                (field(it) != null || searchButton(it) != null)
+        } ?: screen.frame(fresh = true)?.takeIf {
+            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields && it.tree.isNotEmpty()
+        } ?: return CortexActionEngine.Result("«${app.label}» открылось, но интерфейс поиска ещё загружается.", false)
+        val ready = open(start) ?: navigation.await(5_000L) {
+            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields &&
+                (field(it) != null || searchButton(it) != null)
+        }?.let { open(it) }
+            ?: return CortexActionEngine.Result("В «${app.label}» не открылось поле поиска после ожидания загрузки.", false)
         report("Ввожу запрос в ${app.label}…")
         val typed = navigation.writeText(ready, request.query, ::field)
             ?: return CortexActionEngine.Result("«${app.label}» не подтвердило текст в поле поиска.", false)
@@ -92,7 +103,10 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
             node.bounds.top < frame.bounds.top + frame.bounds.height() * .23
         fun searchLabel(node: VisualNode) = listOf(node.label, node.description, node.resource.substringAfterLast('/'))
             .map(VisualLabels::normalize).any {
-                it in names || it.startsWith("поиск по ") || it.startsWith("search in ") ||
+                it in names || it.startsWith("поиск по ") || it.startsWith("поиск в ") ||
+                    it.startsWith("поиск на ") || it.startsWith("искать в ") ||
+                    it.startsWith("search in ") || it.startsWith("search on ") ||
+                    it.startsWith("search youtube") || it.startsWith("search for ") ||
                     it.startsWith("поиск или ") || it.startsWith("search or ")
             }
         private val names = setOf("search", "search chats", "search messages", "поиск", "найти", "поиск чатов",
