@@ -11,6 +11,24 @@ internal object FirstExperienceTempo {
     const val SEALED = 2_400L
     const val BRIGHTNESS = 2_200L
 
+    /** A faster, bounded native brightness animation for OEMs without an accessible slider. */
+    suspend fun brightnessRampFast(start: Int, target: Int, write: (Int) -> Boolean,
+                                   pause: suspend (Long) -> Unit = { delay(it) }): Boolean {
+        require(start in 0..65_535 && target in 0..65_535)
+        var last = start
+        for (index in 1..24) {
+            pause(45L)
+            val t = index / 24f
+            val eased = t * t * (3f - 2f * t)
+            val value = (start + (target - start) * eased).roundToInt()
+            if (value != last) {
+                if (!write(value)) return false
+                last = value
+            }
+        }
+        return last == target
+    }
+
     /** An unchanged integer SeekBar value is already acknowledged, not an action failure. */
     fun setProgress(current: Float, wanted: Float, integral: Boolean, write: (Float) -> Boolean): Boolean {
         val value = if (integral) wanted.roundToInt().toFloat() else wanted

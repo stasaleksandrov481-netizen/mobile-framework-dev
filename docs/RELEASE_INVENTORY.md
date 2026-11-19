@@ -1,5 +1,10 @@
 # Инвентаризация релизов CORTEX
 
+## 19.11.2026 — подтверждённая опубликованная бета 1.0.18-beta.8
+
+- GitHub release [v1.0.18-beta.8](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/tag/v1.0.18-beta.8), source `ae790b946539d4c07cec934e62b26afe15693d8a`, versionCode 125, published 2026-11-19 14:06:51 UTC. Asset `CORTEX-1.0.18-beta.8.apk`, 19,052,020 bytes, GitHub digest `sha256:7e12d17f215039f2dfcc5627e8c393481af17d16d8d4b3cf524cfb9aa6f2b8ed`. Workflow Android 44539159455 and CodeQL 44539160225 SUCCESS.
+- The current cross-OEM first-experience work in `fix/cortex-cross-oem-first-experience-20261119` is **not contained** in this signed APK. It must go through separate PR/instrumentation and explicit new version; never replace an existing release or its signing materials. Physical Samsung/vivo and other OEM behavior remains unverified.
+
 ## 19.11.2026 — Android 1.0.18-beta.7: проверка всего сценария калькулятора
 
 - PR [#89](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/89) слит; release source `b14532caf3d08051a3d7432dd401b60c9205ed96`, tag `v1.0.18-beta.7`, code **124**. Его дерево совпадает с проверенным PR head `9aedee6cdcdca94671ece7b6de66a65319359059`. Android/JVM/lint/release build, UI screenshots, CodeQL и Handoff прошли. Подписанный main workflow `44524652691` — **SUCCESS**, включая проверку реально скачанного релиза.

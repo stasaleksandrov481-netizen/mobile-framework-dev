@@ -99,10 +99,16 @@ class CortexScreenService : AccessibilityService() {
     internal fun locked(): Boolean = !getSystemService(PowerManager::class.java).isInteractive ||
         getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
-    internal fun homePackages(): Set<String> = packageManager.queryIntentActivities(
-        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY
-    ).filterNot { it.activityInfo.name.substringAfterLast('.') == "FallbackHome" }
-        .mapTo(mutableSetOf()) { it.activityInfo.packageName }
+    internal fun homePackages(): Set<String> {
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val queried = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        // The resolved default Home can be visible even when an OEM hides
+        // some launchers from a general intent query.
+        val chosen = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        return (queried + listOfNotNull(chosen)).filterNot {
+            it.activityInfo.name.substringAfterLast('.') == "FallbackHome"
+        }.mapTo(mutableSetOf()) { it.activityInfo.packageName }
+    }
 
     internal fun frame(fresh: Boolean = false): VisualFrame? {
         if (locked()) return null

@@ -85,6 +85,20 @@ class FirstExperienceDeviceTest {
         assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
     }
 
+    @Test fun unfamiliarOemDisplayIdStillUsesVerifiedNumericResult() = runBlocking(Dispatchers.Main) {
+        val calculator = calculator("unknown_display")
+        assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
+        assertTrue(calculator.clear())
+        assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
+    }
+
+    @Test fun clearKeyMayBeHiddenWhileCalculatorIsAlreadyEmpty() = runBlocking(Dispatchers.Main) {
+        val calculator = calculator("hidden_clear")
+        assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
+        assertTrue(calculator.clear())
+        assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
+    }
+
     @Test fun delayedEqualityDoesNotGetSkipped() = runBlocking(Dispatchers.Main) {
         val calculator = calculator("delayed")
         assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
@@ -132,6 +146,22 @@ class FirstExperienceDeviceTest {
         val frame = requireNotNull(service.frame(fresh = true))
         val trace = frame.tree.first { it.resource.endsWith("/fixture_trace") }
         assertTrue(service.localText(frame, trace).orEmpty().endsWith("×"))
+    }
+
+    @Test fun homeBrightnessWorksWithoutAnAccessibleSystemUiSlider() = runBlocking(Dispatchers.Main) {
+        val service = service()
+        val navigation = VisualNavigation(context, service)
+        assertTrue(service.global(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
+        assertNotNull(navigation.await(8_000L) { it.pkg in navigation.home })
+        captureName = "home-brightness"
+        val resolver = context.contentResolver
+        val level = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS)
+        val mode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE)
+        val outcome = FirstExperienceBrightness(context, service).runOnHome()
+        assertTrue(outcome.message, outcome.performed)
+        assertEquals(level, Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS))
+        assertEquals(mode, Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE))
+        assertFalse(FirstExperienceBrightness.hasPending(context))
     }
 
     @Test fun stopDuringRealBrightnessRampRestoresSettings() = runBlocking(Dispatchers.Main) {

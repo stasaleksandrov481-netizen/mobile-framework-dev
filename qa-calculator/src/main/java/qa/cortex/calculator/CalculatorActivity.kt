@@ -47,7 +47,8 @@ class CalculatorActivity : Activity() {
         trace = text("trace:", 10f, R.id.fixture_trace)
         root.addView(trace)
         display = Display(this).apply {
-            id = R.id.calc_edt_formula; text = "0"; textSize = 56f; gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+            id = if (mode == "unknown_display") View.generateViewId() else R.id.calc_edt_formula
+            text = "0"; textSize = 56f; gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
             setTextColor(Color.WHITE); isEnabled = false; setPadding(dp(8), dp(10), dp(8), dp(10))
         }
         root.addView(display, LinearLayout.LayoutParams(-1, dp(118)))
@@ -69,6 +70,7 @@ class CalculatorActivity : Activity() {
                 val button = Button(this).apply {
                     id = ids.getValue(key); text = key; textSize = 22f; setOnClickListener { press(key) }
                 }
+                if (mode == "hidden_clear" && key == "C") button.visibility = View.GONE
                 buttons += button
                 row.addView(button, LinearLayout.LayoutParams(0, -1, 1f))
             }
@@ -110,6 +112,7 @@ class CalculatorActivity : Activity() {
             return
         }
         display.finalValue = false
+        if (mode == "hidden_clear") buttons.firstOrNull { it.text.toString() == "C" }?.visibility = View.VISIBLE
         formula += key
         display.text = if (mode == "opaque") formula else formula.replace("×", " ⨯ ").replace("÷", " : ")
         preview.text = answer()?.toString().orEmpty()

@@ -16,6 +16,44 @@ class FirstExperienceScriptTest {
         assertFalse(FirstExperienceCalculatorScript.Keypad(all - "−", all).known)
     }
 
+    @Test fun `hidden clear key does not disqualify an otherwise valid OEM keypad`() {
+        val controls = FirstExperienceMath.keys.toSet() - "clear"
+        val keypad = FirstExperienceCalculatorScript.Keypad(controls, controls - "=")
+        assertTrue(keypad.known)
+        assertFalse(keypad.canPress("="))
+        assertFalse(FirstExperienceCalculatorScript.Keypad(controls - "8", controls).known)
+    }
+
+    @Test fun `native brightness fast ramp is monotonic and restores original value`() = runBlocking {
+        var actual = 128
+        val values = mutableListOf<Int>()
+        val waits = mutableListOf<Long>()
+        val forward = FirstExperienceTempo.brightnessRampFast(128, 200, { actual = it; values += it; true },
+            { waits += it })
+        assertTrue(forward)
+        assertEquals(200, actual)
+        assertEquals(1080L, waits.sum())
+        assertTrue(values.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue(values.size <= 24)
+        assertTrue(FirstExperienceTempo.brightnessRampFast(200, 128, { actual = it; true }, { }))
+        assertEquals(128, actual)
+    }
+
+    @Test fun `native brightness fast ramp stops on a rejected write`() = runBlocking {
+        var attempts = 0
+        assertFalse(FirstExperienceTempo.brightnessRampFast(128, 200, { ++attempts < 5 }, { }))
+        assertEquals(5, attempts)
+        attempts = 0
+        var pauses = 0
+        val cancelled = runCatching {
+            FirstExperienceTempo.brightnessRampFast(128, 200, { attempts++; true }, {
+                if (++pauses == 3) throw CancellationException("Stopped")
+            })
+        }.exceptionOrNull()
+        assertTrue(cancelled is CancellationException)
+        assertTrue(attempts <= 2)
+    }
+
     @Test fun `an empty primary display wins over an old live preview after C`() {
         assertTrue(FirstExperienceCalculatorScript.Display(listOf(""), listOf("588")).cleared)
         assertTrue(FirstExperienceCalculatorScript.Display(listOf("\u200e\u200f"), emptyList()).cleared)
@@ -103,6 +141,34 @@ class FirstExperienceScriptTest {
         val script = FirstExperienceCalculatorScript(driver) { if (++pauses == 2) throw CancellationException("Stop") }
         assertTrue(runCatching { script.calculate(FirstExperienceMath.example) }.exceptionOrNull() is CancellationException)
         assertEquals(listOf("8"), driver.entries.map { it.key })
+    }
+
+    @Test fun `hidden clear key does not disqualify an otherwise complete OEM keypad`() {
+        val keys = FirstExperienceMath.keys.toSet() - "clear"
+        assertTrue(FirstExperienceCalculatorScript.Keypad(keys, keys).known)
+        assertFalse(FirstExperienceCalculatorScript.Keypad(keys - "=", keys - "=").known)
+    }
+
+    @Test fun `fast native brightness ramp is bounded monotonic and cancellable`() = runBlocking {
+        for ((start, target) in listOf(120 to 185, 230 to 100)) {
+            val writes = mutableListOf<Int>()
+            val pauses = mutableListOf<Long>()
+            assertTrue(FirstExperienceTempo.brightnessRampFast(start, target, { writes += it; true }, { pauses += it }))
+            assertEquals(24, pauses.size)
+            assertEquals(1_080L, pauses.sum())
+            assertEquals(target, writes.last())
+            assertTrue(writes.zipWithNext().all { (a, b) -> if (target > start) b >= a else b <= a })
+        }
+        var writes = 0
+        assertFalse(FirstExperienceTempo.brightnessRampFast(120, 190, { ++writes < 4 }, { }))
+        assertEquals(4, writes)
+        var ticks = 0
+        val error = runCatching {
+            FirstExperienceTempo.brightnessRampFast(120, 190, { true }, {
+                if (++ticks == 3) throw CancellationException("Stop")
+            })
+        }.exceptionOrNull()
+        assertTrue(error is CancellationException)
     }
 
     @Test fun `brightness moves in sixty small monotonic steps over 2200ms each way`() = runBlocking {

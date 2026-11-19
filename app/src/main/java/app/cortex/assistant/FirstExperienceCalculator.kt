@@ -29,17 +29,33 @@ internal class FirstExperienceCalculator(
     }, pause)
 
     private fun resolve(): VisualApp? {
-        val installed = navigation.apps.filter { it.pkg in PACKAGES }
-        val default = context.packageManager.resolveActivity(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALCULATOR), PackageManager.MATCH_DEFAULT_ONLY
-        )?.activityInfo?.packageName
-        return installed.firstOrNull { it.pkg == default } ?: installed.singleOrNull()
-            ?: PACKAGES.firstNotNullOfOrNull { pkg -> installed.firstOrNull { it.pkg == pkg } }
+        val manager = context.packageManager
+        val category = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALCULATOR)
+        // The standard calculator category is more reliable than hard-coded
+        // Samsung/Google/Xiaomi package names on vivo, OPPO and other OEMs.
+        val categoryApps = manager.queryIntentActivities(category, 0).mapNotNull { activity ->
+            val pkg = activity.activityInfo.packageName
+            if (pkg == context.packageName || manager.getLaunchIntentForPackage(pkg) == null) null
+            else VisualApp(activity.loadLabel(manager).toString(), pkg)
+        }.distinctBy { it.pkg }
+        val preferred = manager.resolveActivity(category, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        categoryApps.firstOrNull { it.pkg == preferred }?.let { return it }
+        if (categoryApps.size == 1) return categoryApps.single()
+        // Some OEMs do not advertise CATEGORY_APP_CALCULATOR at all.
+        // Prefer a uniquely identified launchable calculator; never guess an app.
+        val installed = navigation.apps.filter { candidate ->
+            candidate.pkg in PACKAGES || VisualLabels.normalize(candidate.label) in CALCULATOR_NAMES
+        }
+        installed.firstOrNull { it.pkg == preferred }?.let { return it }
+        return installed.singleOrNull() ?: installed.singleOrNull { it.pkg in PACKAGES }
     }
 
     suspend fun open(): Boolean {
         failure = null
-        val calculator = app ?: resolve()?.also { app = it } ?: return false
+        val calculator = app ?: resolve()?.also { app = it } ?: run {
+            failure = "На телефоне не найден калькулятор, который Android разрешает запустить."
+            return false
+        }
         // Fixed local launch sequence. Resolve the installed app, show the real Home,
         // then launch that exact package rather than racing a launcher search UI.
         report("Перехожу на рабочий стол")
@@ -79,7 +95,30 @@ internal class FirstExperienceCalculator(
 
     // OEM calculators legitimately disable = or C after clearing. That is not an unknown layout.
     private fun safeFrame(frame: VisualFrame) = frame.pkg == app?.pkg && !frame.secure && !frame.hasPrivateFields &&
-        frame.tree.any { FirstExperienceMath.isDisplay(it.resource) }
+        (frame.tree.any { FirstExperienceMath.isDisplay(it.resource) } || inferredDisplays(frame).isNotEmpty())
+
+    private fun inferredDisplays(frame: VisualFrame): List<VisualNode> {
+        val keys = controls(frame).values
+        if (keys.size < 12) return emptyList()
+        val keypadTop = keys.minOfOrNull { it.bounds.top } ?: return emptyList()
+        // A text field above a fully identified keypad is a candidate display
+        // even when the OEM exposes an unfamiliar resource ID.
+        return frame.tree.filter { node ->
+            val resource = node.resource.substringAfterLast('/').lowercase()
+            val text = service.localText(frame, node).orEmpty()
+            val numeric = text.isBlank() || FirstExperienceReadback.integer(text) != null ||
+                FirstExperienceMath.expression(text).matches(Regex("""[0-9.+*/-]{1,40}"""))
+            !node.clickable && !node.scrollable &&
+                (node.role in setOf("TextView", "EditText", "TextInputEditText") ||
+                    node.role.endsWith("TextView") || node.role.endsWith("Display")) &&
+                !node.bounds.isEmpty && node.bounds.bottom <= keypadTop &&
+                node.bounds.width() >= frame.bounds.width() * .18f &&
+                node.bounds.top > frame.bounds.top + frame.bounds.height() * .06f &&
+                !resource.contains("history") &&
+                !resource.contains("preview") && !resource.contains("trace") &&
+                numeric
+        }.take(3)
+    }
 
     private fun ready(frame: VisualFrame): Boolean {
         if (!safeFrame(frame)) return false
@@ -87,13 +126,13 @@ internal class FirstExperienceCalculator(
         return indexedKeypad.known
     }
 
-    private fun expressions(frame: VisualFrame): List<String> = frame.tree.filter {
-        FirstExperienceMath.isDisplay(it.resource) && (it.editable || FirstExperienceMath.isExpression(it.resource))
-    }.mapNotNull { service.localText(frame, it) }
+    private fun expressions(frame: VisualFrame): List<String> = displayFields(frame).filter {
+        it.second == FirstExperienceReadback.Role.PRIMARY
+    }.mapNotNull { service.localText(frame, it.first) }
 
-    private fun results(frame: VisualFrame): List<String> = frame.tree.filter {
-        FirstExperienceMath.isDisplay(it.resource) && !it.editable && !FirstExperienceMath.isExpression(it.resource)
-    }.mapNotNull { service.localText(frame, it) }
+    private fun results(frame: VisualFrame): List<String> = displayFields(frame).filter {
+        it.second != FirstExperienceReadback.Role.PRIMARY
+    }.mapNotNull { service.localText(frame, it.first) }
 
     private fun cleared(frame: VisualFrame): Boolean {
         if (!ready(frame)) return false
@@ -102,11 +141,17 @@ internal class FirstExperienceCalculator(
     }
 
     private fun displayFields(frame: VisualFrame): List<Pair<VisualNode, FirstExperienceReadback.Role>> {
-        val fields = frame.tree.filter { FirstExperienceMath.isDisplay(it.resource) }
+        val identified = frame.tree.filter { FirstExperienceMath.isDisplay(it.resource) }
+        val inferred = inferredDisplays(frame).filter { node ->
+            identified.none { it.path == node.path }
+        }
+        val fields = identified + inferred
         val hasFormula = fields.any { it.editable || FirstExperienceMath.isExpression(it.resource) }
         return fields.map { node -> node to when {
             node.resource.substringAfterLast('/') == "result_final" -> FirstExperienceReadback.Role.FINAL
-            node.editable || FirstExperienceMath.isExpression(node.resource) || !hasFormula -> FirstExperienceReadback.Role.PRIMARY
+            node in inferred -> FirstExperienceReadback.Role.PRIMARY
+            node.editable || FirstExperienceMath.isExpression(node.resource) || !hasFormula && inferred.isEmpty() ->
+                FirstExperienceReadback.Role.PRIMARY
             else -> FirstExperienceReadback.Role.PREVIEW
         } }
     }
@@ -183,9 +228,10 @@ internal class FirstExperienceCalculator(
     suspend fun calculate(step: FirstExperienceMath.Calculation) = script.calculate(step)
 
     private companion object {
-        // These packages use native calculator controls. Unknown interfaces are skipped.
-        val PACKAGES = listOf("com.sec.android.app.popupcalculator", "com.google.android.calculator", "com.android.calculator2",
+        val CALCULATOR_NAMES = setOf("calculator", "калькулятор", "calculadora", "calculatrice", "rechner", "calcolatrice")
+        val PACKAGES = setOf("com.sec.android.app.popupcalculator", "com.google.android.calculator", "com.android.calculator2",
             "com.miui.calculator", "com.huawei.calculator", "com.hihonor.calculator", "com.coloros.calculator",
-            "com.oplus.calculator", "com.asus.calculator")
+            "com.oplus.calculator", "com.asus.calculator", "com.vivo.calculator", "com.vivo.calculator2",
+            "com.bbk.calculator", "com.iqoo.calculator")
     }
 }
