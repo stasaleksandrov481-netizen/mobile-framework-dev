@@ -39,7 +39,12 @@ internal class CortexActionSequence(
             allConfirmed = allConfirmed && confirmed
             val handoff = status == "panel" || kind == "lock_screen" && status in setOf("done", "requested") ||
                 kind in setOf("timer", "alarm", "dial", "sms") && status == "opened"
-            if (handoff || status == "cancelled") {
+            // A definite Android failure must not silently run dependent steps
+            // in a different app or with a missing permission. "requested" is
+            // deliberately not a hard failure: asynchronous Android actions
+            // can still be followed by an independent local command.
+            val hardFailure = status in HARD_FAILURES || status.isBlank()
+            if (handoff || status == "cancelled" || hardFailure) {
                 complete(commands.size - index - 1, true)
             } else step(index + 1)
         }
@@ -55,5 +60,9 @@ internal class CortexActionSequence(
 
     companion object {
         const val MAX_STEPS = 8
+        private val HARD_FAILURES = setOf(
+            "unavailable", "not_installed", "invalid", "unsupported",
+            "needs_screen", "needs_brightness", "needs_lock", "denied", "error"
+        )
     }
 }

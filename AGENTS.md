@@ -7,9 +7,10 @@
 - Репозиторий: `stasaleksandrov481-netizen/mobile-framework-dev`.
 - Android: `app/`; интерфейс: `app/src/main/assets/web/`; нативные функции: `app/src/main/java/app/cortex/assistant/`.
 - Сайт: `cortex-web/`; служебная панель: `cortex-control/`.
-- Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. На 17.11.2026 production связан с `main`; **это не означает, что Android APK с `main` имеет одобренный пользователем интерфейс**.
-- Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex` **ACTIVE v45** (17.11.2026, PR #54, `main` SHA `60f5b91`). После релиза 11 файлов runtime точно сверены с `main`. SQL baseline для `cortex_ai_device_identity` теперь в `supabase/migrations/20261117080100_cortex_device_identity_baseline.sql`; живую БД повторно не мигрировали, объекты уже существуют. **Не выкатывать Edge Function или БД без повторной проверки live version, всех 11 файлов, миграций и совместимости.**
-- Android `main` по `app/build.gradle.kts`: `1.0.14` / `114`. Версия интерфейса, которую пользователь считает правильной, пока не подтверждена. Не выпускать и не распространять новый APK, пока не установлен её точный commit SHA.
+- Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. **Исходники сайта в `main` могут расходиться с подтверждённым production UI**. Не выкатывать сайт автоматически из Android-ветки.
+- Supabase: проект `jjcqrjztxohnifmziksy`. Последний read-only снимок на 19.11.2026 в `docs/RELEASE_INVENTORY.md`: Edge `cortex` **ACTIVE v48**. Состояние живого runtime может измениться; перед серверными правками сверять все 11 файлов и миграции, не деплоить автоматически.
+- Android: подтверждённая **опубликованная** бета 19.11.2026 — `v1.0.18-beta.7`, versionCode **124**, release source `b14532caf3d08051a3d7432dd401b60c9205ed96`. Актуальная `main` может быть новее из-за документации и исправлений, поэтому **не приравнивать зелёную CI к проверке телефона**, не переподписывать старый тег и сверять release inventory перед каждым новым APK. На физическом Samsung A23 автоматическая демонстрация, Telegram и FPS не подтверждены.
+- Первичный источник релизных фактов — `docs/RELEASE_INVENTORY.md` и начало `docs/AGENT_HANDOFF.md`; старые датированные записи в этом файле не являются актуальным статусом.
 
 ## Обязательная последовательность
 

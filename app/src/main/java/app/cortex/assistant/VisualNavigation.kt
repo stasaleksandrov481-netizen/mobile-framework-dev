@@ -52,7 +52,21 @@ internal class VisualNavigation(context: Context, private val service: CortexScr
                     .takeIf { VisualLabels.normalize(app.label) in SETTINGS_NAMES }
             if (intent != null) {
                 report("Открываю «${app.label}»…")
-                if (launch(intent)) return await(APP_START_MS) { it.pkg == app.pkg && it.tree.isNotEmpty() } != null
+                if (launch(intent)) {
+                    val opened = await(APP_START_MS) { it.pkg == app.pkg && it.tree.isNotEmpty() }
+                    if (opened != null) return true
+                    if (service.activePackage() == app.pkg) {
+                        // The correct app is still foreground but may show an
+                        // empty startup window: do not jump Home or tap elsewhere.
+                        report("Жду загрузки «${app.label}»…")
+                        return await(6_000L) {
+                            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields && it.tree.isNotEmpty()
+                        } != null
+                    }
+                    // Android accepted the intent but did not switch to the
+                    // requested package. Try the launcher only in this case.
+                    report("Пробую открыть «${app.label}» через список приложений…")
+                }
             }
         }
         if (home.isEmpty()) return false
