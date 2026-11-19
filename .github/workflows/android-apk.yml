@@ -97,7 +97,7 @@ jobs:
           gradle-version: '8.13'
 
       - name: Build and test Android
-        run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest
+        run: gradle --no-daemon :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 
       # Keep a test APK available even if the signing or GitHub release step fails.
       - name: Verify test APK output

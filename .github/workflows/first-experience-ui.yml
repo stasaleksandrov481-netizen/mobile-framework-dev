@@ -24,9 +24,12 @@ jobs:
       - name: Install browser test dependencies
         working-directory: qa/browser
         run: npm ci --no-audit --no-fund
-      - name: Install Chromium
-        working-directory: qa/browser
-        run: npx playwright install --with-deps chromium
+      - name: Locate the runner browser
+        shell: bash
+        run: |
+          browser=$(command -v google-chrome || command -v chromium || true)
+          test -n "$browser"
+          echo "CORTEX_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
       - name: Check WebView pages and capture mobile layouts
         working-directory: qa/browser
         run: npm test
