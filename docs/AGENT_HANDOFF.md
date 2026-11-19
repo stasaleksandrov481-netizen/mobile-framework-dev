@@ -1,3 +1,10 @@
+## 2026-11-19 UTC · Beta.9 OEM calculator glyph fix after PR #94 merge
+
+- User merged PR #94 correctly; `main` became `9930120a839f6b3d64b0ccd006b6cb53f3295a1f`. The first automatic nonrelease Android build `44563964021` passed; the subsequent manually dispatched release run `44565132375` failed version validation because `v1.0.18-beta.8` already exists. **No signed APK with PR #94 was published**. Signed beta.8 remains rollback.
+- Android native regression `44560436931`: 14/15 test cases passed. The failing `unfamiliarOemDisplayIdStillUsesVerifiedNumericResult` stopped at fixture trace `C84×`. Its custom display draws `84 ⨯ `, a nonstandard multiplication glyph that `FirstExperienceMath.expression()` did not normalize; subsequent safe-frame inference rejected it. This is grounded in the failing emulator screenshot and fixture source, **not** proof of vivo firmware behavior.
+- Branch `fix/cortex-oem-operator-glyphs-beta9-20261119` based on main `9930120a`: add `⨯` multiplication and `:` division normalization to the strict calculator expression reader; add JVM tests, bump Android metadata to `1.0.18-beta.9`, versionCode `126`. No site, Supabase, payments, secrets or live update keys touched.
+- Next: PR Android/JVM/lint + Android device regression must pass (especially 15/15), then merge **with exact subject** `release(cortex): publish beta 1.0.18-beta.9`, requiring signed publication, checksum/download/certificate verification. Do not publish `beta.8` again or send debug APK to testers. Physical Samsung/vivo/other OEM tests remain unverified; maintain rollback beta.8 and ask testers to report OEM/package-specific failures.
+
 ## 2026-11-19 UTC · Cross-OEM Android first experience and cold app index (beta.8 baseline)
 
 - Branch: `fix/cortex-cross-oem-first-experience-20261119`, exact base `main` `ae790b946539d4c07cec934e62b26afe15693d8a`. Verified published rollback: signed `v1.0.18-beta.8` (versionCode 125), Android CI run 44539159455, release digest in `docs/RELEASE_INVENTORY.md`.
