@@ -4,6 +4,14 @@
 
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · Beta.8 independent preflight and Telegram startup regression
+
+- Audited live repository state read-only: `main` `ae790b946539d4c07cec934e62b26afe15693d8a` is signed `v1.0.18-beta.8`, versionCode 125. GitHub release ID 451431887, asset size 19,052,020 bytes, sha256 `7e12d17f215039f2dfcc5627e8c393481af17d16d8d4b3cf524cfb9aa6f2b8ed`; release build/verification workflow 44539159455 and CodeQL 44539160225 both SUCCESS. Previous PR #92 API34 emulator verified 12/12; physical Samsung/real third-party applications remain unverified.
+- Branch `fix/cortex-beta-startup-and-release-inventory-20261119` based on immutable beta.8 source `ae790b9`. Identified an additional startup race: `ConversationNavigation.run` accepted nonempty splash-screen accessibility trees and could call OCR/tap on the splash before chat search was ready; app-search already waited for a search control. Fix adds bounded readiness (up to 8 sec) for chat/header, exact visible recipient or actual search affordance before proceeding, then keeps existing safe OCR fallback. `ScreenSearch.ready` shares the semantic search-ready check.
+- Added isolated QA mode `chat-slow` to `qa-calculator/src/main/java/qa/cortex/calculator/SearchActivity.kt` and new `ConversationAndSearchDeviceTest.kt` instrumentation test for delayed Telegram-like launch through an actual AccessibilityService and verified draft; test workflow now demands 13/13 (previous 12/12). No real Telegram account or message sending is required.
+- Updated stale `AGENTS.md` and `docs/RELEASE_INVENTORY.md` from beta.7 to signed beta.8 facts; unchanged Android WebView UI, liquid island, production site, server, Edge Function, auth data, token plans, keys and signing material.
+- Branch CI and physical smoke test **pending at record creation**. Do not claim this new fix is in beta.8 or publish a beta.9 without passing CI and verifying signed release source/certificate. Need real Samsung smoke tests for Accessibility after cold-start, voice, long-press assist, Telegram, YouTube, demo/OEM calculator, brightness restoration and island FPS. Rollback: immutable signed beta.8; beta.7 retained.
+
 ## 2026-11-19 UTC · Beta.8 release candidate after 12/12 Android emulator checks
 
 - Base: `main` merge PR #92, commit `ad94b755380e00550dd98fb821543e669d1f5539`. Release branch `release/cortex-1-0-18-beta-8-20261119`. Only Android version number changes vs verified runtime: `1.0.18-beta.8`, versionCode `125`. Signed beta.7 remains immutable rollback.
