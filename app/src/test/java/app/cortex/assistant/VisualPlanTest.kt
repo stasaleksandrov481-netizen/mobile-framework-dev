@@ -154,6 +154,8 @@ class VisualPlanTest {
             AppSearchRequest.parse("Открой в Ютубе и найди гта 6", installed))
         assertEquals(AppSearchRequest("YouTube", "gta 6"),
             AppSearchRequest.parse("Открой ютуб и найди gta 6", installed))
+        assertEquals(AppSearchRequest("YouTube", "гта 6"),
+            AppSearchRequest.parse("Открыть в Ютубе и найти гта 6", installed))
         assertEquals(AppSearchRequest("YouTube", "GTA 6"),
             AppSearchRequest.parse("Найди GTA 6 в ютубе", installed))
     }
