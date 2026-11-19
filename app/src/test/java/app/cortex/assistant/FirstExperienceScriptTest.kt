@@ -16,6 +16,44 @@ class FirstExperienceScriptTest {
         assertFalse(FirstExperienceCalculatorScript.Keypad(all - "−", all).known)
     }
 
+    @Test fun `hidden clear key does not disqualify an otherwise valid OEM keypad`() {
+        val controls = FirstExperienceMath.keys.toSet() - "clear"
+        val keypad = FirstExperienceCalculatorScript.Keypad(controls, controls - "=")
+        assertTrue(keypad.known)
+        assertFalse(keypad.canPress("="))
+        assertFalse(FirstExperienceCalculatorScript.Keypad(controls - "8", controls).known)
+    }
+
+    @Test fun `native brightness fast ramp is monotonic and restores original value`() = runBlocking {
+        var actual = 128
+        val values = mutableListOf<Int>()
+        val waits = mutableListOf<Long>()
+        val forward = FirstExperienceTempo.brightnessRampFast(128, 200, { actual = it; values += it; true },
+            { waits += it })
+        assertTrue(forward)
+        assertEquals(200, actual)
+        assertEquals(1080L, waits.sum())
+        assertTrue(values.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue(values.size <= 24)
+        assertTrue(FirstExperienceTempo.brightnessRampFast(200, 128, { actual = it; true }, { }))
+        assertEquals(128, actual)
+    }
+
+    @Test fun `native brightness fast ramp stops on a rejected write`() = runBlocking {
+        var attempts = 0
+        assertFalse(FirstExperienceTempo.brightnessRampFast(128, 200, { ++attempts < 5 }, { }))
+        assertEquals(5, attempts)
+        attempts = 0
+        var pauses = 0
+        val cancelled = runCatching {
+            FirstExperienceTempo.brightnessRampFast(128, 200, { attempts++; true }, {
+                if (++pauses == 3) throw CancellationException("Stopped")
+            })
+        }.exceptionOrNull()
+        assertTrue(cancelled is CancellationException)
+        assertTrue(attempts <= 2)
+    }
+
     @Test fun `an empty primary display wins over an old live preview after C`() {
         assertTrue(FirstExperienceCalculatorScript.Display(listOf(""), listOf("588")).cleared)
         assertTrue(FirstExperienceCalculatorScript.Display(listOf("\u200e\u200f"), emptyList()).cleared)
