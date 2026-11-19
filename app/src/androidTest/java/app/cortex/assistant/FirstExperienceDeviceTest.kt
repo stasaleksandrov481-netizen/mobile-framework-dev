@@ -85,6 +85,20 @@ class FirstExperienceDeviceTest {
         assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
     }
 
+    @Test fun unfamiliarOemDisplayIdStillUsesVerifiedNumericResult() = runBlocking(Dispatchers.Main) {
+        val calculator = calculator("unknown_display")
+        assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
+        assertTrue(calculator.clear())
+        assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
+    }
+
+    @Test fun clearKeyMayBeHiddenWhileCalculatorIsAlreadyEmpty() = runBlocking(Dispatchers.Main) {
+        val calculator = calculator("hidden_clear")
+        assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
+        assertTrue(calculator.clear())
+        assertTrue(calculator.failure, FirstExperienceMath.performPrediction(17) { _, step -> calculator.calculate(step) })
+    }
+
     @Test fun delayedEqualityDoesNotGetSkipped() = runBlocking(Dispatchers.Main) {
         val calculator = calculator("delayed")
         assertTrue(calculator.failure, calculator.calculate(FirstExperienceMath.example))
