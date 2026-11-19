@@ -1,5 +1,14 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · Beta preflight: fail-closed task chains, app startup, Android messenger/search regressions
+
+- Baseline: `main` `acd225822c29f5b21f5611f3946dfc4c4d7488b4`, signed release `v1.0.18-beta.7` / source `b14532c` / versionCode 124. Branch: `fix/cortex-beta-readiness-20261119`; all changes Android native/test infrastructure only, plus this handoff and stale AGENTS baseline correction. No production site, pricing, server, DB or APK publication.
+- `CortexActionSequence.kt`: stop an ordered local command chain on definitive Android failures (unsupported, unavailable, missing application/permission, invalid, etc), report remaining steps rather than continue in the wrong state. Continue on `requested` and unverified `opened` but never claim overall success. New JVM regressions in `CortexActionSequenceTest.kt`.
+- `VisualNavigation.kt`: launch intent timeouts wait a further bounded period when the correct package is in front (app may have an empty launch screen); only attempt HOME/launcher fallback if package did not switch. No blind tap or model requests.
+- Isolated `qa-calculator` test-only fixture `SearchActivity.kt` and four Android instrumentation regressions `ConversationAndSearchDeviceTest.kt` exercise **actual** accessibility gestures against a fake Telegram recent conversation, search result and draft, declined send confirmation, and a delayed YouTube-like search. `android-device-test.yml` now requires 12/12 tests, not merely the original 8/8 calculator tests.
+- The fixture uses no contacts, Telegram account, external API or real message sending; it is installed as a separate APK and never included in production CORTEX. Physical Samsung A23, actual Telegram/YouTube apps, island FPS, AI provider and voice hotword remain unverified; do not promise full device reliability from emulator tests.
+- Required before merge: JVM/lint/Android debug+release, 12/12 API34 instrumentation, WebView UI, CodeQL, handoff checks. Protect signed beta.7 as rollback; do not publish beta.8 until tested and versionCode incremented with immutable tag.
+
 ## 2026-11-19 UTC · beta.7 published after native Android regression and independent APK verification
 
 - PR #89 merged as release source `b14532caf3d08051a3d7432dd401b60c9205ed96`, tree `d0c7e4d6bca870fbc47a463ee4279ac1ca51f93e`, identical to tested head `9aedee6cdcdca94671ece7b6de66a65319359059`. Final PR Android/JVM/lint/release build `44523659217`, WebView screenshot workflow `44523659206`, CodeQL/security and handoff checks all passed. Main signed-release workflow `44524652691`, job `135561895294`, SUCCESS including publication and re-downloaded checksum/source verification.
