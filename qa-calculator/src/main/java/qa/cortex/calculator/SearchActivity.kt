@@ -35,7 +35,8 @@ class SearchActivity : Activity() {
         if (mode == "search-slow") {
             text("Загрузка приложения…", 18f)
             handler.postDelayed({ if (!isFinishing) renderLanding() }, 1_400L)
-        } else renderLanding()
+        } else if (mode == "chat-search") renderSearch()
+        else renderLanding()
     }
 
     private fun dp(value: Int) = (resources.displayMetrics.density * value).toInt()
@@ -87,7 +88,7 @@ class SearchActivity : Activity() {
                 if (query.isEmpty()) return
                 handler.postDelayed({
                     if (ticket != generation || isFinishing) return@postDelayed
-                    if (mode == "chat") {
+                    if (mode == "chat" || mode == "chat-search") {
                         for (name in listOf("Рыбка", "Рыбка Новости")) {
                             val button = Button(this@SearchActivity).apply {
                                 text = name
