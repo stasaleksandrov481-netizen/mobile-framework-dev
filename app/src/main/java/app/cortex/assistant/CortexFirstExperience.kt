@@ -43,7 +43,7 @@ internal object CortexFirstExperience {
     private fun reason(context: Context): String? = when {
         FirstExperienceBrightness.hasPending(context) -> "Сначала нужно восстановить настройки яркости."
         CortexActionState.gate != "open" -> CortexActionState.gateMessage()
-        CortexScreenService.connected == null -> "Разрешите CORTEX управление экраном в специальных возможностях."
+        CortexScreenService.connected == null -> "Служба управления экраном не подключена. Если доступ уже включён, дождитесь подключения или перезапустите CORTEX."
         !Settings.canDrawOverlays(context) -> "Разрешите показ островка поверх других приложений."
         !CortexIslandService.allowedInOrientation(context) -> "Поверните телефон вертикально для знакомства с CORTEX."
         CortexScreenService.connected?.locked() != false -> "Разблокируйте телефон для знакомства с CORTEX."
@@ -105,6 +105,7 @@ internal object CortexFirstExperience {
 
     private fun validSession(body: JSONObject) = session.isNotBlank() && body.optString("session") == session
     private fun emit(context: Context) { listener?.invoke(snapshot(context)) }
+    fun availabilityChanged(context: Context) { emit(context.applicationContext) }
     private fun report(context: Context, text: String) {
         message = text
         CortexActionState.report(context, "executing", text)
@@ -145,16 +146,21 @@ internal object CortexFirstExperience {
             var monitor: Job? = null
             try {
                 report(context, "Передаю управление CORTEX")
-                if (!CortexIslandService.beginFirstExperience(context) || withTimeoutOrNull(3_000L) {
-                        while (!CortexIslandService.firstExperienceReady()) delay(60L)
+                if (!CortexIslandService.beginFirstExperience(context, session) || withTimeoutOrNull(4_500L) {
+                        while (!CortexIslandService.firstExperienceReady(session)) delay(60L)
                         true
                     } != true) throw IllegalStateException("Android не показал островок с кнопкой остановки.")
                 monitor = launch {
                     while (isActive) {
                         delay(180L)
-                        if (CortexScreenService.connected?.locked() != false || !Settings.canDrawOverlays(context) ||
-                            !CortexIslandService.allowedInOrientation(context) || !CortexIslandService.firstExperienceReady()) {
-                            stop("Знакомство остановлено: экран или разрешения больше недоступны.")
+                        val screen = CortexScreenService.connected
+                        val failure = FirstExperienceHealth.failure(connected = screen != null,
+                            unlocked = screen?.locked() == false, overlay = Settings.canDrawOverlays(context),
+                            orientation = CortexIslandService.allowedInOrientation(context),
+                            islandAvailable = CortexIslandService.firstExperienceAvailable(session))
+                        if (failure != null) {
+                            CortexActionState.log(context, failure.message)
+                            stop(failure.message)
                         }
                     }
                 }
@@ -177,7 +183,7 @@ internal object CortexFirstExperience {
                     // Keep the task slot until ALL restoration has completed.
                     CortexActionState.report(context, if (phase == "stopped") "stopped" else "done", message)
                     CortexRuntime.firstExperienceActive = false
-                    CortexIslandService.endFirstExperience()
+                    CortexIslandService.endFirstExperience(session)
                     if (phase == "stopped" && CortexScreenService.connected?.locked() == false) returnToApp(context)
                     emit(context)
                 }
