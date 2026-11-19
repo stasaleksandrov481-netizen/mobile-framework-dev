@@ -86,12 +86,16 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
         // Results may already be drawn *during* text entry. Requiring a
         // structure change after typing gives a false failure for fast searches.
         // Do not count the editable query itself as a result.
-        fun hasResults(current: VisualFrame) = current.pkg == app.pkg &&
-            !current.secure && !current.hasPrivateFields &&
-            current.tree.any { node ->
-                node.enabled && !node.editable && !inToolbar(current, node) &&
+        fun hasResults(current: VisualFrame): Boolean {
+            if (current.pkg != app.pkg || current.secure || current.hasPrivateFields) return false
+            // The first result can be near the top of the screen, well above
+            // the old 23%-height cutoff. Bound it to the actual search editor.
+            val resultTop = field(current)?.bounds?.bottom ?: editor.bounds.bottom
+            return current.tree.any { node ->
+                node.enabled && !node.editable && node.bounds.centerY() > resultTop &&
                     VisualLabels.score(node.label, request.query) >= 82
             }
+        }
         val matches = if (hasResults(typed)) typed else navigation.await(if (requested) 9_000L else 2_400L, ::hasResults)
         return if (matches != null) CortexActionEngine.Result("Поиск «${request.query}» открыт в ${app.label}.", true)
         else CortexActionEngine.Result(if (requested) "Запрос «${request.query}» передан в ${app.label}. Результаты ещё не подтверждены."
