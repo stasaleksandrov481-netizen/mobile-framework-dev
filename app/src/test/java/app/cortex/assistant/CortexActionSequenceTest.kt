@@ -95,6 +95,37 @@ class CortexActionSequenceTest {
         }
     }
 
+    @Test fun failedPhoneActionBlocksRemainingCommands() {
+        for (status in listOf("not_installed", "unavailable", "needs_screen", "needs_brightness",
+                "needs_lock", "invalid", "unsupported", "")) {
+            val started = mutableListOf<String>()
+            var final: CortexActionSequence.Result? = null
+            CortexActionSequence(listOf(step("app"), step("torch"), step("lock_screen")), { true },
+                { command, _, _, done ->
+                    started += command.optString("kind")
+                    done(outcome(status))
+                }) { final = it }.start()
+            assertEquals(status, listOf("app"), started)
+            assertFalse(status, requireNotNull(final).ok)
+            assertTrue(status, requireNotNull(final).blocked)
+            assertTrue(status, requireNotNull(final).text.contains("Осталось шагов: 2"))
+        }
+    }
+
+    @Test fun acceptedButUnconfirmedLaunchCanContinueToIndependentCommand() {
+        val kinds = mutableListOf<String>()
+        var final: CortexActionSequence.Result? = null
+        CortexActionSequence(listOf(step("app"), step("torch")), { true },
+            { command, index, _, done ->
+                kinds += command.getString("kind")
+                done(outcome(if (index == 1) "opened" else "done"))
+            }) { final = it }.start()
+        assertEquals(listOf("app", "torch"), kinds)
+        assertFalse(requireNotNull(final).ok)
+        assertFalse(requireNotNull(final).blocked)
+        assertTrue(requireNotNull(final).text.contains("Android получил запрос"))
+    }
+
     @Test fun clockAndMessageIntentsWaitForUserConfirmation() {
         for (kind in listOf("timer", "alarm", "dial", "sms")) {
             var secondStarted = false
