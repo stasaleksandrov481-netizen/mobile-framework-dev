@@ -16,22 +16,29 @@ internal class ConversationNavigation(
         var frame = navigation.await(VisualNavigation.APP_START_MS) {
             usable(it, app.pkg) && it.tree.isNotEmpty()
         } ?: return result("Приложение открылось, но экран переписки пока недоступен.")
-        val name = searchName(request.recipient)
-        var recipient = name
+        val query = ConversationMatch.searchQuery(request.recipient)
+        var recipient = request.recipient
         var openedWindow = frame.window
         if (!chat(frame, recipient, search)) {
             report("Ищу переписку «${request.recipient}»…")
             val onList = search.field(frame) == null
             // Reuse an exact visible conversation before opening search.
-            val visible = if (onList) candidate(frame, name, null, allowOcr = false) else null
-            val matching: Pair<VisualFrame, Candidate> = if (visible != null && visible.score == 100) frame to visible
-            else {
+            val nativeVisible = if (onList) candidate(frame, request.recipient, null, allowOcr = false) else null
+            val visible = if (nativeVisible?.score == 100) frame to nativeVisible else if (onList) {
+                // A native chat list may draw names without accessible click targets.
+                val words = screen.recognize(frame)
+                if (words.protected) null else {
+                    val enriched = frame.copy(nodes = frame.nodes + words.nodes)
+                    candidate(enriched, request.recipient, null, allowOcr = true)
+                        ?.takeIf { it.score == 100 }?.let { enriched to it }
+                }
+            } else null
+            val matching: Pair<VisualFrame, Candidate> = visible ?: run {
                 val ready = search.open(frame) ?: return result("Не открылось поле поиска в «${app.label}».")
-                val typed = navigation.writeText(ready, name, search::field)
+                val typed = navigation.writeText(ready, query, search::field)
                     ?: return result("Не удалось подтвердить текст в поле поиска «${app.label}».")
-                val found = findResult(typed, name, search)
+                findResult(typed, query, request.recipient, search)
                     ?: return result("В результатах поиска не нашёл однозначный чат «${request.recipient}». Назовите точное имя или @username.")
-                found
             }
             recipient = matching.second.title
             if (!activate(matching.first, matching.second.row)) return result("Переписка не открылась.")
@@ -88,29 +95,27 @@ internal class ConversationNavigation(
 
     private data class Candidate(val row: VisualNode, val title: String, val score: Int)
 
-    private fun searchName(name: String): String = when {
-        name.startsWith('@') -> name
-        name.matches(Regex("""(?iu)[а-яё]{2,}ке""")) -> name.dropLast(1) + "а"
-        else -> name
-    }
-
-    private suspend fun findResult(initial: VisualFrame, name: String, search: ScreenSearch): Pair<VisualFrame, Candidate>? {
+    private suspend fun findResult(initial: VisualFrame, query: String, recipient: String, search: ScreenSearch): Pair<VisualFrame, Candidate>? {
         fun valid(frame: VisualFrame) = usable(frame, initial.pkg) && frame.window == initial.window &&
-            search.field(frame)?.let { screen.fieldMatches(frame, it, name) } == true
-        val native = navigation.await(3_000L) {
-            valid(it) && candidate(it, name, search.field(it), allowOcr = false) != null
+            search.field(frame)?.let { screen.fieldMatches(frame, it, query) } == true
+        val native = navigation.await(4_500L) {
+            valid(it) && candidate(it, recipient, search.field(it), allowOcr = false)?.score == 100
         }
-        if (native != null) return native to requireNotNull(candidate(native, name, search.field(native), allowOcr = false))
-        // Custom-drawn result rows may expose no title through accessibility.
+        if (native != null) return native to requireNotNull(candidate(native, recipient, search.field(native), allowOcr = false))
+        // Prefer a visually verified exact title over an accessible prefix-only row.
         repeat(2) {
             val current = screen.frame(fresh = true)?.takeIf(::valid) ?: return null
             val words = screen.recognize(current)
             if (words.protected) return null
             val enriched = current.copy(nodes = current.nodes + words.nodes)
-            candidate(enriched, name, search.field(enriched), allowOcr = true)?.let { return enriched to it }
+            candidate(enriched, recipient, search.field(enriched), allowOcr = true)
+                ?.takeIf { it.score == 100 }?.let { return enriched to it }
             if (it == 0) navigation.await(1_600L) { valid(it) && it.structure() != current.structure() }
         }
-        return null
+        // Partial names remain possible only when there is a single distinct
+        // candidate; the chat header and explicit send confirmation still apply.
+        val current = screen.frame(fresh = true)?.takeIf(::valid) ?: return null
+        return candidate(current, recipient, search.field(current), allowOcr = false)?.let { current to it }
     }
 
     private fun candidate(frame: VisualFrame, name: String, field: VisualNode?, allowOcr: Boolean): Candidate? {
@@ -121,14 +126,19 @@ internal class ConversationNavigation(
         val candidates = frame.nodes.mapNotNull { node ->
             if (!node.enabled || node.editable || node.bounds.centerY() <= top || node.bounds.centerY() >= boundary) return@mapNotNull null
             if (node.ocr && !allowOcr) return@mapNotNull null
+            val title = ConversationMatch.title(node.label, node.description, node.descriptionLines)
+            val score = ConversationMatch.score(title, node.descriptionLines, name)
+            if (score == 0 || node.ocr && score < 100 || field == null && score < 100) return@mapNotNull null
             val row = if (node.clickable || node.ocr) node else frame.tree.filter { parent ->
                 parent.clickable && parent.enabled && contains(parent.bounds, node.bounds) &&
                     parent.path.size < node.path.size && node.path.take(parent.path.size) == parent.path &&
                     parent.bounds.height() < frame.bounds.height() * .19
-            }.maxByOrNull { it.path.size } ?: return@mapNotNull null
-            val title = ConversationMatch.title(node.label, node.description, node.descriptionLines)
-            val score = ConversationMatch.score(title, node.descriptionLines, name)
-            if (score == 0 || node.ocr && score < 100 || field == null && score < 100) return@mapNotNull null
+            }.maxByOrNull { it.path.size } ?: node.takeIf {
+                // Some messenger builds expose a visible title without a clickable parent.
+                // Only tap an exact title; opening must still verify the chat header.
+                score == 100 && it.role in setOf("TextView", "View") && it.label.isNotBlank() &&
+                    it.bounds.height() < frame.bounds.height() * .10
+            } ?: return@mapNotNull null
             val resolvedTitle = if (name.startsWith('@') && title.startsWith('@')) {
                 frame.nodes.filter { item ->
                     item.ocr && item.bounds.bottom <= node.bounds.top &&
