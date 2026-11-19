@@ -135,6 +135,36 @@ class VisualPlanTest {
         assertEquals(100, ConversationMatch.score("Имя", listOf("Имя", "@example_user, 13 подписчиков"), "@example_user"))
     }
 
+    @Test fun inflectedTelegramNamesMatchVerifiedTitlesNotMessagePreviews() {
+        assertEquals("рыбк", ConversationMatch.searchQuery("рыбке"))
+        assertEquals("саш", ConversationMatch.searchQuery("Саше"))
+        assertEquals("@example_user", ConversationMatch.searchQuery("@example_user"))
+        assertEquals(100, ConversationMatch.score("Рыбка", listOf("Рыбка", "был в сети"), "рыбке"))
+        assertEquals(100, ConversationMatch.score("Саша", listOf("Саша"), "Саше"))
+        assertEquals(100, ConversationMatch.score("Катя", listOf("Катя"), "Кате"))
+        assertEquals(100, ConversationMatch.score("Антон", listOf("Антон"), "Антоне"))
+        assertEquals(100, ConversationMatch.score("Андрей", listOf("Андрей"), "Андрею"))
+        assertEquals(0, ConversationMatch.score("Рыбка Новости", listOf("Рыбка Новости"), "рыбке"))
+        assertEquals(0, ConversationMatch.score("Медиа", listOf("Медиа", "Рыбка"), "рыбке"))
+        assertEquals(0, ConversationMatch.score("Рыба", listOf("Рыба"), "рыбке"))
+    }
+
+    @Test fun youtubeSearchParsesNaturalLocationPhrasesBeforeLaunching() {
+        assertEquals(AppSearchRequest("YouTube", "гта 6"),
+            AppSearchRequest.parse("Открой в Ютубе и найди гта 6", installed))
+        assertEquals(AppSearchRequest("YouTube", "gta 6"),
+            AppSearchRequest.parse("Открой ютуб и найди gta 6", installed))
+        assertEquals(AppSearchRequest("YouTube", "GTA 6"),
+            AppSearchRequest.parse("Найди GTA 6 в ютубе", installed))
+    }
+
+    @Test fun genericSystemDestinationUsesSemanticNavigationInsteadOfAppNotFound() {
+        assertTrue(VisualRequest.isAction("Открой статистику использования телефона"))
+        assertFalse(VisualRequest.explicitAppLaunch("Открой статистику использования телефона"))
+        assertFalse(VisualRequest.explicitAppLaunch("Покажи цифровое благополучие"))
+        assertTrue(VisualRequest.explicitAppLaunch("Открой приложение Тестовый помощник"))
+    }
+
     @Test fun shoppingVideoAndInstalledAppSearchDoNotNeedAPlanFromTheModel() {
         assertEquals(AppSearchRequest("TikTok", "прогулка по городу"),
             AppSearchRequest.parse("открой тик ток и найди прогулка по городу", installed))
