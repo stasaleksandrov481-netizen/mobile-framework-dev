@@ -2,8 +2,8 @@ package app.cortex.assistant
 
 internal data class AppSearchRequest(val app: String, val query: String) {
     companion object {
-        private const val FIND = "(?:найди|поищи|вбей|введи в поиск|покажи результаты по)"
-        private val open = Regex("""^(?:открой|запусти|зайди в)\s+(.+?)(?:\s*[,;]\s*|\s+)(?:и\s+|потом\s+|затем\s+)?$FIND\s+(.+)$""", RegexOption.IGNORE_CASE)
+        private const val FIND = "(?:найди|найти|поищи|поискать|вбей|введи в поиск|покажи результаты по)"
+        private val open = Regex("""^(?:открой|открыть|запусти|запустить|зайди в|зайти в)\s+(.+?)(?:\s*[,;]\s*|\s+)(?:и\s+|потом\s+|затем\s+)?$FIND\s+(.+)$""", RegexOption.IGNORE_CASE)
         private val find = Regex("""^$FIND\s+(.+?)\s+(?:в|на|через)\s+(.+)$""", RegexOption.IGNORE_CASE)
         private val aliases = mapOf("тт" to "TikTok", "тик ток" to "TikTok", "тикток" to "TikTok", "тиктоке" to "TikTok",
             "tiktok" to "TikTok", "вб" to "Wildberries", "вайлдберриз" to "Wildberries", "wildberries" to "Wildberries",
