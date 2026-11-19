@@ -1,5 +1,14 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · Telegram chat names / YouTube readiness / semantic system destinations
+
+- Branch: `fix/cortex-telegram-youtube-semantic-20261119` (work from current `main`); latest Android code/test commit `2294712ab5aa02722a1b6a111c39aab42ae620f0`.
+- Android-only fix: `ConversationMatch.kt`, `ConversationNavigation.kt` match Russian inflected recipients by a short search stem and **exact verified chat titles**, including native/recent and OCR rows. Keep chat-header verification and explicit send confirmation; never infer recipient from message previews or global results.
+- `ScreenSearch.kt`: parse `Открой в Ютубе и найди гта 6`, wait for actual search controls before input, and retry when the app has only partially loaded.
+- `VisualPlan.kt` + `CortexActionEngine.kt`: only an explicit application request gets an immediate "not installed" result. Unknown system destinations (e.g. usage statistics) now fall through to the semantic visual planner; this is not a guarantee of every Settings screen on every OEM.
+- `VisualPlanTest.kt`: regression tests for naming inflections, YouTube phrasing, and system-destination intent. GitHub CI and physical Samsung/Telegram/YouTube smoke test **not yet verified**; do not claim the bug fixed in an installed APK.
+- No WebView design, island, production site, signing materials, quotas, database, Edge Function, Vercel, tag, or published APK changed. Keep the current signed release as rollback. Next: PR CI, inspect tests/compile, manually test on phone before preparing a separately approved APK.
+
 ## 2026-11-18 UTC · DDoS-эпизод, WAF v10 и синхронизация Edge v47
 
 - Vercel `get_active_attack_status`: обнаружен **active DDoS** на `cortexapp.ru` с `2026-11-18T18:45:00Z`; зафиксировано `1,206,282` запросов для минуты `18:45Z`, системное действие `sys_dos_mitigation:challenge`. Это **не** показатель постоянной интенсивности после указанной минуты. Проверка `/`, `/register`, `/pricing`, `/payment?plan=start`, `/api/status` после обнаружения дала 200; `/api/status` вернул `{status:"ok",cache:"ok"}`. Не пытаться имитировать нагрузку на живом домене.
