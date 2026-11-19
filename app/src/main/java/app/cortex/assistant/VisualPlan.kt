@@ -137,6 +137,14 @@ internal object VisualRequest {
         }
     }
 
+    // Only a request explicitly naming an *app* should get the "app not installed"
+    // error. "Open phone usage statistics" refers to a Settings destination and
+    // needs the semantic visual planner rather than an exact package lookup.
+    fun explicitAppLaunch(text: String): Boolean = Regex(
+        """^(?:открой|открыть|запусти|запустить|open|launch)\\s+(?:приложение|the app)\\s+""",
+        RegexOption.IGNORE_CASE
+    ).containsMatchIn(cleanCommand(text))
+
     fun opensFirst(text: String): Boolean =
         open.matches(cleanCommand(text).split(separators, limit = 2).first())
 
