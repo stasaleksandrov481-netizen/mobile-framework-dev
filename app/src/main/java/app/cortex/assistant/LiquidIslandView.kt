@@ -15,6 +15,8 @@ import android.graphics.RectF
 import android.graphics.Region
 import android.os.Build
 import android.os.SystemClock
+import android.text.TextPaint
+import android.text.TextUtils
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -49,6 +51,12 @@ internal class LiquidIslandView(
     private val traceSegment = Path()
     private val traceMeasure = PathMeasure()
     private val traceBounds = RectF()
+    private val measuredTraceBounds = RectF()
+    private var measuredTraceRadius = -1f
+    private val statusPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private var fittedStatus = ""
+    private var fittedLabel = ""
+    private var fittedWidth = -1f
     private val signal = IslandSignal(density)
     private val glass = IslandGlass(density)
     private val mascot = IslandMascot(density)
@@ -392,9 +400,13 @@ internal class LiquidIslandView(
             ink.alpha = (240 * compactAlpha).roundToInt()
             ink.textSize = 12f * density
             val available = (compactBody.width() - dp(48)).coerceAtLeast(1f)
-            val text = android.text.TextUtils.ellipsize(statusLabel,
-                android.text.TextPaint(ink), available, android.text.TextUtils.TruncateAt.END).toString()
-            canvas.drawText(text, compactBody.left + dp(15), compactBody.centerY() - (ink.ascent() + ink.descent()) / 2f, ink)
+            if (fittedLabel != statusLabel || fittedWidth != available) {
+                fittedLabel = statusLabel
+                fittedWidth = available
+                statusPaint.set(ink)
+                fittedStatus = TextUtils.ellipsize(statusLabel, statusPaint, available, TextUtils.TruncateAt.END).toString()
+            }
+            canvas.drawText(fittedStatus, compactBody.left + dp(15), compactBody.centerY() - (ink.ascent() + ink.descent()) / 2f, ink)
             if (activeStop) {
                 val x = compactBody.right - dp(14)
                 val y = compactBody.centerY()
@@ -441,7 +453,8 @@ internal class LiquidIslandView(
             }
         }
         if (moving && compactAlpha > .02f && disappearance == 0f && isActivePhase()) {
-            postInvalidateDelayed(48L)
+            // Follow the display's frame clock instead of imposing a visibly choppy ~20 Hz timer.
+            postInvalidateOnAnimation()
         }
     }
 
@@ -493,10 +506,14 @@ internal class LiquidIslandView(
         if (!motion || !style.progress || !isActivePhase() || compactBody.width() < 18f * density) return
         val inset = 1.8f * density
         traceBounds.set(compactBody.left + inset, compactBody.top + inset, compactBody.right - inset, compactBody.bottom - inset)
-        traceOutline.rewind()
         val arc = (radius - inset).coerceAtLeast(0f)
-        traceOutline.addRoundRect(traceBounds, arc, arc, Path.Direction.CW)
-        traceMeasure.setPath(traceOutline, true)
+        if (measuredTraceBounds != traceBounds || measuredTraceRadius != arc) {
+            measuredTraceBounds.set(traceBounds)
+            measuredTraceRadius = arc
+            traceOutline.rewind()
+            traceOutline.addRoundRect(traceBounds, arc, arc, Path.Direction.CW)
+            traceMeasure.setPath(traceOutline, true)
+        }
         val total = traceMeasure.length
         if (total <= 0f) return
         val elapsed = ((now - phaseStartedAt).coerceAtLeast(0L) % 200_000L) / 1000f

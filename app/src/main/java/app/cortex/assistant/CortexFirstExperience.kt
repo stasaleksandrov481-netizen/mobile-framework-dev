@@ -164,7 +164,7 @@ internal object CortexFirstExperience {
                         }
                     }
                 }
-                withTimeout(240_000L) { demonstrate(context) }
+                withTimeout(300_000L) { demonstrate(context) }
             } catch (_: TimeoutCancellationException) {
                 phase = "stopped"; message = "Время знакомства истекло. Его можно повторить в настройках."
             } catch (_: CancellationException) {
@@ -195,40 +195,38 @@ internal object CortexFirstExperience {
     private suspend fun demonstrate(context: Context) {
         val service = CortexScreenService.connected ?: throw IllegalStateException()
         val calculator = FirstExperienceCalculator(context, service) { report(context, it) }
-        delay(1_000L)
-        val ready = calculator.open() && calculator.clear()
-        if (ready) {
+        delay(FirstExperienceTempo.BEFORE_ACTION)
+        if (calculator.open() && calculator.clear()) {
             report(context, "Вычисляю")
             exampleDone = calculator.calculate(FirstExperienceMath.example)
         }
         if (exampleDone) {
-            report(context, "Готово"); delay(600L)
-            report(context, "Это сделал не ты."); delay(1_650L)
+            report(context, "Готово"); delay(900L)
+            report(context, "Это сделал не ты."); delay(2_200L)
         } else {
             skip(context, "Не удалось подтвердить результат в калькуляторе. Пропускаю этот фокус.")
-            delay(1_500L)
+            delay(FirstExperienceTempo.BEFORE_ACTION)
         }
-        report(context, "А теперь немного магии с экраном."); delay(1_200L)
+        report(context, "А теперь немного магии с экраном."); delay(FirstExperienceTempo.BEFORE_ACTION)
         val brightness = FirstExperienceBrightness(context, service).run()
         brightnessDone = brightness.performed
         if (brightness.performed) report(context, brightness.message) else skip(context, brightness.message)
-        delay(1_600L)
+        delay(FirstExperienceTempo.RESULT)
         if (!returnToApp(context)) throw IllegalStateException()
-        if (!ready) {
-            skip(context, "Предсказание пропущено: интерфейс настоящего калькулятора недоступен.")
-            phase = "finish"; return
-        }
+        // The first calculation's failure is not a permanent calculator capability verdict.
+        // Always show the number prompt; prediction gets a fresh launch, clear and verification.
         state(context, "number", "Последний фокус. Проверим, умею ли я предсказывать результат?")
         val selected = withTimeout(120_000L) { requireNotNull(number).await() }
         state(context, "sealed", "Мой прогноз уже сделан.")
-        delay(1_500L)
+        delay(FirstExperienceTempo.SEALED)
         phase = "running"
         if (!calculator.open() || !calculator.clear()) {
             skip(context, "Калькулятор недоступен. Пропускаю предсказание.")
             returnToApp(context); phase = "finish"; return
         }
         val confirmed = FirstExperienceMath.performPrediction(selected) { index, calculation ->
-            report(context, "Предсказание · шаг ${index + 1} из 4")
+            val action = listOf("Умножаю на 2", "Прибавляю 10", "Делю на 2", "Вычитаю исходное число")[index]
+            report(context, "$action · ${index + 1}/4")
             calculator.calculate(calculation)
         }
         if (!confirmed) {
@@ -239,7 +237,7 @@ internal object CortexFirstExperience {
         if (!returnToApp(context)) throw IllegalStateException()
         state(context, "reveal", "Совпадение? Математика. А вот телефон я действительно контролировал.")
         CortexIslandService.pulseFirstExperience()
-        delay(1_100L)
+        delay(FirstExperienceTempo.RESULT)
     }
 
     private suspend fun returnToApp(context: Context): Boolean {

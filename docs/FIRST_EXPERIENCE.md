@@ -32,10 +32,21 @@ remain immediate cancellations and are reported separately; brightness cleanup i
 
 ## Real calculator
 
-`FirstExperienceCalculator` resolves an installed native calculator, uses the existing
-verified launcher navigation with an 18-second budget and awaits its keypad. Each
-button comes from a fresh accessibility tree and is pressed by the shared gesture
-executor. No guessed coordinates or AI planning are used.
+`FirstExperienceCalculator` resolves the installed native calculator, confirms the
+real Home screen, holds it for two seconds, launches that exact installed package,
+awaits its keypad and holds for another two seconds before acting. This fixed local
+launch script replaces the launcher-search race. Buttons come from fresh accessibility
+trees and are pressed by the shared gesture executor. No guessed coordinates or AI
+planning are used.
+
+Keypad identity and enabled state are separate: Samsung/OEM calculators may disable
+equals or clear after C without ceasing to be recognized. Only the requested key must
+be enabled. An empty editable formula is not replaced by its accessibility help text;
+its clear acknowledgement takes precedence over an old live-preview result. Each digit
+and operator must appear in the actual formula before the next key, and every equality
+must show the expected integer. One retry is allowed only after positively observing the
+unchanged prior formula; equals is never blindly repeated. Keys are spaced by 650 ms;
+each calculation has a two-second preparation and a 2.2-second result hold.
 
 Recognized package candidates include Samsung, Google/AOSP, Xiaomi, Huawei/HONOR,
 OPPO/OnePlus and ASUS. This is a candidate list, **not a claim of physical device
@@ -46,7 +57,9 @@ visual frame's editable-text redaction or cloud model payload.
 
 The example verifies 588 on the actual display. Prediction performs four separately
 visible calculations for integers 1–99. Each equality result must be confirmed before
-the next operation. The five card is only revealed after all four confirmations.
+the next operation. The number prompt is independent of first-example success:
+prediction gets a fresh launch/clear. The sealed card remains visible for 2.4 seconds;
+the five card is only revealed after all four real confirmations.
 
 ## Brightness transaction
 
@@ -61,6 +74,11 @@ the next operation. The five card is only revealed after all four confirmations.
   brightness bias. Slider movement uses its observed OEM range, with target fraction
   35–85%, and a confirmed visible change. Returning to the initial slider position is
   followed by exact system-setting restoration and readback.
+- After opening the panel, wait two seconds. Movement takes 2.2 seconds each way in
+  60 eased, cancellable ACTION_SET_PROGRESS steps with visible holds. A bounded live
+  node handle refreshes and validates the exact slider identity/range/bounds/window
+  without traversing the whole UI tree on every tick. It is closed before cleanup.
+  Reduce Motion uses one change; missing or changed controls still skip and restore.
 - Cancellation, lock, permission loss, timeout and service disappearance run bounded
   `NonCancellable` cleanup. The shared task lease stays held through cleanup.
   Original mode restoration is attempted even if an earlier provider write throws.
@@ -75,7 +93,9 @@ the next operation. The five card is only revealed after all four confirmations.
 
 - JVM tests: all 99 arithmetic scripts, exact selectors, ambiguous controls, display
   parsing, safe target ranges, stop-on-failure/cancellation, restoration order and
-  verification, provider failures and invalid snapshots.
+  verification, provider failures and invalid snapshots. Additional regressions cover
+  disabled post-clear keys, blank formula with stale preview, actual per-key acknowledgements,
+  pacing, retry after a failed example, all 99 complete paced predictions and ramp cancellation.
 - `node --test qa/first-experience.test.mjs`: native-only UI progression, input limits,
   duplicate requests/snapshots, setup gating, stop, skip, focus/inert cleanup and escaping.
 - `cd qa/browser && npm ci && npx playwright install chromium && npm test`: renders the
@@ -83,11 +103,20 @@ the next operation. The five card is only revealed after all four confirmations.
   **test fixture**; screenshots do not prove Android device actions work.
 - New GitHub UI workflow saves those screenshots. Existing Android workflow includes
   the feature's Node tests and all Android unit tests; security workflow remains enabled.
-- Before public APK release: physically test Samsung A23 plus at least one Xiaomi and
+- Before declaring OEM compatibility: physically test Samsung A23 plus at least one Xiaomi and
   HONOR device; verify calculator controls/results, full Quick Settings visibility,
   auto/manual brightness, Stop during every stage, screen lock, accessibility/overlay
   revocation, activity recreation and killed-session recovery. Do not advertise an OEM
   as supported solely because its package is listed.
 
-This branch does not change server code, database state, production website, signing,
-version number, release tag or published APK. Keep the previous signed APK as rollback.
+## Island frame pacing (beta.5)
+
+Active border animation follows postInvalidateOnAnimation rather than the old 48 ms
+timer (an approximately 20 Hz cap before display scheduling). Its outline measurement
+and fitted demo status text are cached until geometry/text changes. No new island,
+blur, extra effect or design change is introduced. Actual FPS must still be measured
+on the user's device; a frame-clock change alone is not a hardware FPS guarantee.
+
+This Android-only beta.5 / code122 change does not deploy server code, database or
+production website. Keep beta.4 as a rollback/source reference; it retains the reported
+calculator/pacing issues and must not be described as device validated.

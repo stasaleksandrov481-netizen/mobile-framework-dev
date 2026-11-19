@@ -27,21 +27,19 @@ internal class FirstExperienceBrightness(private val context: Context, private v
 
     private suspend fun animate(fraction: Float): Boolean {
         val initial = navigation.await(900L) { panel(it) && slider(it) != null } ?: return false
-        val range = slider(initial)?.range ?: return false
+        val node = slider(initial) ?: return false
+        val range = node.range ?: return false
         val start = (range.current - range.min) / (range.max - range.min)
         val reduced = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE).getBoolean("reduceMotion", false)
-        val steps = if (reduced) 1 else 6
-        for (index in 1..steps) {
-            val frame = service.frame(fresh = true)?.takeIf(::panel) ?: return false
-            val control = slider(frame) ?: return false
-            val current = control.range ?: return false
-            if (current.min != range.min || current.max != range.max) return false
-            val relative = start + (fraction - start) * index / steps
-            val wanted = range.min + relative * (range.max - range.min)
-            if (!service.setProgress(frame, control, wanted)) return false
-            delay(100L)
+        val control = service.progressControl(initial, node) ?: return false
+        val moved = control.use {
+            if (reduced) it.set(range.min + fraction * (range.max - range.min))
+            else FirstExperienceTempo.brightnessRamp(start, fraction, { relative ->
+                it.set(range.min + relative * (range.max - range.min))
+            })
         }
-        return navigation.await(900L) { frame ->
+        if (!moved) return false
+        return navigation.await(1_500L) { frame ->
             if (!panel(frame)) false else slider(frame)?.range?.let {
                 val actual = (it.current - it.min) / (it.max - it.min)
                 abs(actual - fraction) <= .045f
@@ -68,6 +66,7 @@ internal class FirstExperienceBrightness(private val context: Context, private v
             if (navigation.await(2_500L) { panel(it) && slider(it) != null } == null) {
                 return Outcome(false, "Не распознал ползунок яркости на этом телефоне. Пропускаю фокус.")
             }
+            delay(FirstExperienceTempo.BEFORE_ACTION)
             // Persist BEFORE the first write. A later app/service start can recover a killed session.
             val saved = context.getSharedPreferences(STORE, Context.MODE_PRIVATE).edit().clear()
                 .putBoolean("pending", true).putInt("level", level).putInt("mode", mode)
@@ -77,7 +76,7 @@ internal class FirstExperienceBrightness(private val context: Context, private v
                 Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1) != Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL) {
                 return Outcome(false, "Android не разрешил временно отключить автояркость. Пропускаю фокус.")
             }
-            delay(180L)
+            delay(400L)
             val manual = service.frame(fresh = true)?.takeIf(::panel) ?: return Outcome(false, "Панель закрыта. Возвращаю настройки яркости.")
             val range = slider(manual)?.range ?: return Outcome(false, "Ползунок изменился. Возвращаю настройки яркости.")
             // Use the live range after switching to manual, not the OEM's raw Settings scale.
@@ -86,8 +85,9 @@ internal class FirstExperienceBrightness(private val context: Context, private v
             if (!animate(target)) return Outcome(false, "Android не подтвердил изменение яркости. Возвращаю настройки.")
             val actual = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level)
             if (actual == level) return Outcome(false, "Изменение яркости не подтверждено. Пропускаю фокус.")
-            delay(650L)
-            animate(original)
+            delay(1_300L)
+            if (!animate(original)) return Outcome(false, "Возвращаю точные исходные настройки яркости.")
+            delay(900L)
             return Outcome(true, "Я могу управлять не только приложениями.")
         } finally {
             withContext(NonCancellable) {
