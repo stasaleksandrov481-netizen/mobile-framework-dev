@@ -72,6 +72,15 @@ class ConversationAndSearchDeviceTest {
         assertTrue(draftVisible(screen, "Привет!"))
     }
 
+    @Test fun delayedTelegramStartupWaitsForChatListBeforeLookingForRecipient() = runBlocking(Dispatchers.Main) {
+        val screen = launch("chat-slow")
+        val request = ConversationRequest(fixtureLabel, "рыбке", "Как ты?", send = false)
+        val result = ConversationNavigation(screen, VisualNavigation(context, screen), { _, _, _ -> false })
+            .run(request, {})
+        assertTrue(result.text, result.ok)
+        assertTrue(draftVisible(screen, "Как ты?"))
+    }
+
     @Test fun inflectedSearchResultIsOpenedAfterSearchAndDraftVerified() = runBlocking(Dispatchers.Main) {
         val screen = launch("chat-search")
         val request = ConversationRequest(fixtureLabel, "рыбке", "Как дела?", send = false)
