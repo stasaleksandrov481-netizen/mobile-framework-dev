@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { projectUrl, publishableKey } from "./project.js";
+import { SUPPORT_PAGE_SIZE, supportPageBounds } from "./support-paging.js";
 
 const db = createClient(projectUrl, publishableKey, {
   auth: { flowType: "pkce", persistSession: true, storage: window.sessionStorage,
@@ -18,6 +19,7 @@ const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Иде
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
 let quotaId = "", supportFilter = "active", ownId = "";
+let supportPage = 0, supportTotal = 0;
 const IDLE_LIMIT_MS = 30 * 60 * 1000;
 let lastInteraction = Date.now(), signingOut = false;
 
@@ -183,7 +185,9 @@ async function loadTab() {
     const html = await views[page]();
     if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div><span class="overline">CORTEX / ' +
       escape(page.toUpperCase()) + '</span><h1>' + labels[page] + '</h1></div>' +
-      '<div class="heading-tools"><span class="muted">Данные в реальном времени</span>' + button("Обновить", "refresh") + '</div></div>' + html;
+      '<div class="heading-tools"><span class="muted">' + (page === "overview" ? "Автообновление раз в минуту" : "Обновлено " +
+        new Date().toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }) + " МСК") +
+      '</span>' + button("Обновить", "refresh") + '</div></div>' + html;
   } catch (error) {
     if (version === renderVersion && main.isConnected) {
       main.innerHTML = '<h1>' + labels[page] + '</h1><p>' + safeError(error) + '</p>' + button("Повторить", "refresh");
@@ -226,12 +230,21 @@ async function support() {
   const filterBar = '<div class="ticket-filters" aria-label="Статус обращений">' + Object.entries(filters).map(([id, label]) =>
     '<button type="button" data-action="ticket-filter" data-value="' + id + '" aria-pressed="' + (id === supportFilter) + '">' +
     label + '</button>').join("") + '</div>';
-  const query = db.from("cortex_support").select("id,created_at,category,message,reply_to,app_version,status");
-  const tickets = data(await (supportFilter === "active" ? query.neq("status", "closed") : query.eq("status", supportFilter))
-    .order("created_at", { ascending: false }).limit(100)) || [];
+  const query = db.from("cortex_support").select("id,created_at,category,message,reply_to,app_version,status", { count: "exact" });
+  const offset = supportPage * SUPPORT_PAGE_SIZE;
+  const result = await (supportFilter === "active" ? query.neq("status", "closed") : query.eq("status", supportFilter))
+    .order("created_at", { ascending: false }).range(offset, offset + SUPPORT_PAGE_SIZE - 1);
+  const tickets = data(result) || [];
+  supportTotal = result.count ?? 0;
+  const paging = supportPageBounds(supportTotal, supportPage);
+  if (paging.page !== supportPage) {
+    supportPage = paging.page;
+    ticket = null;
+    return support();
+  }
   if (!tickets.length) return filterBar + '<p>В этой категории нет обращений.</p>';
   const current = tickets.find(item => item.id === selected) || tickets[0];
-  if (ticket === selected) ticket = current.id;
+  ticket = current.id;
   const [replies, attachment] = await Promise.all([
     db.from("cortex_support_replies").select("id,created_at,message").eq("ticket_id", current.id).order("created_at"),
     db.from("cortex_support").select("screenshot").eq("id", current.id).maybeSingle()
@@ -252,7 +265,15 @@ async function support() {
       '<details><summary>Скриншот</summary><img class="attachment" src="' + escape(screenshot) + '" alt="Приложенный скриншот"></details>' : "") +
     form("reply", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Ответ пользователю<textarea name="message" rows="4" maxlength="4000" required></textarea></label>', "Отправить ответ") +
     form("ticket-status", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Статус<select name="status">' + options(ticketStates, current.status) + '</select></label>', "Сохранить статус");
-  return filterBar + '<div class="support-layout"><div class="ticket-list">' + list + '</div>' + card("Диалог", details) + '</div>';
+  const pageControls = '<div class="ticket-pagination" aria-label="Страницы обращений"><span>Показаны ' +
+    (paging.offset + 1) + '–' + paging.end + ' из ' + supportTotal + '</span>' +
+    '<div><button type="button" data-action="ticket-page" data-value="prev"' +
+    (paging.page === 0 ? " disabled" : "") + '>Назад</button>' +
+    '<span> ' + (paging.page + 1) + ' / ' + paging.pages + ' </span>' +
+    '<button type="button" data-action="ticket-page" data-value="next"' +
+    (paging.page === paging.pages - 1 ? " disabled" : "") + '>Далее</button></div></div>';
+  return filterBar + pageControls + '<div class="support-layout"><div class="ticket-list">' + list +
+    '</div>' + card("Диалог", details) + '</div>';
 }
 
 async function controlConfig() {
@@ -426,7 +447,17 @@ app.addEventListener("click", async event => {
         catch { flash(ownId); }
         break;
       case "ticket": ticket = value; await loadTab(); break;
-      case "ticket-filter": supportFilter = value; ticket = null; await loadTab(); break;
+      case "ticket-filter": supportFilter = value; supportPage = 0; ticket = null; await loadTab(); break;
+      case "ticket-page": {
+        const paging = supportPageBounds(supportTotal, supportPage);
+        const next = paging.page + (value === "next" ? 1 : -1);
+        if ((value === "next" || value === "prev") && next >= 0 && next < paging.pages) {
+          supportPage = next;
+          ticket = null;
+          await loadTab();
+        }
+        break;
+      }
       case "billing-revoke":
         if (!confirm("Отозвать выданный доступ?")) break;
         await billingRpc("revoke", { id: value });
@@ -533,6 +564,8 @@ app.addEventListener("submit", async event => {
         }).select("version_code").single());
         break;
       case "role":
+        if (!confirm((read("role") === "remove" ? "Отозвать административный доступ" : "Изменить административную роль") +
+          " для " + read("email") + "?")) return;
         data(await db.rpc("cortex_set_admin_role", { p_email: read("email"), p_role: read("role") }));
         break;
       case "ai-config":
@@ -541,10 +574,12 @@ app.addEventListener("submit", async event => {
           p_model: read("model") || null }));
         break;
       case "billing-plan":
+        if (!confirm("Изменить тариф " + read("plan") + "? Новые условия могут повлиять на оплату и лимиты пользователей.")) return;
         await billingRpc("plan", { plan: read("plan"), price: Math.round(Number(read("price")) * 100),
           tokens: Number(read("tokens")), advanced: Number(read("advanced")), context: Number(read("context")) });
         break;
       case "billing-funding":
+        if (!confirm("Изменить бюджет ИИ и состояние приёма платежей?")) return;
         await billingRpc("funding", { micros: Math.round(Number(read("usd")) * 1e6), checkout: formData.has("checkout") });
         break;
       case "billing-grant": {
@@ -596,6 +631,11 @@ async function expireIdleSession() {
 }
 
 setInterval(expireIdleSession, 60_000);
+// Poll only the read-only overview while the tab is visible and the admin is active.
+setInterval(() => {
+  if (!document.hidden && user && role && tab === "overview" && !signingOut &&
+      Date.now() - lastInteraction < IDLE_LIMIT_MS) void loadTab();
+}, 60_000);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) void expireIdleSession();
 });

@@ -62,6 +62,9 @@ dialog::backdrop { background: #000c; }
 
 .ticket-filters { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 16px; }
 .ticket-filters button[aria-pressed=true] { background:#fff; color:#000; }
+.ticket-pagination { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin:-3px 0 15px; color:#b6b6bd; font-size:.82rem; }
+.ticket-pagination > div { display:flex; align-items:center; gap:9px; }
+.ticket-pagination button { min-height:36px; padding:5px 11px; }
 .ticket-messages { display:flex; flex-direction:column; gap:10px; max-height:45vh; overflow:auto; padding:8px 2px; }
 .ticket-message { max-width:85%; align-self:flex-start; padding:10px 13px; border:1px solid #555; border-radius:15px 15px 15px 4px; }
 .ticket-message.from-control { align-self:flex-end; background:#eee; color:#111; border-radius:15px 15px 4px 15px; }
