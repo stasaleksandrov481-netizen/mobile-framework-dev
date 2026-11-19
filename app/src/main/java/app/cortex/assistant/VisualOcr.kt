@@ -21,6 +21,57 @@ internal data class OcrResult(val nodes: List<VisualNode> = emptyList(), val pro
 internal class VisualOcr(private val service: CortexScreenService) {
     private val mutex = Mutex()
 
+    /** Local numeric readback of an already identified display. No model request or full-screen text export. */
+    suspend fun readIntegerRegion(frame: VisualFrame, display: Rect, region: Rect): String? {
+        val area = Rect(region)
+        if (!area.intersect(frame.bounds) || !area.intersect(display)) return null
+        val capture = screenshot(frame)
+        val bitmap = capture.bitmap ?: return null
+        return try {
+            withContext(Dispatchers.Default) { mutex.withLock {
+                val origin = if (capture.window) frame.bounds else display
+                val left = ((area.left - origin.left).toLong() * bitmap.width / origin.width()).toInt().coerceIn(0, bitmap.width)
+                val top = ((area.top - origin.top).toLong() * bitmap.height / origin.height()).toInt().coerceIn(0, bitmap.height)
+                val right = ((area.right - origin.left).toLong() * bitmap.width / origin.width()).toInt().coerceIn(left, bitmap.width)
+                val bottom = ((area.bottom - origin.top).toLong() * bitmap.height / origin.height()).toInt().coerceIn(top, bitmap.height)
+                if (right <= left || bottom <= top) return@withLock null
+                val crop = Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top)
+                val scale = (1600f / maxOf(crop.width, crop.height)).coerceAtMost(2f)
+                val input = Bitmap.createScaledBitmap(crop, (crop.width * scale).toInt().coerceAtLeast(1),
+                    (crop.height * scale).toInt().coerceAtLeast(1), true)
+                val engine = TessBaseAPI()
+                try {
+                    val base = File(service.filesDir, "ocr")
+                    val data = File(base, "tessdata").apply { mkdirs() }
+                    val model = File(data, "eng.traineddata")
+                    if (model.length() == 0L) {
+                        val temp = File.createTempFile("eng", ".tmp", data)
+                        try {
+                            service.assets.open("ocr/eng.traineddata").use { source ->
+                                temp.outputStream().use { source.copyTo(it) }
+                            }
+                            check(temp.renameTo(model))
+                        } finally { temp.delete() }
+                    }
+                    if (!engine.init(base.absolutePath, "eng", TessBaseAPI.OEM_LSTM_ONLY)) return@withLock null
+                    engine.setPageSegMode(TessBaseAPI.PageSegMode.PSM_SINGLE_LINE)
+                    engine.setVariable("tessedit_char_whitelist", "0123456789+-=., ")
+                    engine.setImage(input)
+                    val text = engine.utF8Text?.trim().orEmpty()
+                    val iterator = engine.resultIterator ?: return@withLock null
+                    try {
+                        iterator.begin()
+                        text.takeIf { it.isNotEmpty() && iterator.confidence(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE) >= 70f }
+                    } finally { iterator.delete() }
+                } finally {
+                    engine.recycle()
+                    if (input !== crop && input !== bitmap) input.recycle()
+                    if (crop !== bitmap) crop.recycle()
+                }
+            } }
+        } finally { bitmap.recycle() }
+    }
+
     suspend fun read(frame: VisualFrame, display: Rect): OcrResult {
         val capture = screenshot(frame)
         val bitmap = capture.bitmap ?: return OcrResult(protected = capture.protected)

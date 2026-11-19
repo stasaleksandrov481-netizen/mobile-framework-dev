@@ -27,7 +27,6 @@ internal object FirstExperienceMath {
 
     private val spaces = Regex("\\s+")
     private val integer = Regex("[+-]?[0-9]+(?:\\.0+)?")
-    private val binaryInput = Regex("[0-9]+[*/+\\-]([0-9]+)")
     private fun normalized(value: String) = value.trim().lowercase(Locale.ROOT).replace(spaces, " ")
 
     private val aliases = mapOf(
@@ -85,8 +84,6 @@ internal object FirstExperienceMath {
             })
         }
     }
-
-    fun rightOperand(text: String): Int? = binaryInput.matchEntire(expression(text))?.groupValues?.get(1)?.toIntOrNull()
 
     fun cleared(text: String) = expression(text).isBlank() || displayedInteger(text) == 0
 

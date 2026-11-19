@@ -194,7 +194,7 @@ internal object CortexFirstExperience {
 
     private suspend fun demonstrate(context: Context) {
         val service = CortexScreenService.connected ?: throw IllegalStateException()
-        val calculator = FirstExperienceCalculator(context, service) { report(context, it) }
+        val calculator = FirstExperienceCalculator(context, service, report = { report(context, it) })
         delay(FirstExperienceTempo.BEFORE_ACTION)
         if (calculator.open() && calculator.clear()) {
             report(context, "Вычисляю")

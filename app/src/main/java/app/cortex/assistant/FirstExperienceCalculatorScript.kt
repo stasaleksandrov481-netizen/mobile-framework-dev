@@ -2,7 +2,7 @@ package app.cortex.assistant
 
 import kotlinx.coroutines.delay
 
-/** Real keys and verified integer results. Operator text can be deferred by an OEM calculator. */
+/** Fixed real key sequences. Only equality results, never an OEM's formula serialization, advance calculations. */
 internal class FirstExperienceCalculatorScript(
     private val driver: Driver,
     private val pause: suspend (Long) -> Unit = { delay(it) }
@@ -18,18 +18,6 @@ internal class FirstExperienceCalculatorScript(
         val cleared get() = expressions.ifEmpty { results }.let { values ->
             values.isNotEmpty() && values.all(FirstExperienceMath::cleared)
         }
-        fun matches(entry: Entry): Boolean {
-            val expected = entry.expression
-            if (expected != null) {
-                val primary = expressions.ifEmpty { results }
-                if (primary.any { FirstExperienceMath.expression(it) == FirstExperienceMath.expression(expected) }) return true
-                // Some real calculators show only the current operand, not a serialized formula.
-                val operand = FirstExperienceMath.rightOperand(expected) ?: return false
-                return !entry.operator && primary.any { FirstExperienceMath.displayedInteger(it) == operand }
-            }
-            val result = entry.result ?: return false
-            return (expressions + results).any { FirstExperienceMath.displayedInteger(it) == result }
-        }
     }
     interface Driver {
         suspend fun clear(): Boolean
@@ -44,10 +32,16 @@ internal class FirstExperienceCalculatorScript(
     }
 
     suspend fun calculate(calculation: FirstExperienceMath.Calculation): Boolean {
-        var expression = if (calculation.keys.firstOrNull() in setOf("+", "−", "×", "÷"))
-            previousResult?.toString() ?: return false else ""
+        val continuing = calculation.keys.firstOrNull() in setOf("+", "−", "×", "÷")
+        val prefix = if (continuing) {
+            val confirmed = previousResult ?: return false
+            // Start from the last VERIFIED result explicitly. OEMs differ in what = leaves editable.
+            if (!driver.clear()) { previousResult = null; return false }
+            confirmed.toString().map(Char::toString)
+        } else emptyList()
+        var expression = ""
         pause(FirstExperienceTempo.BEFORE_ACTION)
-        for (key in calculation.keys) {
+        for (key in prefix + calculation.keys) {
             val before = expression
             if (key != "=") expression += key
             val entry = Entry(key, before, if (key == "=") null else expression,

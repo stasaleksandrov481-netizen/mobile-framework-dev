@@ -182,14 +182,21 @@ class CortexScreenService : AccessibilityService() {
 
     internal fun stopTouch() { touch?.clear() }
 
+    internal suspend fun readCalculatorRegion(frame: VisualFrame, region: Rect): String? {
+        if (frame.secure || frame.hasPrivateFields || Build.VERSION.SDK_INT < 30 || !isCurrent(frame)) return null
+        val recognizer = ocr ?: VisualOcr(this).also { ocr = it }
+        return recognizer.readIntegerRegion(frame, displayBounds(), region).takeIf { isCurrent(frame) }
+    }
+
     /** Values stay local; the general visual frame still redacts editable text. */
     internal fun localText(frame: VisualFrame, node: VisualNode): String? {
         var text: String? = null
-        val read = onNode(frame, node) {
+        val read = onNode(frame, node, readOnly = true) {
             // An empty OEM calculator EditText may expose a help description.
             // That description is not the formula entered by the user or demo.
-            text = if (it.isEditable) it.text?.toString().orEmpty()
-                else it.text?.toString() ?: it.contentDescription?.toString().orEmpty()
+            val raw = it.text?.toString().orEmpty()
+            val description = it.contentDescription?.toString().orEmpty()
+            text = raw.ifBlank { description.takeIf { value -> FirstExperienceReadback.integer(value) != null } ?: raw }
             true
         }
         return text.takeIf { read }
@@ -375,7 +382,8 @@ class CortexScreenService : AccessibilityService() {
         it.windowId == frame.window && it.packageName?.toString() == frame.pkg && !sensitive(it)
     } == true
 
-    private fun onNode(frame: VisualFrame, node: VisualNode, use: (AccessibilityNodeInfo) -> Boolean): Boolean {
+    private fun onNode(frame: VisualFrame, node: VisualNode, readOnly: Boolean = false,
+                       use: (AccessibilityNodeInfo) -> Boolean): Boolean {
         if (locked() || node.ocr) return false
         return withRoot { root ->
             if (root.windowId != frame.window || root.packageName?.toString() != frame.pkg || sensitive(root)) return@withRoot false
@@ -387,13 +395,15 @@ class CortexScreenService : AccessibilityService() {
                     current = child
                     if (sensitive(current)) return@withRoot false
                 }
+                if (readOnly && !current.refresh()) return@withRoot false
+                if (sensitive(current)) return@withRoot false
                 val rect = Rect().apply { current.getBoundsInScreen(this) }
                 val text = if (current.isEditable) VisualLabels.clean(current.hintText) else VisualLabels.clean(current.text)
                 val description = VisualLabels.clean(current.contentDescription)
-                current.isVisibleToUser && current.isEnabled &&
+                current.isVisibleToUser && (readOnly || current.isEnabled) &&
                     Rect.intersects(rect, node.bounds) && current.viewIdResourceName.orEmpty() == node.resource &&
                     current.className?.toString()?.substringAfterLast('.').orEmpty() == node.role &&
-                    text.ifBlank { description } == node.label && description == node.description && use(current)
+                    (readOnly || text.ifBlank { description } == node.label && description == node.description) && use(current)
             } finally {
                 if (current !== root) current.recycle()
             }

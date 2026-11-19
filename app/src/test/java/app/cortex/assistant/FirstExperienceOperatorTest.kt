@@ -51,10 +51,8 @@ class FirstExperienceOperatorTest {
                 formula += entry.key
             }
             val shown = display()
-            val actual = if (mode == DisplayMode.GENERIC_DISPLAY)
-                FirstExperienceCalculatorScript.Display(emptyList(), listOf(shown))
-                else FirstExperienceCalculatorScript.Display(listOf(shown), emptyList())
-            return actual.matches(entry)
+            return entry.key != "=" || FirstExperienceReadback.confirmed(
+                listOf(FirstExperienceReadback.Value(FirstExperienceReadback.Role.PRIMARY, shown)), requireNotNull(entry.result))
         }
     }
 
@@ -97,7 +95,7 @@ class FirstExperienceOperatorTest {
         val script = FirstExperienceCalculatorScript(driver) { }
         assertTrue(script.clear())
         assertFalse(script.calculate(FirstExperienceMath.example))
-        assertEquals(listOf("8", "4", "×", "7"), driver.keys)
+        assertEquals(listOf("8", "4", "×", "7", "="), driver.keys)
         assertTrue(driver.answers.isEmpty())
     }
 

@@ -57,8 +57,9 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 123
-        versionName = "1.0.18-beta.6"
+        versionCode = 124
+        versionName = "1.0.18-beta.7"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "CORTEX_WEB_UPDATE_ROOT", quotedBuildValue(webUpdateRoot))
         buildConfigField("String", "CORTEX_WEB_UPDATE_PUBLIC_KEY", quotedBuildValue(webUpdatePublicKey))
         buildConfigField("String", "CORTEX_RELEASE_SIGNER_SHA256", quotedBuildValue(expectedSignerSha256))
@@ -101,4 +102,7 @@ dependencies {
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
 }
