@@ -865,21 +865,24 @@
 
   async function resendCode() {
     if (!["verify", "reset"].includes(accountMode) || Date.now() < emailResendUntil) return;
+    const mode = accountMode;
     const field = screen.querySelector("#account-form");
-    const email = field?.querySelector('[name="email"]')?.value?.trim() || "";
+    const email = field?.querySelector('[name="email"]')?.value?.trim().toLowerCase() || "";
     const button = field?.querySelector("[data-resend-button]");
     if (!button || !email) { flash("Укажите электронную почту."); return; }
     button.disabled = true;
     try {
-      await Api.request("auth-resend", { payload: { email, kind: accountMode === "reset" ? "recovery" : "signup" } });
-      if (!field.isConnected) return;
+      await Api.request("auth-resend", { payload: { email, kind: mode === "reset" ? "recovery" : "signup" } });
+      if (!field.isConnected || accountMode !== mode) return;
       field.querySelector('[name="code"]').value = "";
       updateCodeCells();
       emailResendCooldown();
       flash("Новый код отправлен, проверьте почту.");
     } catch (error) {
-      flash(error.message);
-      updateResendButton();
+      if (field.isConnected && accountMode === mode) {
+        flash(error.message);
+        updateResendButton();
+      }
     }
   }
 
@@ -900,6 +903,7 @@
 
   async function submitAccount(form, values) {
     const mode = form.dataset.mode;
+    const email = values.email?.trim().toLowerCase() || "";
     const error = form.querySelector(".form-error");
     const submit = form.querySelector("[type=submit]");
     if (submit.disabled) return;
@@ -911,7 +915,10 @@
     label.textContent = "Подождите…";
     try {
       if (mode === "signup" || mode === "reset") {
-        if (values.password !== values.confirmation) throw new Error("Пароли не совпадают.");
+        if (values.password !== values.confirmation) {
+          form.querySelector('[name="confirmation"]')?.setAttribute("aria-invalid", "true");
+          throw new Error("Пароли не совпадают.");
+        }
         if (new TextEncoder().encode(values.password).length > 72) throw Api.failure("invalid_password");
       }
       if (!Api.available) throw Api.failure(Api.android ? "webview" : "preview");
@@ -921,7 +928,7 @@
       if (connection.status === "offline") throw Api.failure("offline");
       if (!available()) throw new Error(U.accountAvailability(connection, mode));
       const result = await Api.request("auth-" + mode, { payload: {
-        name: values.name, email: values.email, password: values.password, code: values.code
+        name: values.name, email, password: values.password, code: values.code
       } });
       form.removeAttribute("aria-busy");
       if (result.state === "signed_in" && M.account(result.account)) {
@@ -934,14 +941,27 @@
         flash("Вход выполнен");
       } else if (result.state === "check_email" && form.isConnected) {
         emailResendCooldown();
-        emailForm(mode === "signup" ? "verify" : "reset", values.email);
+        emailForm(mode === "signup" ? "verify" : "reset", email);
       } else if (result.state === "password_changed" && form.isConnected) {
         setAccount(null);
-        emailForm("password", values.email);
+        emailForm("password", email);
         flash("Пароль изменён");
-      }
+      } else throw new Error("Не удалось завершить вход. Попробуйте ещё раз.");
     } catch (failure) {
-      if (form.isConnected) { error.textContent = failure.message; error.hidden = false; }
+      if (form.isConnected) {
+        if (failure.code === "auth_unconfirmed" && mode === "password") {
+          form.removeAttribute("aria-busy");
+          emailForm("verify", email);
+          flash("Подтвердите почту. Если код не пришёл, запросите новый.");
+        } else {
+          const fieldName = failure.code === "invalid_email" ? "email"
+            : failure.code === "invalid_code" || (failure.code === "auth_credentials" && mode !== "password") ? "code"
+            : ["invalid_password", "auth_credentials"].includes(failure.code) ? "password" : "";
+          if (fieldName) form.querySelector(`[name="${fieldName}"]`)?.setAttribute("aria-invalid", "true");
+          error.textContent = failure.message || "Что-то пошло не так. Попробуйте ещё раз.";
+          error.hidden = false;
+        }
+      }
     } finally {
       submit.disabled = false;
       label.textContent = previousLabel;
@@ -1927,6 +1947,11 @@
 
   app.addEventListener("input", event => {
     const input = event.target;
+    if (input.closest?.("#account-form")) {
+      input.removeAttribute("aria-invalid");
+      const error = input.form?.querySelector(".form-error");
+      if (error) error.hidden = true;
+    }
     if (input.classList?.contains("account-code-input")) updateCodeCells();
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
     if (input.id === "faq-search") filterFaq();
