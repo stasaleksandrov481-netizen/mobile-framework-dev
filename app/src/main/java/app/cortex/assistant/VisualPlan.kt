@@ -141,7 +141,7 @@ internal object VisualRequest {
     // error. "Open phone usage statistics" refers to a Settings destination and
     // needs the semantic visual planner rather than an exact package lookup.
     fun explicitAppLaunch(text: String): Boolean = Regex(
-        """^(?:открой|открыть|запусти|запустить|open|launch)\\s+(?:приложение|the app)\\s+""",
+        """^(?:открой|открыть|запусти|запустить|open|launch)\s+(?:приложение|the app)\s+""",
         RegexOption.IGNORE_CASE
     ).containsMatchIn(cleanCommand(text))
 
