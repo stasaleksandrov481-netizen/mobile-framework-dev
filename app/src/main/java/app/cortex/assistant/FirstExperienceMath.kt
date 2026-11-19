@@ -75,8 +75,8 @@ internal object FirstExperienceMath {
             if (symbol.isWhitespace() || Character.isSpaceChar(symbol) ||
                 Character.getType(symbol) == Character.FORMAT.toInt() || symbol in "\uFE0E\uFE0F") continue
             append(when (symbol) {
-                '×', '✕', '✖', '∗', '⋅', '∙', '·', 'x', 'X', 'ｘ', 'Ｘ', '＊' -> '*'
-                '÷', '∕', '／' -> '/'
+                '×', '⨯', '✕', '✖', '∗', '⋅', '∙', '·', 'x', 'X', 'ｘ', 'Ｘ', '＊' -> '*'
+                '÷', '∕', '／', ':' -> '/'
                 '−', '–', '—', '﹣', '－' -> '-'
                 '＋' -> '+'
                 ',' -> '.'
