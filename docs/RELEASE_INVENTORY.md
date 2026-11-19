@@ -1,5 +1,13 @@
 # Инвентаризация релизов CORTEX
 
+## 19.11.2026 14:07 UTC — опубликована Android 1.0.18-beta.8
+
+- Подтверждённый GitHub release: `v1.0.18-beta.8` / `1.0.18-beta.8`, versionCode **125**, immutable release source `ae790b946539d4c07cec934e62b26afe15693d8a`, release ID **451431887** (published 14:06:51 UTC). Ссылка: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/tag/v1.0.18-beta.8 .
+- Актив `CORTEX-1.0.18-beta.8.apk` — **19 052 020 байт**, GitHub asset digest `sha256:7e12d17f215039f2dfcc5627e8c393481af17d16d8d4b3cf524cfb9aa6f2b8ed`; отдельный `SHA256SUMS.txt` приложен. Release workflow [44539159455](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/actions/runs/44539159455) **SUCCESS**, включая сборку, JUnit/lint, подпись, публикацию и проверку скачанного APK; CodeQL [44539160225](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/actions/runs/44539160225) **SUCCESS**.
+- По непосредственно предшествовавшему PR #92: Android API34 [44536463488](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/actions/runs/44536463488) **12/12 PASS**. Зафиксированы fake Telegram recent/search/draft, отмена отправки и задержанная загрузка YouTube-like поиска; калькулятор/яркость — 8 тестов. Это тестовая Android fixture, не реальные Telegram/YouTube и не Samsung A23.
+- Beta.8 повышает Android версию после проверенных PR #92, сохраняя UI и rollback `v1.0.18-beta.7`. Сайты, базы, Edge Function и платежи в указанном релизе не деплоились. Физический тест голосового пробуждения, островка/FPS, разрешений One UI и реальных сторонних приложений остаётся обязательным перед заявлением о полной совместимости.
+- В отдельном, **не опубликованном APK** Android QA PR подготавливается дополнительная проверка медленной загрузки Telegram. Не приписывать её опубликованному beta.8, не менять тег/подпись beta.8.
+
 ## 19.11.2026 — Android 1.0.18-beta.7: проверка всего сценария калькулятора
 
 - PR [#89](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/89) слит; release source `b14532caf3d08051a3d7432dd401b60c9205ed96`, tag `v1.0.18-beta.7`, code **124**. Его дерево совпадает с проверенным PR head `9aedee6cdcdca94671ece7b6de66a65319359059`. Android/JVM/lint/release build, UI screenshots, CodeQL и Handoff прошли. Подписанный main workflow `44524652691` — **SUCCESS**, включая проверку реально скачанного релиза.
