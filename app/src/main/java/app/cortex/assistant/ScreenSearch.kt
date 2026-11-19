@@ -83,15 +83,19 @@ internal class ScreenSearch(private val screen: CortexScreenService, private val
                 current.pkg == typed.pkg && current.window == typed.window && !current.secure && !current.hasPrivateFields &&
                     field(current)?.let { it.focused && screen.fieldMatches(current, it, request.query) && screen.submit(current, it) } == true
             } != null)
-        val matches = navigation.await(if (requested) 9_000L else 2_400L) {
-            it.pkg == app.pkg && !it.secure && !it.hasPrivateFields &&
-                it.structure() != typed.structure() && it.tree.any { node ->
-                    !node.editable && !inToolbar(it, node) && VisualLabels.score(node.label, request.query) >= 82
-                }
-        }
+        // Results may already be drawn *during* text entry. Requiring a
+        // structure change after typing gives a false failure for fast searches.
+        // Do not count the editable query itself as a result.
+        fun hasResults(current: VisualFrame) = current.pkg == app.pkg &&
+            !current.secure && !current.hasPrivateFields &&
+            current.tree.any { node ->
+                node.enabled && !node.editable && !inToolbar(current, node) &&
+                    VisualLabels.score(node.label, request.query) >= 82
+            }
+        val matches = if (hasResults(typed)) typed else navigation.await(if (requested) 9_000L else 2_400L, ::hasResults)
         return if (matches != null) CortexActionEngine.Result("Поиск «${request.query}» открыт в ${app.label}.", true)
         else CortexActionEngine.Result(if (requested) "Запрос «${request.query}» передан в ${app.label}. Результаты ещё не подтверждены."
-            else "Ввёл «${request.query}» в поиск ${app.label}.", !requested)
+            else "Ввёл «${request.query}» в поиск ${app.label}, но результаты не подтвердились.", false)
     }
 
     private fun searchButton(frame: VisualFrame): VisualNode? = frame.tree.filter {
