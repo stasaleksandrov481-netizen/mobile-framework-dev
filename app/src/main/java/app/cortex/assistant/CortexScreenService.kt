@@ -25,6 +25,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
+internal interface VisualProgressControl : AutoCloseable {
+    fun set(value: Float): Boolean
+}
+
 /** The visual task owns screen reads. Accessibility events only mark screen changes. */
 class CortexScreenService : AccessibilityService() {
     private val revisions = MutableStateFlow(0L)
@@ -182,10 +186,49 @@ class CortexScreenService : AccessibilityService() {
     internal fun localText(frame: VisualFrame, node: VisualNode): String? {
         var text: String? = null
         val read = onNode(frame, node) {
-            text = it.text?.toString() ?: it.contentDescription?.toString().orEmpty()
+            // An empty OEM calculator EditText may expose a help description.
+            // That description is not the formula entered by the user or demo.
+            text = if (it.isEditable) it.text?.toString().orEmpty()
+                else it.text?.toString() ?: it.contentDescription?.toString().orEmpty()
             true
         }
         return text.takeIf { read }
+    }
+
+    /** Keep one validated real slider for a bounded ramp, without rebuilding the entire UI tree per tick. */
+    @Suppress("DEPRECATION")
+    internal fun progressControl(frame: VisualFrame, node: VisualNode): VisualProgressControl? {
+        val expectedRange = node.range ?: return null
+        if (node.resource.isBlank() || !node.progressSettable) return null
+        var copy: AccessibilityNodeInfo? = null
+        if (!onNode(frame, node) { current -> copy = AccessibilityNodeInfo.obtain(current); true }) return null
+        val current = copy ?: return null
+        val bounds = Rect()
+        return object : VisualProgressControl {
+            private var closed = false
+            override fun set(value: Float): Boolean {
+                if (closed || !value.isFinite() || !isCurrent(frame)) return false
+                return runCatching {
+                    if (!current.refresh()) return@runCatching false
+                    current.getBoundsInScreen(bounds)
+                    val range = current.rangeInfo ?: return@runCatching false
+                    val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id
+                    current.isVisibleToUser && current.isEnabled && !sensitive(current) &&
+                        current.windowId == frame.window && current.packageName?.toString() == frame.pkg &&
+                        current.viewIdResourceName == node.resource && bounds == node.bounds &&
+                        current.className?.toString()?.substringAfterLast('.') == node.role &&
+                        range.min == expectedRange.min && range.max == expectedRange.max && value in range.min..range.max &&
+                        range.current.isFinite() && range.current in range.min..range.max && current.supports(action) &&
+                        FirstExperienceTempo.setProgress(range.current, value,
+                            range.type == AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT) { wanted ->
+                            wanted in range.min..range.max && current.performAction(action, Bundle().apply {
+                                putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, wanted)
+                            })
+                        }
+                }.getOrDefault(false)
+            }
+            override fun close() { if (!closed) { closed = true; current.recycle() } }
+        }
     }
 
     internal fun setProgress(frame: VisualFrame, node: VisualNode, value: Float): Boolean = onNode(frame, node) { current ->

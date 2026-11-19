@@ -25,8 +25,10 @@ internal object FirstExperienceMath {
         return true
     }
 
-    private fun normalized(value: String) = value.trim().lowercase(Locale.ROOT)
-        .replace(Regex("\\s+"), " ")
+    private val spaces = Regex("\\s+")
+    private val displaySpaces = Regex("[\\s\\u00a0\\u202f\\u200e\\u200f\\u061c\\u2066-\\u2069]")
+    private val integer = Regex("[+-]?[0-9]+(?:\\.0+)?")
+    private fun normalized(value: String) = value.trim().lowercase(Locale.ROOT).replace(spaces, " ")
 
     private val aliases = mapOf(
         "×" to setOf("×", "*", "x", "multiply", "times", "умножить", "умножение"),
@@ -37,10 +39,10 @@ internal object FirstExperienceMath {
         "clear" to setOf("ac", "c", "clear", "all clear", "clear all", "очистить", "очистить всё", "очистить все", "сброс")
     )
     private val resources = mapOf(
-        "×" to setOf("op_mul", "op_mult", "op_multiply", "multiply", "mul", "bt_mul", "bt_multi", "bt_multiply", "btn_mul", "btn_multiply", "button_multiply"),
-        "÷" to setOf("op_div", "op_divide", "divide", "div", "bt_div", "bt_divide", "btn_div", "btn_divide", "button_divide"),
+        "×" to setOf("op_mul", "op_mult", "op_multiply", "multiply", "mul", "bt_mul", "bt_multi", "bt_multiply", "bt_multiplication", "btn_mul", "btn_multiply", "button_multiply"),
+        "÷" to setOf("op_div", "op_divide", "divide", "div", "bt_div", "bt_divide", "bt_division", "btn_div", "btn_divide", "button_divide"),
         "+" to setOf("op_add", "add", "plus", "bt_add", "bt_plus", "btn_add", "btn_plus", "button_add"),
-        "−" to setOf("op_sub", "op_subtract", "subtract", "minus", "bt_sub", "bt_minus", "btn_sub", "btn_minus", "button_subtract"),
+        "−" to setOf("op_sub", "op_subtract", "subtract", "minus", "bt_sub", "bt_minus", "bt_subtract", "btn_sub", "btn_minus", "button_subtract"),
         "=" to setOf("eq", "op_equal", "op_equals", "equal", "equals", "bt_equal", "bt_equals", "btn_equal", "btn_equals", "button_equal"),
         "clear" to setOf("clr", "clear", "all_clear", "clear_all", "bt_clear", "btn_clear", "button_clear")
     )
@@ -64,10 +66,19 @@ internal object FirstExperienceMath {
 
     fun isDisplay(resource: String) = resource.substringAfterLast('/').lowercase(Locale.ROOT) in displays
 
+    private val expressions = setOf("formula", "calculator_edit_text", "calc_edt_formula", "expression", "expression_view",
+        "current_formula", "formuladisplay", "tv_expression")
+    fun isExpression(resource: String) = resource.substringAfterLast('/').lowercase(Locale.ROOT) in expressions
+
+    fun expression(text: String) = text.replace(displaySpaces, "").replace('−', '-').replace('×', '*')
+        .replace('÷', '/').replace(',', '.')
+
+    fun cleared(text: String) = expression(text).isBlank() || displayedInteger(text) == 0
+
     fun displayedInteger(text: String): Int? {
-        val value = text.replace(Regex("[\\s\\u00a0\\u202f\\u200e\\u200f]"), "")
+        val value = text.replace(displaySpaces, "")
             .removePrefix("=").replace('−', '-').replace(',', '.')
-        if (!Regex("[+-]?[0-9]+(?:\\.0+)?").matches(value)) return null
+        if (!integer.matches(value)) return null
         return runCatching { value.toBigDecimal().intValueExact() }.getOrNull()
     }
 
