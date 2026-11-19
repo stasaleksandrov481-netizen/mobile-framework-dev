@@ -57,11 +57,22 @@ test("health probes suppress upstream errors", async () => {
   assert.equal(await healthy(), false);
 });
 
-test("APK URL only accepts absolute credential-free HTTPS URLs", () => {
-  assert.equal(safeHttpsDownloadUrl("https://github.com/owner/repo/releases/latest"), "https://github.com/owner/repo/releases/latest");
-  for (const candidate of [undefined, "", "javascript:alert(1)", "http://example.com/app.apk", "//example.com/x", "https://a:b@example.com/app.apk", "/download"]) {
+test("APK URL accepts only direct downloads from approved hosts; never links to GitHub", () => {
+  const directApk = "https://1ucrqsypjqorifn9.public.blob.vercel-storage.com/android/CORTEX-1.0.18-beta.10-2a1cce8e.apk";
+  assert.equal(safeHttpsDownloadUrl(directApk), directApk);
+  assert.equal(safeHttpsDownloadUrl("https://cortexapp.ru/releases/CORTEX.apk"), "https://cortexapp.ru/releases/CORTEX.apk");
+  for (const candidate of [undefined, "", "javascript:alert(1)", "http://example.com/app.apk", "//example.com/x", "https://a:b@example.com/app.apk", "/download",
+    "https://github.com/owner/repo/releases/latest", "https://github.com/owner/repo/releases/download/v1/app.apk",
+    "https://example.com/app.apk", "https://cortexapp.ru/download", "https://evil.cortexapp.ru/app.apk",
+    "https://cortexapp.ru/app.apk?token=secret", "https://cortexapp.ru/app.apk#fragment"]) {
     assert.equal(safeHttpsDownloadUrl(candidate), undefined);
   }
+});
+
+test("public FAQ never exposes the source repository to visitors", () => {
+  const page = readFileSync(new URL("../app/questions/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /github\.com|mobile-framework-dev|репозиторий проекта/i);
+  assert.match(page, /официальном сайте/);
 });
 
 test("Auth errors cannot leak raw database, SMTP or account-enumeration details", () => {

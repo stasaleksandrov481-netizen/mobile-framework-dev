@@ -32,6 +32,8 @@ jobs:
           cache-dependency-path: cortex-web/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
+      - name: Validate public links and authorization safeguards
+        run: node --test scripts/hardening.test.mjs
       - run: npm run build
       - name: Install browser test dependencies
         run: npm ci --prefix ../qa/browser --no-audit --no-fund

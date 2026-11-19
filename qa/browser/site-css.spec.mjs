@@ -54,3 +54,17 @@ test("landing page retains readable layout without external CSS", async ({ page 
   expect(bodyStyle).toBe("rgb(5, 5, 5)");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(394);
 });
+
+for (const pathname of ["/questions", "/support", "/privacy", "/pricing"]) {
+  test(`information page ${pathname} remains readable without external CSS`, async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await page.route(/\/_next\/static\/.*\.css(?:\?.*)?$/, route => route.abort("failed"));
+    await page.goto(pathname, { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#cortex-critical-styles")).toHaveCount(1);
+    const main = page.locator(".legal-page");
+    await expect(main.locator("h1")).toBeVisible();
+    expect(await main.evaluate(element => getComputedStyle(element).fontFamily)).not.toMatch(/Times New Roman/i);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(394);
+    if (pathname === "/questions") await expect(page.locator('a[href*="github.com"]')).toHaveCount(0);
+  });
+}
