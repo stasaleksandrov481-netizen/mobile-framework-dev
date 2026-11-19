@@ -1,5 +1,6 @@
 package app.cortex.assistant
 
+import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
@@ -207,15 +208,25 @@ internal object CortexFirstExperience {
             skip(context, "${calculator.failure ?: "Не удалось распознать калькулятор."} Пропускаю этот фокус.")
             delay(FirstExperienceTempo.BEFORE_ACTION)
         }
-        report(context, "А теперь немного магии с экраном."); delay(FirstExperienceTempo.BEFORE_ACTION)
-        val brightness = FirstExperienceBrightness(context, service).run()
-        brightnessDone = brightness.performed
-        if (brightness.performed) report(context, brightness.message) else skip(context, brightness.message)
+        report(context, "Возвращаюсь на главный экран…")
+        val navigation = VisualNavigation(context, service)
+        val home = service.global(AccessibilityService.GLOBAL_ACTION_HOME) &&
+            navigation.await(8_000L) { it.pkg in navigation.home && !it.secure && !it.hasPrivateFields } != null
+        if (home) {
+            delay(FirstExperienceTempo.BEFORE_ACTION)
+            report(context, "Управляю яркостью прямо на главном экране…")
+            val demo = FirstExperienceBrightness(context, service)
+            val brightness = demo.runOnHome().let { if (it.performed) it else demo.run() }
+            brightnessDone = brightness.performed
+            if (brightness.performed) report(context, brightness.message) else skip(context, brightness.message)
+        } else {
+            skip(context, "Android не подтвердил главный экран. Фокус с яркостью пропущен.")
+        }
         delay(FirstExperienceTempo.RESULT)
         if (!returnToApp(context)) throw IllegalStateException()
         // The first calculation's failure is not a permanent calculator capability verdict.
         // Always show the number prompt; prediction gets a fresh launch, clear and verification.
-        state(context, "number", "Последний фокус. Проверим, умею ли я предсказывать результат?")
+        state(context, "number", "Задумай число от 1 до 99. Я покажу четыре вычисления и заранее запечатаю результат.")
         val selected = withTimeout(120_000L) { requireNotNull(number).await() }
         state(context, "sealed", "Мой прогноз уже сделан.")
         delay(FirstExperienceTempo.SEALED)
