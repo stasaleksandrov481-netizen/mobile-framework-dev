@@ -104,13 +104,18 @@ internal class FirstExperienceCalculator(
         // A text field above a fully identified keypad is a candidate display
         // even when the OEM exposes an unfamiliar resource ID.
         return frame.tree.filter { node ->
+            val resource = node.resource.substringAfterLast('/').lowercase()
+            val text = service.localText(frame, node).orEmpty()
+            val numeric = text.isBlank() || FirstExperienceReadback.integer(text) != null ||
+                FirstExperienceMath.expression(text).matches(Regex("""[0-9.+*/-]{1,40}"""))
             !node.clickable && !node.scrollable &&
                 node.role in setOf("TextView", "EditText", "TextInputEditText") &&
                 !node.bounds.isEmpty && node.bounds.bottom <= keypadTop &&
                 node.bounds.width() >= frame.bounds.width() * .18f &&
                 node.bounds.top > frame.bounds.top + frame.bounds.height() * .06f &&
-                node.label.length <= 40 && !node.label.contains("history", ignoreCase = true) &&
-                !node.label.contains("истори", ignoreCase = true)
+                resource.none { it == '/' } && !resource.contains("history") &&
+                !resource.contains("preview") && !resource.contains("trace") &&
+                numeric
         }.take(3)
     }
 
@@ -136,7 +141,9 @@ internal class FirstExperienceCalculator(
 
     private fun displayFields(frame: VisualFrame): List<Pair<VisualNode, FirstExperienceReadback.Role>> {
         val identified = frame.tree.filter { FirstExperienceMath.isDisplay(it.resource) }
-        val fields = if (identified.isNotEmpty()) identified else inferredDisplays(frame)
+        val fields = identified + inferredDisplays(frame).filter { inferred ->
+            identified.none { it.path == inferred.path }
+        }
         val hasFormula = fields.any { it.editable || FirstExperienceMath.isExpression(it.resource) }
         return fields.map { node -> node to when {
             node.resource.substringAfterLast('/') == "result_final" -> FirstExperienceReadback.Role.FINAL
