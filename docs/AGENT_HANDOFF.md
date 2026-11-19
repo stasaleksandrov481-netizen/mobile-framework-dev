@@ -2,6 +2,9 @@
 
 ## 2026-11-19 UTC · FIRST EXPERIENCE · implementation / verification
 
+- PR #83: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/83 (draft). Remote implementation SHA `9e91ba3dc1ec5c7ea590ec991a66c8b896a2450c`, tree matches the local implementation commit. CodeQL + handoff gate passed; Android run `44471230709` reached Kotlin compile and found the optional adaptive-bias constant is not in the public SDK. Replaced the SDK reference with its optional provider key, preserving readback and no hidden-API reflection; unchanged adaptive bias needs no redundant OEM write. This correction requires a new Android run.
+- CI feature/onboarding/privacy Node tests: 61/61; backend/billing, signed WebView packaging, site/admin build+lint passed in the Android pipeline. UI run `44471230812` is still installing its browser. No actual screenshot or Android runtime test is claimed yet. Also preserved the reveal DOM across native cleanup and reserved header space for the real island.
+
 - Task: real, local first-run calculator / brightness / prediction demonstration, existing island and Stop control; no speech or model calls.
 - Branch: `feat/cortex-first-experience-20261119`; Android baseline `dd602112a02896348bc80b0c3d06279a94e88a11` (latest main, Telegram / app readiness fixes included), clean separate checkout. Current main Android is `1.0.18-beta.1` / 118; AGENTS.md version header is historical. PR #79 beta.2 is separate and must not be overwritten.
 - Read-only baseline check: main Android and security workflows successful; Supabase `cortex` ACTIVE v48; Vercel production READY `dpl_HRA7RyqX7unzAG4QuMWSVHiFavrY`, source `3d8c81ebfe4f35e54988540a214620888bdc3bc3` (production web source differs from main; website publication remains frozen). No backend, database, website deployment or published APK requested by this task.

@@ -119,6 +119,8 @@ test("sealed forecast contains no result and failures do not reveal a five", () 
   assert.doesNotMatch(env.html, />5<|ПРОГНОЗ ПОДТВЕРЖДЁН/);
   env.receive({ phase: "finish", notices: ["Вычисление не подтверждено"], predictionDone: false });
   assert.doesNotMatch(env.html, />5<|ПРОГНОЗ ПОДТВЕРЖДЁН/);
+  env.receive({ phase: "reveal", predictionDone: false });
+  assert.doesNotMatch(env.html, />5<|ПРОГНОЗ ПОДТВЕРЖДЁН/);
   env.receive({ phase: "reveal", predictionDone: true });
   assert.match(env.html, />5<|ПРОГНОЗ ПОДТВЕРЖДЁН/);
 });

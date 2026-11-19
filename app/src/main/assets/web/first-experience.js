@@ -117,8 +117,10 @@ window.CortexFirstExperience = (() => {
 
   function receive(state) {
     if (!state || state.type !== "first-experience" || !phases.has(state.phase)) return;
+    if (state.phase === "reveal" && state.predictionDone !== true) return;
     if (root.classList.contains("in-onboarding") && !view) { pending = state; return; }
     pending = null;
+    const sameReveal = view && current?.phase === "reveal" && state.phase === "reveal" && current.session === state.session;
     if (state.session !== current?.session) entered = "";
     current = state;
     if (state.phase === "idle") { close(); return; }
@@ -127,7 +129,13 @@ window.CortexFirstExperience = (() => {
     signature = nextSignature;
     requestPending = false;
     show();
+    view.setAttribute("data-active", state.active ? "true" : "false");
     const page = content(state);
+    if (sameReveal) {
+      // Finishing native cleanup changes Stop to Next without replaying the card animation.
+      view.querySelector(".experience-actions").innerHTML = page.actions;
+      return;
+    }
     view.innerHTML = `<header class="experience-header"><span>CORTEX</span><small>FIRST EXPERIENCE</small></header>
       <section class="experience-body" aria-live="polite">${page.body}</section><footer class="experience-actions">${page.actions}</footer>`;
     if (!document.hidden && window.cortexAppVisible !== false) {

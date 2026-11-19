@@ -131,6 +131,12 @@ class FirstExperienceTest {
         assertEquals("mode:1", settings.writes.last())
     }
 
+    @Test fun `unchanged adaptive bias needs no optional OEM setting write`() {
+        val settings = Settings()
+        assertTrue(FirstExperienceRecovery.restore(FirstExperienceRecovery.Saved(42, 1, "0.5"), settings))
+        assertEquals(listOf("mode:0", "level:42", "mode:1"), settings.writes)
+    }
+
     @Test fun `unknown saved values trigger no system writes`() {
         val settings = Settings()
         assertFalse(FirstExperienceRecovery.restore(FirstExperienceRecovery.Saved(-1, 1, null), settings))

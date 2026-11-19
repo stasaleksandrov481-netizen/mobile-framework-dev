@@ -58,7 +58,7 @@ internal class FirstExperienceBrightness(private val context: Context, private v
             ?.takeIf { it in 0..65_535 } ?: return Outcome(false, "Android не сообщил исходную яркость. Пропускаю фокус.")
         val mode = Settings.System.getString(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE)?.toIntOrNull()
             ?.takeIf { it in 0..1 } ?: return Outcome(false, "Android не сообщил режим яркости. Пропускаю фокус.")
-        val adjustment = Settings.System.getString(resolver, Settings.System.SCREEN_AUTO_BRIGHTNESS_ADJ)
+        val adjustment = Settings.System.getString(resolver, AUTO_BRIGHTNESS_ADJUSTMENT)
         var opened = false
         try {
             if (!service.global(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS)) {
@@ -106,6 +106,8 @@ internal class FirstExperienceBrightness(private val context: Context, private v
 
     companion object {
         private const val STORE = "cortex-first-experience-brightness"
+        // Optional AOSP/OEM provider key, not an Android SDK constant. Never use hidden-API reflection.
+        private const val AUTO_BRIGHTNESS_ADJUSTMENT = "screen_auto_brightness_adj"
         private val SYSTEM_UI = setOf("com.android.systemui", "com.miui.systemui", "com.huawei.systemui", "com.hihonor.systemui")
 
         fun hasPending(context: Context) = context.getSharedPreferences(STORE, Context.MODE_PRIVATE).getBoolean("pending", false)
@@ -125,8 +127,8 @@ internal class FirstExperienceBrightness(private val context: Context, private v
                     override fun mode() = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
                     override fun level(value: Int) = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, value)
                     override fun level() = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1)
-                    override fun adjustment(value: String) = Settings.System.putString(resolver, Settings.System.SCREEN_AUTO_BRIGHTNESS_ADJ, value)
-                    override fun adjustment() = Settings.System.getString(resolver, Settings.System.SCREEN_AUTO_BRIGHTNESS_ADJ)
+                    override fun adjustment(value: String) = Settings.System.putString(resolver, AUTO_BRIGHTNESS_ADJUSTMENT, value)
+                    override fun adjustment() = Settings.System.getString(resolver, AUTO_BRIGHTNESS_ADJUSTMENT)
                 }
                 if (FirstExperienceRecovery.restore(FirstExperienceRecovery.Saved(level, mode, store.getString("adjustment", null)), access)) {
                     store.edit().clear().commit()

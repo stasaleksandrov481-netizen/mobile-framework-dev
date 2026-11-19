@@ -18,7 +18,8 @@ internal object FirstExperienceRecovery {
         val manual = attempt { access.mode(0) && access.mode() == 0 }
         val level = attempt { access.level(saved.level) && access.level() == saved.level }
         val adjustment = saved.adjustment == null || attempt {
-            access.adjustment(saved.adjustment) && access.adjustment() == saved.adjustment
+            access.adjustment() == saved.adjustment ||
+                access.adjustment(saved.adjustment) && access.adjustment() == saved.adjustment
         }
         // Do not short-circuit this final write when an earlier restore failed.
         val mode = attempt { access.mode(saved.mode) && access.mode() == saved.mode }

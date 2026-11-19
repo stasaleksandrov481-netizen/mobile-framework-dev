@@ -84,3 +84,12 @@ test("Show and number entry send native commands without faking any calculator r
   expect(await page.evaluate(() => window.__nativeRequests.at(-1).operation)).toBe("first-experience-stop");
   await expect(page.locator(".experience-card strong")).toHaveText("?");
 });
+
+test("native cleanup preserves the revealed card instead of replaying its animation", async ({ page }) => {
+  await boot(page);
+  await nativeState(page, { phase: "reveal", predictionDone: true, active: true });
+  await page.locator(".experience-card").evaluate(el => { el.dataset.originalCard = "yes"; });
+  await nativeState(page, { phase: "reveal", predictionDone: true, active: false });
+  await expect(page.locator(".experience-card")).toHaveAttribute("data-original-card", "yes");
+  await expect(page.getByRole("button", { name: "Дальше", exact: true })).toBeVisible();
+});

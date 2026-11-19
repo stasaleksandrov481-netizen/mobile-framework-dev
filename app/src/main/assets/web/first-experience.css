@@ -4,6 +4,7 @@
 .experience-header { display: flex; align-items: center; justify-content: space-between; padding: 23px var(--gutter, 24px); flex: 0 0 auto; }
 .experience-header > span { font-size: 13px; font-weight: 650; letter-spacing: .19em; }
 .experience-header > small { color: #757575; font-size: 9px; letter-spacing: .17em; }
+.cortex-experience[data-active="true"] .experience-header { visibility: hidden; }
 .experience-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: clamp(36px, 8vh, 88px) var(--gutter, 24px) 28px; display: flex; flex-direction: column; justify-content: safe center; }
 .experience-body h1 { margin: 0 0 22px; font-size: clamp(30px, 8.2vw, 45px); line-height: 1.09; letter-spacing: -.055em; font-weight: 550; outline: none; }
 .experience-body p { margin: 0 0 19px; font-size: 15px; line-height: 1.65; color: #a6a6a6; max-width: 370px; }
