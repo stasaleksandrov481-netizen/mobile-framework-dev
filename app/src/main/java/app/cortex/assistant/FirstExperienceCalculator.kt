@@ -224,7 +224,9 @@ internal class FirstExperienceCalculator(
         return if (navigation.await(1_500L, ::safeFrame) != null) true else failed(entry)
     }
 
-    suspend fun clear() = script.clear().also { if (!it) failure = "Калькулятор не подтвердил очистку поля ввода." }
+    suspend fun clear() = script.clear().also {
+        failure = if (it) null else "Калькулятор не подтвердил очистку поля ввода."
+    }
     suspend fun calculate(step: FirstExperienceMath.Calculation) = script.calculate(step)
 
     private companion object {

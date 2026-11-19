@@ -25,8 +25,9 @@ internal object CortexLocalCommands {
     private val store = Regex("""(?:найди|поищи|покажи|установи|скачай|открой)\s+(.+?)\s+в\s+(?:google play|play market|play маркет(?:е)?|плей маркет(?:е)?|гугл плее)""", RegexOption.IGNORE_CASE)
     private val launch = Regex("""(?:открой|открывай|запусти|запускай|включи приложение|перейди в|переходи в|зайди в|загляни в|открой мне|open|launch) (?:мне )?(?:приложение )?(.{2,65})""")
     private val launchReversed = Regex("""(.{2,65}) (?:открой|открыть|запусти|запустить)""")
-    private val dim = Regex("""(?:прибавь|увеличь|подними|повысь|убавь|уменьши|снизь|понизь) яркость(?: экрана)?(?: на (\d{1,3}) ?(?:%|процент(?:а|ов)?))?""")
+    private val dim = Regex("""(?:прибавь|увеличь|подними|повысь|убавь|уменьши|снизь|понизь) яркост(?:ь|и)(?: экрана)?(?: на (\d{1,3}) ?(?:%|процент(?:а|ов)?))?""")
     private val brightnessLevel = Regex("""(?:установи|поставь|сделай|измени) яркость(?: экрана)? (?:на )?(\d{1,3}) ?(?:%|процент(?:а|ов)?)?""")
+    private val conversationalBrightness = Regex("""сделай (?:(?:мне|экран|яркость|подсветку) )?(?:чуть |немного )?(ярче|темнее|поярче|потемнее)""")
     private val close = Regex("""(?:закрой|сверни|выйди из) (?:приложение |приложения )?(.{2,65})""")
     private val timer = Regex("""(?:поставь|запусти|установи|создай) таймер(?: на)? (\d{1,3}) (секунд\p{L}*|минут\p{L}*|час\p{L}*)""")
     private val alarm = Regex("""(?:поставь|заведи|установи) будильник(?: на)? ([01]?\d|2[0-3]):([0-5]\d)""")
@@ -35,7 +36,7 @@ internal object CortexLocalCommands {
     private val clipboard = Regex("""(?:скопируй|скопировать) (?:текст )?[«\"](.{1,800})[»\"]""", RegexOption.IGNORE_CASE)
     private val dialer = Regex("""(?:позвони|набери номер|открой набор номера) (\+?[\d ()-]{5,22})""", RegexOption.IGNORE_CASE)
     private val message = Regex("""(?:напиши|создай) смс(?: на номер)? (\+?[\d ()-]{5,22}) (?:с текстом )?[«\"](.{1,1000})[»\"]""", RegexOption.IGNORE_CASE)
-    private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|подскажи как)\s""")
+    private val instruction = Regex("""^(?:как|почему|можно ли|что такое|зачем|объясни|расскажи|подскажи как)\s""")
     private val cameraNames = setOf("камера", "камеру", "фотокамеру", "camera")
     private val spaces = Regex("""\s+""")
     private val shadeQualifier = Regex("""^(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек) +| +(?:в|через) (?:шторке|шторку|быстрых настройках|панели быстрых настроек)$""")
@@ -177,6 +178,9 @@ internal object CortexLocalCommands {
             else -> {
                 val level = volume.matchEntire(plain)?.groupValues?.get(1)?.toIntOrNull()
                 if (level != null && level in 0..100) return command("volume", "mode" to "set", "level" to level)
+                conversationalBrightness.matchEntire(plain)?.let { phrase ->
+                    return command("brightness", "mode" to if (phrase.groupValues[1] in setOf("ярче", "поярче")) "up" else "down")
+                }
                 brightnessLevel.matchEntire(plain)?.groupValues?.get(1)?.toIntOrNull()?.let {
                     if (it in 1..100) return command("brightness", "mode" to "set", "level" to it)
                 }

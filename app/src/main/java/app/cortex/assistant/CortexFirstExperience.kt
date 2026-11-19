@@ -235,10 +235,16 @@ internal object CortexFirstExperience {
             skip(context, "Калькулятор недоступен. Пропускаю предсказание.")
             returnToApp(context); phase = "finish"; return
         }
-        val confirmed = FirstExperienceMath.performPrediction(selected) { index, calculation ->
+        suspend fun perform(): Boolean = FirstExperienceMath.performPrediction(selected) { index, calculation ->
             val action = listOf("Умножаю на 2", "Прибавляю 10", "Делю на 2", "Вычитаю исходное число")[index]
             report(context, "$action · ${index + 1}/4")
             calculator.calculate(calculation)
+        }
+        var confirmed = perform()
+        if (!confirmed && calculator.failure?.contains("после «=»") == true) {
+            // One fresh replay is safe; repeating '=' or guessing the answer is not.
+            report(context, "Калькулятор не показал подтверждённый результат. Проверяю ещё раз с чистого поля…")
+            if (calculator.clear()) confirmed = perform()
         }
         if (!confirmed) {
             skip(context, "${calculator.failure ?: "Не удалось подтвердить вычисление."} Прогноз не раскрыт.")
