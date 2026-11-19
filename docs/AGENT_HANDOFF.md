@@ -1,5 +1,12 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · beta.6 operator fix published and independently verified
+
+- PR #87 head `d4902ba383f4365f05447c5fee88965ac0c17455` passed Android/JVM/lint run `44502651774`, UI, CodeQL and handoff checks. Release source `01cdc85e028d6aae3d6dfd115fbf7f420125a678` has the identical validated tree `6ba0beda57943a8886e2c4c2f3cbb641f9404bd7`. Main signed-release workflow `44503438919`, job `135488812139`, **SUCCESS** including publish and actual downloadable-release verification. Old-release removal skipped; prior tags/assets retained.
+- Published prerelease `v1.0.18-beta.6`, release ID `451174099`, package `app.cortex.assistant`, code **123**. Public APK independently downloaded: **19,046,444 bytes**, SHA256 `909a2d4da78290ab82e39371b4511f416cad17272a6258e32919c73403f8be11`, matches both GitHub digest and downloaded SHA256SUMS.txt. `apksigner verify` passed; certificate `dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274` matches independently verified beta.5. `aapt` verified package/version; all 25 WebView files match source. DEX includes calculator/script/math and the new rightOperand helper.
+- Update: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/download/v1.0.18-beta.6/CORTEX-1.0.18-beta.6.apk . Tests cover hidden operator echo, operand-only/generic displays for all 99 choices, formatting and rejected missing/wrong operations. No API/AI/TTS, server/DB/site deploy or unrelated rendering/pacing change. This post-release documentation commit must not retarget the beta.6 tag or request another release.
+- Remaining: physical Samsung A23 validation from multiplication through the right operand and = in both tricks. Exact OEM accessibility structure was not captured; the new branch removes the shared literal-operator checkpoint, but CI/protocol fixtures are not proof of device success. If a later step fails, existing notices now identify the key/expected result instead of a generic failure. Never mark the previous beta.5 device report as resolved on hardware without a retest.
+
 ## 2026-11-19 UTC · beta.6 operator acknowledgement follow-up
 
 - User reports that the current demo enters the digits and multiplication in both calculator tricks, then stops before the right operand. This is a real-device failure of the beta.5 flow, despite green CI. Exact OEM hierarchy/glyph codepoints were not supplied; do not claim they were observed.
