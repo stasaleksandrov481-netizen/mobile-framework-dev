@@ -17,10 +17,14 @@ export const criticalStyles = `
 :where(.brand img){width:33px;height:33px;object-fit:contain}
 :where(.button){display:inline-flex;align-items:center;justify-content:center;gap:12px;min-height:48px;padding:12px 20px;border:1px solid #393939;border-radius:12px;background:#1c1c1c;color:#f6f6f6;text-align:center;font-weight:650}
 :where(.button--primary){background:#f5f5f5;border-color:#f5f5f5;color:#101010}
-:where(.shell){min-height:100svh;display:flex;flex-direction:column;background:#080808}
+:where(.shell){min-height:100svh;width:100%;min-width:0;display:flex;flex-direction:column;background:#080808}
 :where(.site-header),:where(.site-footer){display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px;padding:25px clamp(20px,5vw,70px)}
-:where(.hero){flex:1;display:grid;place-items:center;padding:65px 22px;text-align:center}
-:where(.hero-copy){max-width:920px;margin:auto}
+:where(.site-header>*),:where(.site-footer>*){min-width:0;max-width:100%}
+:where(.footer-merchant),:where(.footer-links){display:flex;flex-wrap:wrap;gap:10px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+:where(.footer-merchant){flex-direction:column;align-items:flex-start}
+:where(.footer-links a){display:inline-flex;align-items:center;gap:5px;max-width:100%;overflow-wrap:anywhere}
+:where(.hero){flex:1;min-width:0;width:100%;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;padding:65px 22px;text-align:center}
+:where(.hero-copy){width:100%;min-width:0;max-width:920px;margin:auto;overflow-wrap:anywhere}
 :where(.hero h1){font-size:clamp(36px,9vw,72px);line-height:1.08;letter-spacing:-.05em}
 :where(.hero-description){margin:20px auto;color:#aaa;font-size:15px;line-height:1.7;max-width:600px}
 :where(.hero-actions){display:flex;justify-content:center;flex-wrap:wrap;gap:12px;margin-top:28px}
