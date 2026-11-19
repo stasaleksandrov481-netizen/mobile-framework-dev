@@ -58,9 +58,8 @@ window.CortexFirstExperience = (() => {
             <label for="experience-number">Выбери любое целое число от 1 до 99</label>
             <input id="experience-number" name="number" type="text" inputmode="numeric" pattern="[1-9][0-9]?" maxlength="2" autocomplete="off" required value="${esc(entered)}" placeholder="17" aria-describedby="experience-number-hint">
             <small id="experience-number-hint">Введи своё число. Дальше телефон снова возьму я.</small>
-            <button type="submit" class="action primary" ${!validNumber(entered) || requestPending ? "disabled" : ""}>Продолжить</button>
           </form>`,
-        actions: stop
+        actions: `<button type="submit" form="experience-number-form" class="action primary" ${!validNumber(entered) || requestPending ? "disabled" : ""}>Продолжить</button>` + stop
       };
       case "sealed": return {
         body: `<span class="experience-step">03 / ПРЕДСКАЗАНИЕ</span><h1 id="experience-title">Мой прогноз<br>уже сделан.</h1>

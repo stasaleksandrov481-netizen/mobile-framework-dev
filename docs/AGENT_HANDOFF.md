@@ -2,6 +2,10 @@
 
 ## 2026-11-19 UTC · FIRST EXPERIENCE · implementation / verification
 
+- Android run `44471817985` at remote `f58159e221dd72c27de12692c51d2b6ce09d7c74`: **assembleDebug + testDebugUnitTest + lintDebug passed**, test APK uploaded; release-build verification still running when this entry was written. CodeQL, handoff gate and 6 Playwright checks also passed for that SHA. The only pending runtime edit is the small-screen Continue footer placement; no native implementation changed after this successful native test.
+
+- UI run `44471648155` passed 6 Playwright tests and produced 24 captured pages. Inspected actual 393×852 offer/reveal and 320×568 number screenshots from artifact `14505060291`: monochrome layout is clean, but the small number page hid Continue in its scrollable body. Moved Continue into the fixed footer with its form association; the next UI run must verify it remains visible. These are WebView fixture screenshots, not phone execution.
+
 - Follow-up: UI checks use the Ubuntu runner's already-installed Chrome rather than spending the job installing a second browser. Android build step now includes `:app:lintDebug`; any newly discovered baseline lint failure must be distinguished from feature regressions. Remote fix SHA `23fc33e89ee2f118a966386175dcb4403529ddfe` pending CI.
 
 - PR #83: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/83 (draft). Remote implementation SHA `9e91ba3dc1ec5c7ea590ec991a66c8b896a2450c`, tree matches the local implementation commit. CodeQL + handoff gate passed; Android run `44471230709` reached Kotlin compile and found the optional adaptive-bias constant is not in the public SDK. Replaced the SDK reference with its optional provider key, preserving readback and no hidden-API reflection; unchanged adaptive bias needs no redundant OEM write. This correction requires a new Android run.
