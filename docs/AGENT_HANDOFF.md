@@ -4,6 +4,13 @@
 
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · Beta.8 release candidate after 12/12 Android emulator checks
+
+- Base: `main` merge PR #92, commit `ad94b755380e00550dd98fb821543e669d1f5539`. Release branch `release/cortex-1-0-18-beta-8-20261119`. Only Android version number changes vs verified runtime: `1.0.18-beta.8`, versionCode `125`. Signed beta.7 remains immutable rollback.
+- Verified PR #92 head `069763abcd56308a7cd7421ff11f62c0a78e2d28`: Android debug/JVM/lint/release workflow `44536463654` SUCCESS; native API34 integration `44536463488` **12/12 PASS** (fake Telegram recent/search, declined send, delayed YouTube-like search and 8 calculator/brightness checks); First Experience UI `44536463520`, security `44536463582`, handoff `44536463519` SUCCESS. Initial native run `44534879820` had 11/12; its search false-negative was fixed and retested.
+- Release-only metadata change; no WebView/island UI, Supabase, Vercel, site, SQL, prices, data, keys, old tags or previous APKs altered.
+- Release gate: PR must pass CI. Merge subject exactly `release(cortex): publish beta 1.0.18-beta.8` for signed publication. Then check immutable tag/source, APK download, SHA256SUMS, package/version and certificate. Physical Samsung, actual Telegram/YouTube, voice hotword, OEM power management, FPS are still not demonstrated by emulator tests; beta testers must validate them.
+
 ## 2026-11-19 UTC · Beta preflight: fail-closed task chains, app startup, Android messenger/search regressions
 
 - Baseline: `main` `acd225822c29f5b21f5611f3946dfc4c4d7488b4`, signed release `v1.0.18-beta.7` / source `b14532c` / versionCode 124. Branch: `fix/cortex-beta-readiness-20261119`; all changes Android native/test infrastructure only, plus this handoff and stale AGENTS baseline correction. No production site, pricing, server, DB or APK publication.
