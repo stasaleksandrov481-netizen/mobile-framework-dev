@@ -18,6 +18,18 @@ internal class ConversationNavigation(
         } ?: return result("Приложение открылось, но экран переписки пока недоступен.")
         val query = ConversationMatch.searchQuery(request.recipient)
         var recipient = request.recipient
+        // Splash screens often expose a nonempty accessibility tree before the
+        // messenger shows its chat list. Do not OCR/tap that transient screen.
+        if (!chat(frame, recipient, search) && !search.ready(frame) &&
+            candidate(frame, recipient, null, allowOcr = false)?.score != 100) {
+            report("Жду загрузки переписок в ${app.label}…")
+            val loaded = navigation.await(8_000L) { current ->
+                usable(current, app.pkg) && current.tree.isNotEmpty() &&
+                    (chat(current, recipient, search) || search.ready(current) ||
+                        candidate(current, recipient, null, allowOcr = false)?.score == 100)
+            }
+            if (loaded != null) frame = loaded
+        }
         var openedWindow = frame.window
         if (!chat(frame, recipient, search)) {
             report("Ищу переписку «${request.recipient}»…")
