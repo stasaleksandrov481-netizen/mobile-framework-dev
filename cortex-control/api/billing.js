@@ -1,14 +1,30 @@
-import { timingSafeEqual, randomUUID } from "node:crypto";
+import { timingSafeEqual, randomUUID, createHash } from "node:crypto";
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const subjectPattern = /^(?:yandex_[A-Za-z0-9_-]{43}|[a-f0-9-]{36})$/;
 const paymentEmail = /^[^\s@<>(),:;\\"]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
 const plans = new Set(["start", "pro", "ultra"]);
-const paymentStates = {
-  PENDING: "pending", CONFIRMED: "confirmed", CHARGEBACKED: "refunded", CANCELED: "canceled",
-  EXPIRED: "canceled", FAILED: "canceled"
-};
-const providerHost = "https://app.platega.io";
+const checkoutHost = "https://auth.robokassa.ru";
+
+function invoiceId(id) {
+  return (BigInt("0x" + id.replaceAll("-", "").slice(0, 15)) + 1n).toString();
+}
+
+function amountInKopecks(value) {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,9})\.[0-9]{2}(?:0{0,4})$/.test(value)) return -1;
+  const [rubles, fractional] = value.split(".");
+  const kopecks = BigInt(rubles) * 100n + BigInt(fractional.slice(0, 2));
+  return kopecks <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(kopecks) : -1;
+}
+
+function formBody(req) {
+  if (Number(req.headers["content-length"] || 0) > 8192) throw new BillingError(400, "invalid");
+  const value = typeof req.body === "string" ? Object.fromEntries(new URLSearchParams(req.body)) : req.body;
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(value).length > 8192) {
+    throw new BillingError(400, "invalid");
+  }
+  return value;
+}
 
 class BillingError extends Error {
   constructor(status, code) {
@@ -37,7 +53,7 @@ function jsonObject(req) {
 function httpsUrl(value, checkHost = false) {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || (checkHost && !/^(?:[a-z0-9-]+\.)*platega\.io$/.test(url.hostname))) return null;
+    if (url.protocol !== "https:" || url.username || url.password || (checkHost && url.origin !== checkoutHost)) return null;
     return url.href;
   } catch {
     return null;
@@ -52,13 +68,20 @@ function kopecks(value) {
 
 export function createBillingHandler(env = process.env, network = fetch) {
   const mode = env.CORTEX_BILLING_MODE;
-  const merchant = env.PLATEGA_MERCHANT_ID;
-  const secret = env.PLATEGA_SECRET;
-  const returnUrl = httpsUrl(env.PLATEGA_RETURN_URL);
+  const merchant = env.ROBOKASSA_MERCHANT_LOGIN?.trim();
+  const password1 = env.ROBOKASSA_PASSWORD_1;
+  const password2 = env.ROBOKASSA_PASSWORD_2;
+  const hashAlgorithm = (env.ROBOKASSA_HASH_ALGORITHM || "md5").toLowerCase();
   const dbOrigin = httpsUrl(env.SUPABASE_URL);
   const dbKey = env.SUPABASE_SERVICE_ROLE_KEY;
   const gatewaySecret = env.CORTEX_BILLING_TOKEN;
-  const liveReady = mode === "live" && uuid.test(merchant || "") && Boolean(secret && returnUrl);
+  const liveReady = mode === "live" && /^[A-Za-z0-9_.-]{1,128}$/.test(merchant || "") &&
+    Boolean(password1 && password2) && ["md5", "sha256"].includes(hashAlgorithm) &&
+    env.ROBOKASSA_LIVE_APPROVED === "true";
+
+  function digest(value) {
+    return createHash(hashAlgorithm).update(value, "utf8").digest("hex");
+  }
 
   async function database(path, payload, accessToken) {
     const headers = {
