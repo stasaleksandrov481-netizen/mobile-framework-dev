@@ -77,6 +77,14 @@ class FirstExperienceTest {
         }
     }
 
+    @Test fun `OEM glyphs in nonstandard calculator display are normalized for recognition`() {
+        assertEquals("84*7", FirstExperienceMath.expression("84 ⨯ 7"))
+        assertEquals("44/2", FirstExperienceMath.expression("44 : 2"))
+        assertEquals("588", FirstExperienceMath.expression("588"))
+        assertNull(FirstExperienceMath.displayedInteger("84 ⨯ 7"))
+        assertNull(FirstExperienceMath.displayedInteger("44 : 2"))
+    }
+
     @Test fun `brightness target remains visible and changes all possible starting levels`() {
         for (level in 0..1_000) {
             val original = level / 1_000f
