@@ -32,7 +32,7 @@ class SearchActivity : Activity() {
             setBackgroundColor(Color.WHITE)
         }
         setContentView(column)
-        if (mode == "search-slow") {
+        if (mode == "search-slow" || mode == "chat-slow") {
             text("Загрузка приложения…", 18f)
             handler.postDelayed({ if (!isFinishing) renderLanding() }, 1_400L)
         } else if (mode == "chat-search") renderSearch()
@@ -57,9 +57,9 @@ class SearchActivity : Activity() {
 
     private fun renderLanding() {
         column.removeAllViews()
-        text(if (mode == "chat") "Telegram QA · не настоящий аккаунт" else "YouTube QA · только тест", 16f)
+        text(if (mode == "chat" || mode == "chat-slow") "Telegram QA · не настоящий аккаунт" else "YouTube QA · только тест", 16f)
         button("Поиск") { renderSearch() }
-        if (mode == "chat") {
+        if (mode == "chat" || mode == "chat-slow") {
             text("Недавние", 15f)
             button("Рыбка") { renderChat("Рыбка") }
             button("Рыбка Новости") { renderChat("Рыбка Новости") }
@@ -88,7 +88,7 @@ class SearchActivity : Activity() {
                 if (query.isEmpty()) return
                 handler.postDelayed({
                     if (ticket != generation || isFinishing) return@postDelayed
-                    if (mode == "chat" || mode == "chat-search") {
+                    if (mode == "chat" || mode == "chat-search" || mode == "chat-slow") {
                         for (name in listOf("Рыбка", "Рыбка Новости")) {
                             val button = Button(this@SearchActivity).apply {
                                 text = name
