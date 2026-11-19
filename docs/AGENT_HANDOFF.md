@@ -1,5 +1,14 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · APK beta.3 published and verified
+
+- PR #84 merged as release commit `b079f1e786edc1545359ead13e524d8294e5e1ee`; main workflow `44478498107` completed **SUCCESS**, including preflight, debug/release builds, JVM tests, lint, signing, publish and actual downloaded-file verification. PR workflow `44477747468`, UI, CodeQL and handoff gate were also successful. Manual integration checks additionally covered 6 release-intent cases.
+- Published GitHub prerelease `v1.0.18-beta.3`, release ID `451001338`, Android package `app.cortex.assistant`, versionCode **120**. APK `CORTEX-1.0.18-beta.3.apk`, **19,031,316 bytes**. Direct download: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/download/v1.0.18-beta.3/CORTEX-1.0.18-beta.3.apk
+- Downloaded the public APK independently, verified SHA256 against both GitHub digest and SHA256SUMS.txt: `9dff5271ff352133e5283c8cfc959658bb9cc11dc863611425cef0bc9bbdaeae`. `apksigner verify` passed; certificate `dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274` matches the independently downloaded previous beta.1 APK. `aapt` confirmed the package, versionName and code. All **25** bundled WebView files match the checked source byte-for-byte, and the three native First Experience controller/calculator/brightness classes are present in DEX.
+- Old beta.1 (tag source `be5eab98bdb0421489440f44fe7680a5c6a13361`) and stable 1.0.17 remain available for rollback; no old tags/assets were removed. GitHub `/releases/latest` remains the stable channel by design; beta download is the explicit tag URL above.
+- No further app runtime/UI changes, server, DB or production website deployment were made. This post-release journal update changes documentation only; published tag must continue resolving to `b079f1e...`, never retarget it to the documentation commit. Future APK releases from new source commits must increment both Android versionName and versionCode; early preflight now enforces that rather than wasting a build.
+- Remaining: actual First Experience behavior on Samsung A23/Xiaomi/HONOR still requires physical testing. Updating an existing installation can replay it through Settings → «Повторить знакомство с CORTEX». Do not claim hardware tests were performed from the APK/CI checks alone.
+
 ## 2026-11-19 UTC · APK publication recovery
 
 - User reported the manually requested APK failed. Run `44474766061` on merged main `6d4bbbdc3f906c21043c0fc261be99e604904119` passed debug/release builds, tests, lint and permanent-certificate signing. It failed only in Prepare download: `v1.0.18-beta.1` already identifies an earlier commit. The old tag/release must remain intact.
