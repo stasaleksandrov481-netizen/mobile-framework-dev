@@ -182,7 +182,8 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                         }
                         !visualAllowed -> {
                             val name = VisualRequest.singleApp(command)
-                            if (name != null && state == null && conversation == null)
+                            if (name != null && state == null && conversation == null &&
+                                VisualRequest.explicitAppLaunch(command))
                                 Result("Приложение «$name» не найдено. Уточните название.", false)
                             else Result(VISUAL_DISABLED, false, state != null)
                         }
@@ -493,9 +494,13 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             if (local != null) {
                 task.local = true
                 task.queue.addAll(local)
-            } else VisualRequest.singleApp(task.request)?.let { missing ->
-                return Result("Приложение «$missing» не найдено. Уточните его название.", false)
+            } else if (VisualRequest.explicitAppLaunch(task.request)) {
+                VisualRequest.singleApp(task.request)?.let { missing ->
+                    return Result("Приложение «$missing» не найдено. Уточните его название.", false)
+                }
             }
+            // An unknown destination can be a system screen, not an application.
+            // Let the visual planner resolve its meaning and navigate Settings.
         }
         beforeScreen()
         report("Проверяю текущий экран…")
