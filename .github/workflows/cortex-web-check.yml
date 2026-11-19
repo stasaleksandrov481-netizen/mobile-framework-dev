@@ -14,6 +14,10 @@ jobs:
   build:
     name: Typecheck and build public website
     runs-on: ubuntu-latest
+    env:
+      # CI-only UI fixture: show the full form without publishing registrations.
+      CORTEX_ENABLE_REGISTRATION: "true"
+      CORTEX_PUBLIC_SIGNUP_EXCEPTION: "true"
     defaults:
       run:
         working-directory: cortex-web
@@ -28,4 +32,26 @@ jobs:
           cache-dependency-path: cortex-web/package-lock.json
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
+      - name: Validate public links and authorization safeguards
+        run: node --test scripts/hardening.test.mjs
       - run: npm run build
+      - name: Install browser test dependencies
+        run: npm ci --prefix ../qa/browser --no-audit --no-fund
+      - name: Locate Chromium for CSS-failure regression
+        shell: bash
+        run: |
+          browser=$(command -v google-chrome || command -v chromium || true)
+          test -n "$browser"
+          echo "CORTEX_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - name: Keep registration usable when CSS fetch fails
+        working-directory: qa/browser
+        run: npx playwright test --config site.playwright.config.mjs
+      - name: Save browser regression screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CORTEX-public-site-css-regression
+          path: |
+            qa/browser/test-results/
+            qa/browser/playwright-report/
+          if-no-files-found: warn
