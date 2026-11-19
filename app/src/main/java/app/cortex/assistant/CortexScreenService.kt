@@ -42,6 +42,7 @@ class CortexScreenService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         connected = this
+        if (!CortexRuntime.firstExperienceActive) FirstExperienceBrightness.restorePending(this)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -125,8 +126,9 @@ class CortexScreenService : AccessibilityService() {
                     val scrollable = node.isScrollable || node.supports(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) ||
                         node.supports(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                     val checkable = if (node.isCheckable) node.isChecked else null
+                    val range = node.rangeInfo?.let { VisualRange(it.min, it.max, it.current) }
                     if (raw.intersect(frameBounds) && (text.isNotBlank() || description.isNotBlank() || node.isClickable || node.isLongClickable ||
-                            editable || scrollable || checkable != null)) {
+                            editable || scrollable || checkable != null || range != null)) {
                         nodes += VisualNode((nodes.size + 1).toString(), path, text.ifBlank { description },
                             node.viewIdResourceName.orEmpty(), node.className?.toString()?.substringAfterLast('.').orEmpty(),
                             raw, node.isClickable, editable, scrollable, node.isFocused, checkable, node.isSelected,
@@ -135,7 +137,9 @@ class CortexScreenService : AccessibilityService() {
                             scrollAxis = if (scrollable) node.scrollAxis() else null,
                             longClickable = node.isLongClickable,
                             descriptionLines = rawDescription?.lineSequence()?.take(6)?.map { VisualLabels.clean(it, 130) }
-                                ?.filter { it.isNotBlank() }?.toList().orEmpty())
+                                ?.filter { it.isNotBlank() }?.toList().orEmpty(),
+                            range = range,
+                            progressSettable = node.supports(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id))
                     }
                 }
                 for (index in 0 until minOf(node.childCount, 100)) {
@@ -172,6 +176,23 @@ class CortexScreenService : AccessibilityService() {
     }
 
     internal fun stopTouch() { touch?.clear() }
+
+    /** Values stay local; the general visual frame still redacts editable text. */
+    internal fun localText(frame: VisualFrame, node: VisualNode): String? {
+        var text: String? = null
+        val read = onNode(frame, node) {
+            text = it.text?.toString() ?: it.contentDescription?.toString().orEmpty()
+            true
+        }
+        return text.takeIf { read }
+    }
+
+    internal fun setProgress(frame: VisualFrame, node: VisualNode, value: Float): Boolean = onNode(frame, node) { current ->
+        val range = current.rangeInfo
+        val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id
+        value.isFinite() && range != null && value in range.min..range.max && current.supports(action) &&
+            current.performAction(action, Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, value) })
+    }
 
     internal fun fieldMatches(frame: VisualFrame, node: VisualNode, value: String): Boolean =
         onNode(frame, node) { current -> current.isEditable && current.text?.toString() == value }

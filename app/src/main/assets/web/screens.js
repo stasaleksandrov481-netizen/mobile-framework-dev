@@ -318,6 +318,7 @@ const CortexUI = (() => {
       tile("Язык", "Язык ответа и распознавания", "globe", "go", "language") +
       tile("Анимации и отклик", "Движение интерфейса и вибрация", "wave", "go", "motion") +
       tile("Уведомления", "Оповещения о готовом ответе", "bell", "go", "notifications")
+      + tile("Повторить знакомство с CORTEX", "Настоящее управление телефоном", "refresh", "first-experience")
     ));
   }
   function motion() {
@@ -474,6 +475,7 @@ const CortexUI = (() => {
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
       ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission")}
+      ${item("sliders", "Изменение яркости", "Для изменения и восстановления яркости в интерактивном знакомстве.", a.brightness, "brightness-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
       </section>
       ${compatibilityPanel}

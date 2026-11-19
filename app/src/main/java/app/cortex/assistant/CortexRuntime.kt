@@ -13,6 +13,12 @@ internal object CortexRuntime {
     var scheduleChanged: (() -> Unit)? = null
     var reminder: ((String, String) -> Boolean)? = null
     var leaveForAction: (() -> Unit)? = null
+    var firstExperienceActive = false
+        set(value) {
+            if (field == value) return
+            field = value
+            wakeHook?.invoke()
+        }
 
     fun setAppVisible(value: Boolean) {
         appVisible = value

@@ -6,6 +6,8 @@ import org.json.JSONObject
 
 internal enum class VisualScrollAxis { HORIZONTAL, VERTICAL }
 
+internal data class VisualRange(val min: Float, val max: Float, val current: Float)
+
 internal data class VisualNode(
     val id: String,
     val path: List<Int>,
@@ -25,7 +27,9 @@ internal data class VisualNode(
     val state: String = "",
     val scrollAxis: VisualScrollAxis? = null,
     val longClickable: Boolean = false,
-    val descriptionLines: List<String> = emptyList()
+    val descriptionLines: List<String> = emptyList(),
+    val range: VisualRange? = null,
+    val progressSettable: Boolean = false
 )
 
 internal data class VisualFrame(
@@ -61,7 +65,7 @@ internal data class VisualFrame(
     private val structuralSignature by lazy(LazyThreadSafetyMode.NONE) { tree.map { node ->
         listOf(node.path, node.label, node.role, node.resource, node.bounds, node.checked,
             node.focused, node.selected, node.state, node.enabled, node.editable, node.clickable,
-            node.longClickable, node.scrollable)
+            node.longClickable, node.scrollable, node.range)
     }.hashCode() }
 
     fun structure(): Int = structuralSignature

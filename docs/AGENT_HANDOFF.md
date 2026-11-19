@@ -1,5 +1,15 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · FIRST EXPERIENCE · implementation / verification
+
+- Task: real, local first-run calculator / brightness / prediction demonstration, existing island and Stop control; no speech or model calls.
+- Branch: `feat/cortex-first-experience-20261119`; Android baseline `dd602112a02896348bc80b0c3d06279a94e88a11` (latest main, Telegram / app readiness fixes included), clean separate checkout. Current main Android is `1.0.18-beta.1` / 118; AGENTS.md version header is historical. PR #79 beta.2 is separate and must not be overwritten.
+- Read-only baseline check: main Android and security workflows successful; Supabase `cortex` ACTIVE v48; Vercel production READY `dpl_HRA7RyqX7unzAG4QuMWSVHiFavrY`, source `3d8c81ebfe4f35e54988540a214620888bdc3bc3` (production web source differs from main; website publication remains frozen). No backend, database, website deployment or published APK requested by this task.
+- Implemented native session controller, verified calculator gestures, persisted brightness restoration (including mode/adaptive bias), local prediction, stop/lock/disconnect/timeouts, wake pause, existing-island demo mode, WebView pages and Settings replay. See `docs/FIRST_EXPERIENCE.md` for exact component behavior and OEM/recovery limits.
+- Local Node feature + onboarding/island checks: 24/24 passed; `git diff --check` clean. Full QA: one pre-existing failure in `qa/agent-continuation.test.mjs` (obsolete source regex for retry loop); reproduced in a clean `dd60211` worktree. Do not silently treat it as introduced or mark the entire suite green.
+- Added JVM logic/recovery tests and a dedicated Playwright workflow (actual WebView files, fixture native bridge; screenshots are not phone execution proof). Local Android tooling fetched from official sources; dependency resolution works, but installed host Java is a JRE without javac. Local Chromium is sandbox-blocked; cloud browser cannot reach the task-local HTTP server. Android compile/unit/lint and UI screenshot jobs must be checked in GitHub CI before completion.
+- No public APK or production deployment; feature remains isolated. Preserve current APK/signing/UI, inspect CI and actual captured UI, and physically test Samsung/Xiaomi/HONOR before release. A force-stopped process only restores the brightness journal on a later component start; revoked WRITE_SETTINGS can require user recovery.
+
 ## 2026-11-19 UTC · Telegram chat names / YouTube readiness / semantic system destinations
 
 - Branch: `fix/cortex-telegram-youtube-semantic-20261119` (work from current `main`); latest Android code/test commit `ee8272723c595ba17edd7af4c58d647e5b338ff3`.

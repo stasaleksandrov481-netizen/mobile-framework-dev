@@ -12,5 +12,8 @@ app/build/
 .DS_Store
 __pycache__/
 *.pyc
+qa/browser/node_modules/
+qa/browser/test-results/
+qa/browser/playwright-report/
 
 /supabase/.temp/
