@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   device-regression:
-    name: Real Android service and calculator UI
+    name: Real Android service, commands, messenger and calculator UI
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -60,7 +60,7 @@ jobs:
             adb logcat -d > device-logcat.txt
             adb pull /sdcard/Android/data/app.cortex.assistant/files/device-tests device-screenshots || true
             test -s device-results.txt
-            grep -q 'OK (8 tests)' device-results.txt
+            grep -q 'OK (12 tests)' device-results.txt
             ! grep -E 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' device-results.txt
       - name: Capture emulator logs
         if: always()
