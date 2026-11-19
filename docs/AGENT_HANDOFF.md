@@ -2,9 +2,9 @@
 
 ## 2026-11-19 UTC · Telegram chat names / YouTube readiness / semantic system destinations
 
-- Branch: `fix/cortex-telegram-youtube-semantic-20261119` (work from current `main`); latest Android code/test commit `2294712ab5aa02722a1b6a111c39aab42ae620f0`.
+- Branch: `fix/cortex-telegram-youtube-semantic-20261119` (work from current `main`); latest Android code/test commit `ee8272723c595ba17edd7af4c58d647e5b338ff3`.
 - Android-only fix: `ConversationMatch.kt`, `ConversationNavigation.kt` match Russian inflected recipients by a short search stem and **exact verified chat titles**, including native/recent and OCR rows. Keep chat-header verification and explicit send confirmation; never infer recipient from message previews or global results.
-- `ScreenSearch.kt`: parse `Открой в Ютубе и найди гта 6`, wait for actual search controls before input, and retry when the app has only partially loaded.
+- `ScreenSearch.kt`: parse `Открой в Ютубе и найди гта 6` and `Открыть в Ютубе и найти гта 6`, wait for actual search controls before input, and retry when the app has only partially loaded. `CortexActionEngine.kt` also waits up to 6 seconds for the next requested control/editor after an OPEN step before trying to scroll/type.
 - `VisualPlan.kt` + `CortexActionEngine.kt`: only an explicit application request gets an immediate "not installed" result. Unknown system destinations (e.g. usage statistics) now fall through to the semantic visual planner; this is not a guarantee of every Settings screen on every OEM.
 - `VisualPlanTest.kt`: regression tests for naming inflections, YouTube phrasing, and system-destination intent. GitHub CI and physical Samsung/Telegram/YouTube smoke test **not yet verified**; do not claim the bug fixed in an installed APK.
 - No WebView design, island, production site, signing materials, quotas, database, Edge Function, Vercel, tag, or published APK changed. Keep the current signed release as rollback. Next: PR CI, inspect tests/compile, manually test on phone before preparing a separately approved APK.
