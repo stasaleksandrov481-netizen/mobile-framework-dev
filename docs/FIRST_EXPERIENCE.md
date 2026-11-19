@@ -43,9 +43,16 @@ Keypad identity and enabled state are separate: Samsung/OEM calculators may disa
 equals or clear after C without ceasing to be recognized. Only the requested key must
 be enabled. An empty editable formula is not replaced by its accessibility help text;
 its clear acknowledgement takes precedence over an old live-preview result. Each digit
-and operator must appear in the actual formula before the next key, and every equality
-must show the expected integer. One retry is allowed only after positively observing the
-unchanged prior formula; equals is never blindly repeated. Keys are spaced by 650 ms;
+must appear in the formula or current operand, and every equality must show the expected
+integer. Operator gestures are dispatched exactly once to the recognized control: an OEM
+may keep the left operand visible or render its operator in a separate span, so literal
+text such as N× is not a required checkpoint. The next operand and equality still need
+real display confirmation. Unicode operator glyphs and invisible formatting are normalized.
+Only the requested key, rather than the entire keypad, must remain available during input;
+the full keypad is recognized on launch. One digit retry is allowed only after positively
+observing the unchanged prior formula; operators and equals are never blindly repeated.
+Failures report the key/result that could not be confirmed, without exporting screen text.
+Keys are spaced by 650 ms;
 each calculation has a two-second preparation and a 2.2-second result hold.
 
 Recognized package candidates include Samsung, Google/AOSP, Xiaomi, Huawei/HONOR,
@@ -117,6 +124,8 @@ and fitted demo status text are cached until geometry/text changes. No new islan
 blur, extra effect or design change is introduced. Actual FPS must still be measured
 on the user's device; a frame-clock change alone is not a hardware FPS guarantee.
 
-This Android-only beta.5 / code122 change does not deploy server code, database or
-production website. Keep beta.4 as a rollback/source reference; it retains the reported
-calculator/pacing issues and must not be described as device validated.
+The beta.6 / code123 operator follow-up does not deploy server code, database or production
+website. Its tests include hidden pending operators, current-operand displays for all 99
+choices, formatted formulas and rejected incorrect results. These are protocol fixtures,
+not physical Samsung validation. Keep prior APKs as immutable rollback/source references;
+beta.5 has a real-device report of stopping after multiplication in both calculator tricks.

@@ -204,7 +204,7 @@ internal object CortexFirstExperience {
             report(context, "Готово"); delay(900L)
             report(context, "Это сделал не ты."); delay(2_200L)
         } else {
-            skip(context, "Не удалось подтвердить результат в калькуляторе. Пропускаю этот фокус.")
+            skip(context, "${calculator.failure ?: "Не удалось распознать калькулятор."} Пропускаю этот фокус.")
             delay(FirstExperienceTempo.BEFORE_ACTION)
         }
         report(context, "А теперь немного магии с экраном."); delay(FirstExperienceTempo.BEFORE_ACTION)
@@ -230,7 +230,7 @@ internal object CortexFirstExperience {
             calculator.calculate(calculation)
         }
         if (!confirmed) {
-            skip(context, "Не удалось подтвердить вычисление. Прогноз не раскрыт.")
+            skip(context, "${calculator.failure ?: "Не удалось подтвердить вычисление."} Прогноз не раскрыт.")
             returnToApp(context); phase = "finish"; return
         }
         predictionDone = true

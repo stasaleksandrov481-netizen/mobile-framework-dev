@@ -26,8 +26,8 @@ internal object FirstExperienceMath {
     }
 
     private val spaces = Regex("\\s+")
-    private val displaySpaces = Regex("[\\s\\u00a0\\u202f\\u200e\\u200f\\u061c\\u2066-\\u2069]")
     private val integer = Regex("[+-]?[0-9]+(?:\\.0+)?")
+    private val binaryInput = Regex("[0-9]+[*/+\\-]([0-9]+)")
     private fun normalized(value: String) = value.trim().lowercase(Locale.ROOT).replace(spaces, " ")
 
     private val aliases = mapOf(
@@ -70,14 +70,28 @@ internal object FirstExperienceMath {
         "current_formula", "formuladisplay", "tv_expression")
     fun isExpression(resource: String) = resource.substringAfterLast('/').lowercase(Locale.ROOT) in expressions
 
-    fun expression(text: String) = text.replace(displaySpaces, "").replace('−', '-').replace('×', '*')
-        .replace('÷', '/').replace(',', '.')
+    /** OEM formulas may use a different multiplication glyph or invisible formatting spans. */
+    fun expression(text: String) = buildString {
+        for (symbol in text) {
+            if (symbol.isWhitespace() || Character.isSpaceChar(symbol) ||
+                Character.getType(symbol) == Character.FORMAT.toInt() || symbol in "\uFE0E\uFE0F") continue
+            append(when (symbol) {
+                '×', '✕', '✖', '∗', '⋅', '∙', '·', 'x', 'X', 'ｘ', 'Ｘ', '＊' -> '*'
+                '÷', '∕', '／' -> '/'
+                '−', '–', '—', '﹣', '－' -> '-'
+                '＋' -> '+'
+                ',' -> '.'
+                else -> symbol
+            })
+        }
+    }
+
+    fun rightOperand(text: String): Int? = binaryInput.matchEntire(expression(text))?.groupValues?.get(1)?.toIntOrNull()
 
     fun cleared(text: String) = expression(text).isBlank() || displayedInteger(text) == 0
 
     fun displayedInteger(text: String): Int? {
-        val value = text.replace(displaySpaces, "")
-            .removePrefix("=").replace('−', '-').replace(',', '.')
+        val value = expression(text).removePrefix("=")
         if (!integer.matches(value)) return null
         return runCatching { value.toBigDecimal().intValueExact() }.getOrNull()
     }
