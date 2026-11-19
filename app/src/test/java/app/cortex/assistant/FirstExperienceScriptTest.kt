@@ -105,6 +105,34 @@ class FirstExperienceScriptTest {
         assertEquals(listOf("8"), driver.entries.map { it.key })
     }
 
+    @Test fun `hidden clear key does not disqualify an otherwise complete OEM keypad`() {
+        val keys = FirstExperienceMath.keys.toSet() - "clear"
+        assertTrue(FirstExperienceCalculatorScript.Keypad(keys, keys).known)
+        assertFalse(FirstExperienceCalculatorScript.Keypad(keys - "=", keys - "=").known)
+    }
+
+    @Test fun `fast native brightness ramp is bounded monotonic and cancellable`() = runBlocking {
+        for ((start, target) in listOf(120 to 185, 230 to 100)) {
+            val writes = mutableListOf<Int>()
+            val pauses = mutableListOf<Long>()
+            assertTrue(FirstExperienceTempo.brightnessRampFast(start, target, { writes += it; true }, { pauses += it }))
+            assertEquals(24, pauses.size)
+            assertEquals(1_080L, pauses.sum())
+            assertEquals(target, writes.last())
+            assertTrue(writes.zipWithNext().all { (a, b) -> if (target > start) b >= a else b <= a })
+        }
+        var writes = 0
+        assertFalse(FirstExperienceTempo.brightnessRampFast(120, 190, { ++writes < 4 }, { }))
+        assertEquals(4, writes)
+        var ticks = 0
+        val error = runCatching {
+            FirstExperienceTempo.brightnessRampFast(120, 190, { true }, {
+                if (++ticks == 3) throw CancellationException("Stop")
+            })
+        }.exceptionOrNull()
+        assertTrue(error is CancellationException)
+    }
+
     @Test fun `brightness moves in sixty small monotonic steps over 2200ms each way`() = runBlocking {
         for ((start, target) in listOf(.35f to .57f, .85f to .63f)) {
             val values = mutableListOf<Float>()
