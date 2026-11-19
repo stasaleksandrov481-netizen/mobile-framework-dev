@@ -11,7 +11,9 @@ internal class FirstExperienceCalculatorScript(
         val operator get() = key in setOf("×", "÷", "+", "−")
     }
     data class Keypad(val identified: Set<String>, val enabled: Set<String>) {
-        val known get() = identified.containsAll(FirstExperienceMath.keys)
+        // OEM calculators often do not expose C/AC until a value is entered.
+        // A fully identified numeric/operator keypad is usable with a blank display.
+        val known get() = identified.containsAll(FirstExperienceMath.keys - "clear")
         fun canPress(key: String) = key in enabled
     }
     data class Display(val expressions: List<String>, val results: List<String>) {
