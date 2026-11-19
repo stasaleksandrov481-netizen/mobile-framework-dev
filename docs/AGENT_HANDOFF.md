@@ -1,5 +1,12 @@
 # Передача работы по Android CORTEX
 
+## 2026-11-19 UTC · beta.5 published, independent APK verification complete
+
+- PR #86 final head `5aa9e5f7335cd824e1f1df87783db43a33bcfff9` passed Android run `44492909734` (debug/release/JVM/lint), UI, CodeQL and handoff gates. Merged release source `531e6f3f7a8c10ad68454f56e6cad575df8d5ec5` has the exact validated tree `3e3094319f25aaf28bc016044a310cb19db98f85`. Main signed-release run `44493376972`, job `135454352349`, completed **SUCCESS**, including signing, publication and downloaded-release verification. Old-release removal was skipped.
+- Published prerelease `v1.0.18-beta.5`, release ID `451104408`, package `app.cortex.assistant`, code **122**. Public APK independently downloaded: **19,045,736 bytes**, SHA256 `d0e7a1e02407d763522c649a13fd65abb542c25ab7f94484a81776b2f65d64c8` matches GitHub digest and downloaded SHA256SUMS.txt. `apksigner verify` passed; permanent certificate `dbb16c019e7ea145c7600fe9e8411f7b929ba77c05d21fdaac91ca333631a274` independently matches beta.4. `aapt` verified package/version. All 25 WebView source files match; DEX includes the new calculator script, pacing and validated progress control in addition to the existing demo/lease/health classes.
+- Direct update: https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/download/v1.0.18-beta.5/CORTEX-1.0.18-beta.5.apk . This includes the integer-slider follow-up and all 10 new JVM regressions. No server, DB or website deployment; no new effect/design/island. This journal update changes documentation only and does not request another release. Never move the beta.5 tag to the documentation commit.
+- Next: install over beta.4 and replay Settings → «Повторить знакомство с CORTEX» on Samsung A23. Verify real digits/equality/results, number prompt after a failed first example, visible pacing, brightness return/Stop and border smoothness. **Physical beta.5 success and measured on-device FPS remain unverified**. Earlier beta.4 physical failure is retained above/below; do not turn CI success into an OEM compatibility claim. Previous immutable APKs remain rollback/source references.
+
 ## 2026-11-19 UTC · beta.5 choreography / calculator / brightness / island pacing
 
 - User physically tested beta.4 on Samsung A23: calculator opened and only C was tapped; first calculation and prediction were skipped, brightness jumped too quickly, active border looked low FPS. Screenshot confirms skipped calculator stages, not a successful complete demo. The beta.4 startup fix alone did not solve this.
