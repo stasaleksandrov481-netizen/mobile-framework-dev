@@ -102,14 +102,12 @@ class CortexScreenService : AccessibilityService() {
     internal fun homePackages(): Set<String> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val queried = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        val oemHomeActivities = mutableListOf<android.content.pm.ResolveInfo>()
-        // Some launchers are hidden from the normal intent query on vendor ROMs.
-        val chosen = runCatching { packageManager.getHomeActivities(oemHomeActivities) }.getOrNull()
-        return (queried + oemHomeActivities).filterNot {
+        // The resolved default Home can be visible even when an OEM hides
+        // some launchers from a general intent query.
+        val chosen = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        return (queried + listOfNotNull(chosen)).filterNot {
             it.activityInfo.name.substringAfterLast('.') == "FallbackHome"
-        }.mapTo(mutableSetOf()) { it.activityInfo.packageName }.apply {
-            chosen?.packageName?.let(::add)
-        }
+        }.mapTo(mutableSetOf()) { it.activityInfo.packageName }
     }
 
     internal fun frame(fresh: Boolean = false): VisualFrame? {
