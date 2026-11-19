@@ -843,10 +843,20 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     private suspend fun edit(task: Task, service: CortexScreenService, navigation: VisualNavigation, before: VisualFrame,
                              step: VisualStep, report: (String) -> Unit): StepOutcome {
-        val node = if (step.target.isBlank()) before.tree.firstOrNull { it.editable && it.enabled && it.focused }
-            ?: before.tree.filter { it.editable && it.enabled }.singleOrNull()
-        else before.target(step.target) { it.editable }
-        if (node == null) return StepOutcome(false, "Поле ввода не найдено. Уточните, куда ввести текст.")
+        fun editor(frame: VisualFrame): VisualNode? = if (step.target.isBlank()) {
+            frame.tree.firstOrNull { it.editable && it.enabled && it.focused }
+                ?: frame.tree.filter { it.editable && it.enabled }.singleOrNull()
+        } else frame.target(step.target) { it.editable }
+        var ready = before
+        if (editor(ready) == null && task.verified.lastOrNull()?.startsWith("OPEN:") == true) {
+            report("Жду поле ввода в приложении…")
+            navigation.await(6_000L) { current ->
+                current.pkg == before.pkg && current.window == before.window &&
+                    !current.secure && !current.hasPrivateFields && editor(current) != null
+            }?.let { ready = it }
+        }
+        val node = editor(ready)
+            ?: return StepOutcome(false, "Поле ввода не найдено. Уточните, куда ввести текст.")
         if (step.action == VisualAction.SUBMIT) {
             val risk = VisualSafety.risk(task.request, step, node.label, node.resource, node.role)
             if (risk == VisualRisk.MANUAL) return StepOutcome(false, "Проверьте ответы и сдайте работу самостоятельно.", stop = true)
@@ -858,15 +868,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 delay(400L)
             }
             report("Подтверждаю ввод…")
-            val ok = service.submit(before, node) && (if (step.expect.isNotBlank()) navigation.await { it.has(step.expect) }
-                else navigation.after(before)) != null
+            val ok = service.submit(ready, node) && (if (step.expect.isNotBlank()) navigation.await { it.has(step.expect) }
+                else navigation.after(ready)) != null
             return StepOutcome(ok, "Android не подтвердил ввод. Проверьте открытое приложение.", retry = risk == VisualRisk.NORMAL)
         }
         if (step.value.any { it.code < 32 && it != '\n' && it != '\t' }) {
             return StepOutcome(false, "Поле содержит недопустимые символы.")
         }
         report("Вставляю текст…")
-        val verified = navigation.writeText(before, step.value) { current ->
+        val verified = navigation.writeText(ready, step.value) { current ->
             current.tree.singleOrNull { it.editable && it.enabled && it.path == node.path &&
                 it.resource == node.resource && it.role == node.role }
         } != null
