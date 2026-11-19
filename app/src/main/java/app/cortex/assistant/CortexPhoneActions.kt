@@ -221,21 +221,20 @@ internal class CortexPhoneActions(private val context: Context) {
                 return status("done").put("level", audio.getStreamVolume(stream) * 100 / maximum)
             }
             "brightness" -> {
-                if (mode == "status") return status("done").put("level", (Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128) * 100 / 255))
-                if (!Settings.System.canWrite(context)) return status("needs_brightness")
+                if (mode != "status" && !Settings.System.canWrite(context)) return status("needs_brightness")
                 val resolver = context.contentResolver
-                val current = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128) * 100 / 255
-                val level = when (mode) { "set" -> command.optInt("level", current); "up" -> current + command.optInt("level", 10);
-                    "down" -> current - command.optInt("level", 10); else -> current }.coerceIn(1, 100)
-                val wanted = if (mode == "auto") Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC else Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-                if (!Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, wanted)) return status("unavailable")
-                if (mode !in listOf("auto", "manual") && !Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, level * 255 / 100)) {
-                    return status("unavailable")
+                val outcome = CortexBrightness.apply(object : CortexBrightness.Port {
+                    override fun brightness() = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+                        .takeIf { it >= 0 }
+                    override fun mode() = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
+                        .takeIf { it >= 0 }
+                    override fun writeBrightness(value: Int) = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, value)
+                    override fun writeMode(value: Int) = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, value)
+                }, mode, command.optInt("level", 10))
+                return status(outcome.status).apply {
+                    outcome.percent?.let { put("level", it) }
+                    outcome.automatic?.let { put("automatic", it) }
                 }
-                val actualMode = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, -1)
-                val actualLevel = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
-                return status(if (wanted == actualMode) "done" else "requested")
-                    .put("level", (actualLevel * 100 + 127) / 255).put("automatic", actualMode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
             }
             "rotate" -> {
                 if (!Settings.System.canWrite(context)) return status("needs_brightness")

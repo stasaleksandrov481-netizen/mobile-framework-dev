@@ -252,11 +252,11 @@ const CortexUI = (() => {
   }
 
   const accountModes = {
-    password: ["Войдите в CORTEX", "Продолжите с электронной почтой.", "Войти"],
-    signup: ["Создайте аккаунт", "Код подтверждения придёт на почту.", "Получить код"],
-    verify: ["Подтвердите почту", "Введите код из письма CORTEX.", "Подтвердить и войти"],
-    recover: ["Восстановите доступ", "Получите код для смены пароля.", "Получить код"],
-    reset: ["Задайте новый пароль", "Введите код из письма и новый пароль.", "Сменить пароль"]
+    password: ["Вход в CORTEX", "Введите почту и пароль.", "Войти"],
+    signup: ["Создать аккаунт", "Для регистрации потребуется подтвердить почту.", "Получить код"],
+    verify: ["Подтверждение почты", "Введите шестизначный код из письма.", "Подтвердить и войти"],
+    recover: ["Восстановление доступа", "Отправим код для смены пароля.", "Получить код"],
+    reset: ["Новый пароль", "Введите код из письма и задайте новый пароль.", "Сохранить пароль"]
   };
 
   function accountAvailability(connection, mode = "password") {
@@ -272,24 +272,28 @@ const CortexUI = (() => {
     const [title, description, submit] = accountModes[accountMode];
     const newPassword = accountMode === "signup" || accountMode === "reset";
     const code = accountMode === "verify" || accountMode === "reset";
+    const lockedEmail = code && Boolean(email);
+    const editEmailMode = accountMode === "reset" ? "recover" : "signup";
     const password = (name, caption) => `<label class="field"><span>${caption}</span><span class="account-password">
       <input name="${name}" type="password" required maxlength="72" ${newPassword ? 'minlength="10" autocomplete="new-password"' : 'autocomplete="current-password"'}>
-      ${iconButton("eye", "Показать пароль", "password-visibility")}</span></label>`;
+      ${iconButton("eye", "Показать пароль", "password-visibility", "", "account-show-password")}</span></label>`;
     return `<header class="section-header account-top">${M.state.account ? iconButton("back", "К профилю", "back", "", "section-back") : ""}
-      <span class="brand">${sign}<span>CORTEX</span></span></header>
+      <span class="brand">CORTEX</span></header>
       <div class="scroll account-scroll"><div class="account-page">
-        <div class="account-hero"><div class="account-art glass-card" aria-hidden="true">${sign}<i></i><i></i></div>
+        <div class="account-hero"><span class="account-mark" aria-hidden="true">${sign}</span>
           <section class="account-heading"><h1>${title}</h1><p>${description}</p></section></div>
         ${["password", "signup"].includes(accountMode) ? `<div class="account-tabs" aria-label="Способ входа">
           ${pill("Вход", "email-auth", "password", accountMode === "password")}${pill("Регистрация", "email-auth", "signup", accountMode === "signup")}</div>` : ""}
         <form id="account-form" class="account-fields" data-mode="${accountMode}">
           ${accountMode === "signup" ? '<label class="field"><span>Имя</span><input name="name" type="text" autocomplete="name" maxlength="100" placeholder="По желанию"></label>' : ""}
           <label class="field"><span>Электронная почта</span><input name="email" type="email" maxlength="254" required autocomplete="email"
-            placeholder="name@example.com" value="${esc(email)}" autocapitalize="none" spellcheck="false"></label>
+            placeholder="name@example.com" value="${esc(email)}" autocapitalize="none" spellcheck="false" ${lockedEmail ? "readonly" : ""}></label>
+          ${lockedEmail ? `<div class="account-email-edit"><span>Не та почта?</span>
+            ${button("Изменить", "", "email-auth", editEmailMode, "quiet")}</div>` : ""}
           ${code ? `<label class="field account-code-field"><span>Шестизначный код из письма</span>
             <span class="account-code" data-account-code>
               <input name="code" class="account-code-input" type="text" inputmode="numeric" required
-                aria-label="Шестизначный код подтверждения" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6">
+                aria-label="Шестизначный код подтверждения" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" enterkeyhint="done" spellcheck="false">
               ${Array.from({ length: 6 }, (_, index) => `<span class="account-code-cell" aria-hidden="true" data-code-cell="${index}"></span>`).join("")}
             </span></label>
             <div class="account-resend">
@@ -298,14 +302,14 @@ const CortexUI = (() => {
                 data-resend-button>${resendWait > 0 ? `Повторить через ${resendWait} с` : "Отправить код ещё раз"}</button>
             </div>` : ""}
           ${accountMode === "password" || newPassword ? password("password", newPassword ? "Новый пароль" : "Пароль") : ""}
-          ${newPassword ? password("confirmation", "Повторите пароль") + '<small class="muted">Минимум 10 символов.</small>' : ""}
+          ${newPassword ? password("confirmation", "Повторите пароль") + '<small class="account-password-hint">Не менее 10 символов.</small>' : ""}
           <p class="account-availability" data-auth-status role="status" ${accountAvailability(connection, accountMode) ? "" : "hidden"}>${accountAvailability(connection, accountMode)}</p>
           <p class="form-error" role="alert" hidden></p>
-          <button class="action primary account-submit" type="submit"><span>${submit}</span>${icon("chevron", 18)}</button>
+          <button class="action primary account-submit" type="submit"><span>${submit}</span></button>
           ${accountMode === "password" ? `<div class="account-links">${button("Забыли пароль?", "", "email-auth", "recover", "quiet")}
             ${button("Подтвердить почту", "", "email-auth", "verify", "quiet")}</div>` : ""}
         </form>
-        ${!["password", "signup"].includes(accountMode) ? button("Вернуться ко входу", "back", "email-auth", "password", "quiet") : ""}
+        ${!["password", "signup"].includes(accountMode) ? `<div class="account-return">${button("Вернуться ко входу", "", "email-auth", "password", "quiet")}</div>` : ""}
       </div></div>`;
   }
   function settings() {

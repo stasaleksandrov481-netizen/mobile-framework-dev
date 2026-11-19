@@ -1002,23 +1002,24 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             .put(JSONObject().put("role", "user").put("content", user.toString()))
         val payload = JSONObject().put("messages", messages).put("style", "brief")
             .put("profile", if (task.profile == "deep") "deep" else "fast").put("visual_plan", true)
-        // Planning is read-only. A short network interruption must not discard
-        // a verified multi-step task. Only retry transient failures, never
-        // provider quotas, authorization, or malformed plans.
+        // Planning is read-only. Retry only a transient transport/server error;
+        // quota, authorization and malformed plans are not safe to retry.
         var result: JSONObject? = null
-        // A frozen provider must not hold the island for nearly a minute per attempt.
-        // The server already tries one tool-compatible model and a structured fallback.
-        // Avoid duplicating the request in the app and exhausting the shared free quota.
         val planTimeout = 22_000L
-        result = withTimeoutOrNull<JSONObject>(planTimeout) {
-            var id: String? = null
-            try {
-                suspendCancellableCoroutine { pending ->
-                    id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
+        for (attempt in 0..1) {
+            result = withTimeoutOrNull<JSONObject>(planTimeout) {
+                var id: String? = null
+                try {
+                    suspendCancellableCoroutine { pending ->
+                        id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
+                    }
+                } finally {
+                    id?.let(gateway::cancel)
                 }
-            } finally {
-                id?.let(gateway::cancel)
             }
+            if (!(result == null || result.optString("error") in RETRYABLE_PLAN_ERRORS) || attempt == 1) break
+            report("Связь с ИИ прервалась. Повторяю запрос…")
+            delay(350L)
         }
         val outcome = result ?: return null to "ИИ не ответил вовремя. Можно продолжить с текущего экрана."
         val error = outcome.optString("error")

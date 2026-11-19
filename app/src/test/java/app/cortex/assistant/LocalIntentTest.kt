@@ -97,6 +97,20 @@ class LocalIntentTest {
         assertEquals(15, brightness.getInt("level"))
         assertNull(CortexLocalCommands.parse("Как открыть настройки телефона?", resolve))
     }
+
+    @Test fun addressedAiRequestsWithDirectDeviceIntentStayLocalAndQuestionsStayInChat() {
+        fun step(text: String) = requireNotNull(CortexLocalCommands.parse(text) { null }).single()
+        assertEquals("up", step("Пожалуйста, Кортекс, сделай чуть ярче").getString("mode"))
+        assertEquals("down", step("Кортекс, сделай экран немного темнее").getString("mode"))
+        assertEquals("up", step("Бро, Кортекс, прибавь яркости на 20 процентов").getString("mode"))
+        assertEquals(20, step("Бро, Кортекс, прибавь яркости на 20 процентов").getInt("level"))
+        assertEquals("down", step("Кортекс, уменьши яркость на 15%").getString("mode"))
+        assertEquals("set", step("Кортекс, поставь яркость 70 процентов").getString("mode"))
+        assertEquals(70, step("Кортекс, поставь яркость 70 процентов").getInt("level"))
+        assertNull(CortexLocalCommands.parse("Кортекс, расскажи как сделать экран ярче") { null })
+        assertNull(CortexLocalCommands.parse("Пожалуйста, Кортекс, как уменьшить яркость?") { null })
+        assertNull(CortexLocalCommands.parse("Я хочу узнать почему экран темный") { null })
+    }
     @Test fun localDiagnosticsAndSettingsUseTypedAndroidActions() {
         fun step(text: String) = requireNotNull(CortexLocalCommands.parse(text) { null }).single()
         assertEquals("display", step("Кортекс, открой настройки и раздел «Дисплей»").getString("target"))

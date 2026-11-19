@@ -37,8 +37,11 @@ jobs:
           source_prefixes = ("app/", "cortex-web/", "cortex-control/", "supabase/",
                              "qa/", "tools/", ".github/workflows/")
           source_changes = [name for name in changed if name.startswith(source_prefixes)]
-          if source_changes and "docs/AGENT_HANDOFF.md" not in changed:
-              print("::error::Runtime changes require an entry in docs/AGENT_HANDOFF.md")
+          # Release notes for public CI must never require uploading an entire
+          # private operational journal. Keep the documentation gate strict:
+          # runtime changes still need a changed, reviewable public handoff.
+          if source_changes and "docs/PUBLIC_HANDOFF.md" not in changed:
+              print("::error::Runtime changes require an entry in docs/PUBLIC_HANDOFF.md")
               print("Changed paths:", ", ".join(sorted(source_changes)[:20]))
               sys.exit(1)
           if any(name.startswith("supabase/functions/cortex/") for name in changed):
