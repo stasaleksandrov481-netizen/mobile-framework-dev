@@ -740,6 +740,20 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                                  frame: VisualFrame, step: VisualStep, report: (String) -> Unit): StepOutcome {
         var before = frame
         var node = findTarget(before, step.target)
+        if (node == null && !step.target.startsWith('#') &&
+            task.verified.lastOrNull()?.startsWith("OPEN:") == true) {
+            // The launched app may still be drawing its first interactive screen.
+            // Wait for the requested control before attempting to scroll a splash page.
+            report("Жду загрузки элемента «${step.target}»…")
+            val ready = navigation.await(6_000L) { current ->
+                current.pkg == before.pkg && current.window == before.window &&
+                    !current.secure && !current.hasPrivateFields && findTarget(current, step.target) != null
+            }
+            if (ready != null) {
+                before = ready
+                node = findTarget(ready, step.target)
+            }
+        }
         if (node == null && step.target.startsWith('#')) {
             return StepOutcome(false, "Элемент из плана больше не виден. Сверяю текущий экран.")
         }
