@@ -18,6 +18,8 @@ internal class FirstExperienceCalculator(
     private var indexedFrame: VisualFrame? = null
     private var indexedKeys = emptyMap<String, VisualNode>()
     private var indexedKeypad = FirstExperienceCalculatorScript.Keypad(emptySet(), emptySet())
+    var failure: String? = null
+        private set
     private val script = FirstExperienceCalculatorScript(object : FirstExperienceCalculatorScript.Driver {
         override suspend fun clear() = clearScreen()
         override suspend fun press(entry: FirstExperienceCalculatorScript.Entry) = pressAndConfirm(entry)
@@ -33,6 +35,7 @@ internal class FirstExperienceCalculator(
     }
 
     suspend fun open(): Boolean {
+        failure = null
         val calculator = app ?: resolve()?.also { app = it } ?: return false
         // Fixed local launch sequence. Resolve the installed app, show the real Home,
         // then launch that exact package rather than racing a launcher search UI.
@@ -72,8 +75,14 @@ internal class FirstExperienceCalculator(
     }
 
     // OEM calculators legitimately disable = or C after clearing. That is not an unknown layout.
-    private fun ready(frame: VisualFrame) = frame.pkg == app?.pkg && !frame.secure && !frame.hasPrivateFields &&
-        controls(frame).let { indexedKeypad.known } && frame.tree.any { FirstExperienceMath.isDisplay(it.resource) }
+    private fun safeFrame(frame: VisualFrame) = frame.pkg == app?.pkg && !frame.secure && !frame.hasPrivateFields &&
+        frame.tree.any { FirstExperienceMath.isDisplay(it.resource) }
+
+    private fun ready(frame: VisualFrame): Boolean {
+        if (!safeFrame(frame)) return false
+        controls(frame)
+        return indexedKeypad.known
+    }
 
     private fun expressions(frame: VisualFrame): List<String> = frame.tree.filter {
         FirstExperienceMath.isDisplay(it.resource) && (it.editable || FirstExperienceMath.isExpression(it.resource))
@@ -90,8 +99,14 @@ internal class FirstExperienceCalculator(
     }
 
     private fun matches(frame: VisualFrame, entry: FirstExperienceCalculatorScript.Entry): Boolean {
-        if (!ready(frame)) return false
+        if (!safeFrame(frame)) return false
         return FirstExperienceCalculatorScript.Display(expressions(frame), results(frame)).matches(entry)
+    }
+
+    private fun failed(entry: FirstExperienceCalculatorScript.Entry): Boolean {
+        failure = if (entry.key == "=") "Калькулятор не подтвердил результат ${entry.result} после «=»."
+            else "Калькулятор не подтвердил ввод «${entry.key}»."
+        return false
     }
 
     private suspend fun clearScreen(): Boolean {
@@ -106,11 +121,18 @@ internal class FirstExperienceCalculator(
 
     private suspend fun pressAndConfirm(entry: FirstExperienceCalculatorScript.Entry): Boolean {
         repeat(2) { attempt ->
-            val frame = navigation.await(3_000L) { ready(it) && button(it, entry.key) != null } ?: return false
-            val target = button(frame, entry.key) ?: return false
+            val frame = navigation.await(3_000L) { safeFrame(it) && button(it, entry.key) != null } ?: return failed(entry)
+            val target = button(frame, entry.key) ?: return failed(entry)
             val tapped = service.tap(frame, target)
             // Refresh after the gesture instead of declaring failure during a transient OEM layout update.
             if (tapped) {
+                if (entry.operator) {
+                    // The real, identified operator was tapped. An OEM may retain only the left
+                    // operand or render an operator span differently. Do not wait for literal N×,
+                    // and never tap it twice. The next operand and = result remain mandatory.
+                    delay(120L)
+                    return if (navigation.await(1_500L, ::safeFrame) != null) true else failed(entry)
+                }
                 var consecutive = 0
                 val confirmed = navigation.await(3_000L) { current ->
                     consecutive = if (matches(current, entry)) consecutive + 1 else 0
@@ -118,20 +140,20 @@ internal class FirstExperienceCalculator(
                 } != null
                 if (confirmed) return true
             }
-            if (attempt == 1 || entry.key == "=") return false
-            val current = service.frame(fresh = true)?.takeIf(::ready) ?: return false
+            if (attempt == 1 || entry.key == "=" || entry.operator) return failed(entry)
+            val current = service.frame(fresh = true)?.takeIf(::safeFrame) ?: return failed(entry)
             val unchanged = if (entry.before.isEmpty()) cleared(current) else expressions(current).any {
                 FirstExperienceMath.expression(it) == FirstExperienceMath.expression(entry.before)
             }
             // Retry once only when the old expression is positively still on screen.
             // Never repeat a key blindly or double an already entered digit/operator.
-            if (!unchanged) return false
+            if (!unchanged) return failed(entry)
             delay(FirstExperienceTempo.KEY)
         }
-        return false
+        return failed(entry)
     }
 
-    suspend fun clear() = script.clear()
+    suspend fun clear() = script.clear().also { if (!it) failure = "Калькулятор не подтвердил очистку поля ввода." }
     suspend fun calculate(step: FirstExperienceMath.Calculation) = script.calculate(step)
 
     private companion object {
