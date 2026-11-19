@@ -99,19 +99,23 @@ internal class ConversationNavigation(
         fun valid(frame: VisualFrame) = usable(frame, initial.pkg) && frame.window == initial.window &&
             search.field(frame)?.let { screen.fieldMatches(frame, it, query) } == true
         val native = navigation.await(4_500L) {
-            valid(it) && candidate(it, recipient, search.field(it), allowOcr = false) != null
+            valid(it) && candidate(it, recipient, search.field(it), allowOcr = false)?.score == 100
         }
         if (native != null) return native to requireNotNull(candidate(native, recipient, search.field(native), allowOcr = false))
-        // Custom-drawn result rows may expose no title through accessibility.
+        // Prefer a visually verified exact title over an accessible prefix-only row.
         repeat(2) {
             val current = screen.frame(fresh = true)?.takeIf(::valid) ?: return null
             val words = screen.recognize(current)
             if (words.protected) return null
             val enriched = current.copy(nodes = current.nodes + words.nodes)
-            candidate(enriched, recipient, search.field(enriched), allowOcr = true)?.let { return enriched to it }
+            candidate(enriched, recipient, search.field(enriched), allowOcr = true)
+                ?.takeIf { it.score == 100 }?.let { return enriched to it }
             if (it == 0) navigation.await(1_600L) { valid(it) && it.structure() != current.structure() }
         }
-        return null
+        // Partial names remain possible only when there is a single distinct
+        // candidate; the chat header and explicit send confirmation still apply.
+        val current = screen.frame(fresh = true)?.takeIf(::valid) ?: return null
+        return candidate(current, recipient, search.field(current), allowOcr = false)?.let { current to it }
     }
 
     private fun candidate(frame: VisualFrame, name: String, field: VisualNode?, allowOcr: Boolean): Candidate? {
