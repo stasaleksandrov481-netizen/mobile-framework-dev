@@ -107,7 +107,7 @@ internal class FirstExperienceCalculator(
             val resource = node.resource.substringAfterLast('/').lowercase()
             val text = service.localText(frame, node).orEmpty()
             val numeric = text.isBlank() || FirstExperienceReadback.integer(text) != null ||
-                FirstExperienceMath.expression(text).matches(Regex("""[0-9.+*/-]{1,40}"""))
+                FirstExperienceMath.formula(text).matches(Regex("""[0-9.+*/-]{1,40}"""))
             !node.clickable && !node.scrollable &&
                 (node.role in setOf("TextView", "EditText", "TextInputEditText") ||
                     node.role.endsWith("TextView") || node.role.endsWith("Display")) &&
