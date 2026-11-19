@@ -1,6 +1,7 @@
 package app.cortex.assistant
 
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /** Deliberate, local presentation timing. Every pause remains cancellable. */
 internal object FirstExperienceTempo {
@@ -9,6 +10,12 @@ internal object FirstExperienceTempo {
     const val RESULT = 2_200L
     const val SEALED = 2_400L
     const val BRIGHTNESS = 2_200L
+
+    /** An unchanged integer SeekBar value is already acknowledged, not an action failure. */
+    fun setProgress(current: Float, wanted: Float, integral: Boolean, write: (Float) -> Boolean): Boolean {
+        val value = if (integral) wanted.roundToInt().toFloat() else wanted
+        return current == value || write(value)
+    }
 
     suspend fun brightnessRamp(start: Float, target: Float, write: (Float) -> Boolean,
                               pause: suspend (Long) -> Unit = { delay(it) }): Boolean {

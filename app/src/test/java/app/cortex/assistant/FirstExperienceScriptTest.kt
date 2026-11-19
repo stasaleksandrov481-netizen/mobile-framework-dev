@@ -133,4 +133,20 @@ class FirstExperienceScriptTest {
         assertTrue(error is CancellationException)
         assertEquals(3, writes)
     }
+
+    @Test fun `small eased steps do not fail when an integer SeekBar is already at that value`() = runBlocking {
+        var actual = 35f
+        var actions = 0
+        val completed = FirstExperienceTempo.brightnessRamp(.35f, .57f, { fraction ->
+            FirstExperienceTempo.setProgress(actual, fraction * 100f, integral = true) { value ->
+                actions++
+                // Android may return false if an ACTION_SET_PROGRESS changes nothing.
+                if (actual == value) false else { actual = value; true }
+            }
+        }, { })
+        assertTrue(completed)
+        assertEquals(57f, actual, 0f)
+        assertEquals(22, actions)
+        assertFalse(FirstExperienceTempo.setProgress(35f, 36f, true) { false })
+    }
 }

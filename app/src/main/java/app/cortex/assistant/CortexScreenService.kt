@@ -218,9 +218,13 @@ class CortexScreenService : AccessibilityService() {
                         current.viewIdResourceName == node.resource && bounds == node.bounds &&
                         current.className?.toString()?.substringAfterLast('.') == node.role &&
                         range.min == expectedRange.min && range.max == expectedRange.max && value in range.min..range.max &&
-                        current.supports(action) && current.performAction(action, Bundle().apply {
-                            putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, value)
-                        })
+                        range.current.isFinite() && range.current in range.min..range.max && current.supports(action) &&
+                        FirstExperienceTempo.setProgress(range.current, value,
+                            range.type == AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_INT) { wanted ->
+                            wanted in range.min..range.max && current.performAction(action, Bundle().apply {
+                                putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, wanted)
+                            })
+                        }
                 }.getOrDefault(false)
             }
             override fun close() { if (!closed) { closed = true; current.recycle() } }
