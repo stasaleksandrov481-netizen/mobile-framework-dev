@@ -10,7 +10,7 @@ const app = document.querySelector("#app");
 const feedback = document.querySelector("#feedback");
 const redirectTo = "https://cortex-control-phi.vercel.app/";
 const labels = {
-  overview: "Обзор", support: "Обращения", updates: "Версии", maintenance: "Техработы",
+  overview: "Обзор", site: "Сайт", support: "Обращения", updates: "Версии", maintenance: "Техработы",
   roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
@@ -154,7 +154,7 @@ async function initialize() {
 
 function allowedTabs() {
   if (role === "owner") return Object.keys(labels);
-  if (role === "admin") return ["overview", "support", "updates", "maintenance", "quota", "billing", "audit"];
+  if (role === "admin") return ["overview", "site", "support", "updates", "maintenance", "quota", "billing", "audit"];
   return ["overview", "support"];
 }
 
@@ -222,6 +222,40 @@ async function overview() {
     'старые записи не выдаются за достоверную статистику.</p>' +
     card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>') +
     card("Кто открыл CORTEX сегодня", dailyList);
+}
+
+async function site() {
+  // Aggregates only. The RPC checks the admin role, MFA and live auth session;
+  // raw preregistration emails and user IDs must never reach the dashboard.
+  const stats = data(await db.rpc("cortex_admin_site_metrics"));
+  const summaries = [
+    ["Подтверждённые предрегистрации", stats.total],
+    ["Новые сегодня", stats.today],
+    ["За последние 24 часа", stats.last_24h],
+    ["Подписались на уведомления", stats.notifications]
+  ];
+  const summary = summaries.map(([label, value]) => '<section class="metric-card"><span class="metric-label">' +
+    escape(label) + '</span><strong class="count">' + dateNumber(value) + '</strong></section>').join("");
+  const days = Array.isArray(stats.daily) ? stats.daily : [];
+  const maximum = Math.max(1, ...days.map(item => Math.max(0, Number(item.count) || 0)));
+  const trend = days.map(item => {
+    const count = Math.max(0, Number(item.count) || 0);
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(item.day) ? item.day.split("-").reverse().slice(0, 2).join(".") : "—";
+    return '<li><span>' + escape(day) + '</span><meter min="0" max="' + maximum + '" value="' +
+      Math.min(count, maximum) + '" aria-label="Регистрации ' + escape(day) + '"></meter><strong>' +
+      dateNumber(count) + '</strong></li>';
+  }).join("");
+  const links = '<div class="actions site-actions"><a href="https://cortexapp.ru/" target="_blank" rel="noopener noreferrer">Открыть сайт</a>' +
+    '<a href="https://cortexapp.ru/api/status" target="_blank" rel="noopener noreferrer">Проверить статус сайта</a></div>';
+  return '<div class="dashboard-intro"><div><span class="overline">CORTEX / WEB</span>' +
+    '<h2>Сайт cortexapp.ru</h2><p>Подтверждённые регистрации, аналитика и состояние сайта.</p></div></div>' +
+    '<div class="metrics-grid">' + summary + '</div>' +
+    card("Регистрации за последние 7 дней", trend ? '<ul class="site-trend">' + trend + '</ul>' :
+      '<p>Пока нет данных за период.</p>') +
+    card("Посещения сайта", '<p>Счётчик уникальных посетителей пока не подключён. Здесь показаны только подтверждённые ' +
+      'регистрации. Просмотры страниц и конверсию без отдельного сбора событий достоверно рассчитать нельзя.</p>') +
+    card("Инструменты сайта", links + '<p class="muted">Статистика регистрации обновляется по кнопке «Обновить». ' +
+      'Доступна только владельцу и администратору после MFA.</p>');
 }
 
 async function support() {
@@ -401,7 +435,7 @@ async function subscriptions() {
     card("Подписчики и платежи", entries ? '<ul class="record-list">' + entries + '</ul>' : '<p>Записей пока нет.</p>');
 }
 
-const views = { overview, support, maintenance, updates, roles: access, quota: quotas, billing: subscriptions, audit };
+const views = { overview, site, support, maintenance, updates, roles: access, quota: quotas, billing: subscriptions, audit };
 
 async function saveConfig(values) {
   data(await db.from("cortex_control_config").update({ ...values, updated_at: new Date().toISOString() })
