@@ -9,6 +9,7 @@ const invoice = (BigInt("0x" + id.replaceAll("-", "").slice(0, 15)) + 1n).toStri
 const sum = "399.00";
 const env = {
   SUPABASE_URL: "https://db.example", SUPABASE_SERVICE_ROLE_KEY: "server",
+  SUPABASE_PUBLISHABLE_KEY: "public",
   ROBOKASSA_MERCHANT_LOGIN: "cortex-test", ROBOKASSA_PASSWORD_1: "first",
   ROBOKASSA_PASSWORD_2: "second", ROBOKASSA_LIVE_APPROVED: "true",
   CORTEX_BILLING_TOKEN: "edge", CORTEX_BILLING_TEST_KEY: "sandbox"
