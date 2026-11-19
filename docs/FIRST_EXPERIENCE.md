@@ -140,7 +140,11 @@ and fitted demo status text are cached until geometry/text changes. No new islan
 blur, extra effect or design change is introduced. Actual FPS must still be measured
 on the user's device; a frame-clock change alone is not a hardware FPS guarantee.
 
-The beta.7 / code124 audit does not deploy server code, database or production website.
-Keep prior APKs as immutable source references; beta.6 still has a real-device report of
-failed confirmation after multiplication. Native fixture testing remains distinct from
-physical Samsung validation. Do not publish the beta.7 candidate before its device workflow passes.
+Beta.7 / code124 was published from `b14532caf3d08051a3d7432dd401b60c9205ed96` after
+device workflow `44523659186` passed all 8 tests and the final Android/JVM/lint/UI/security
+checks passed. Signed-release workflow `44524652691` succeeded; the independently downloaded
+APK's checksum, permanent certificate, source tag, package/version and 25 WebView assets agree.
+The separate QA fixture is absent from the release APK. See `RELEASE_INVENTORY.md` for the hash.
+The audit does not deploy server code, database or production website. Prior APKs remain
+immutable source references; beta.6 still has a real-device report of failed confirmation
+after multiplication. Native fixture testing remains distinct from physical Samsung/FPS validation.
