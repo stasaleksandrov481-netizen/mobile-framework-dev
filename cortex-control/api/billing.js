@@ -1,14 +1,30 @@
-import { timingSafeEqual, randomUUID } from "node:crypto";
+import { timingSafeEqual, randomUUID, createHash } from "node:crypto";
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const subjectPattern = /^(?:yandex_[A-Za-z0-9_-]{43}|[a-f0-9-]{36})$/;
 const paymentEmail = /^[^\s@<>(),:;\\"]+@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu;
 const plans = new Set(["start", "pro", "ultra"]);
-const paymentStates = {
-  PENDING: "pending", CONFIRMED: "confirmed", CHARGEBACKED: "refunded", CANCELED: "canceled",
-  EXPIRED: "canceled", FAILED: "canceled"
-};
-const providerHost = "https://app.platega.io";
+const checkoutHost = "https://auth.robokassa.ru";
+
+function invoiceId(id) {
+  return (BigInt("0x" + id.replaceAll("-", "").slice(0, 15)) + 1n).toString();
+}
+
+function amountInKopecks(value) {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,9})\.[0-9]{2}(?:0{0,4})$/.test(value)) return -1;
+  const [rubles, fractional] = value.split(".");
+  const kopecks = BigInt(rubles) * 100n + BigInt(fractional.slice(0, 2));
+  return kopecks <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(kopecks) : -1;
+}
+
+function formBody(req) {
+  if (Number(req.headers["content-length"] || 0) > 8192) throw new BillingError(400, "invalid");
+  const value = typeof req.body === "string" ? Object.fromEntries(new URLSearchParams(req.body)) : req.body;
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(value).length > 8192) {
+    throw new BillingError(400, "invalid");
+  }
+  return value;
+}
 
 class BillingError extends Error {
   constructor(status, code) {
@@ -37,7 +53,7 @@ function jsonObject(req) {
 function httpsUrl(value, checkHost = false) {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || (checkHost && !/^(?:[a-z0-9-]+\.)*platega\.io$/.test(url.hostname))) return null;
+    if (url.protocol !== "https:" || url.username || url.password || (checkHost && url.origin !== checkoutHost)) return null;
     return url.href;
   } catch {
     return null;
@@ -52,13 +68,20 @@ function kopecks(value) {
 
 export function createBillingHandler(env = process.env, network = fetch) {
   const mode = env.CORTEX_BILLING_MODE;
-  const merchant = env.PLATEGA_MERCHANT_ID;
-  const secret = env.PLATEGA_SECRET;
-  const returnUrl = httpsUrl(env.PLATEGA_RETURN_URL);
+  const merchant = env.ROBOKASSA_MERCHANT_LOGIN?.trim();
+  const password1 = env.ROBOKASSA_PASSWORD_1;
+  const password2 = env.ROBOKASSA_PASSWORD_2;
+  const hashAlgorithm = (env.ROBOKASSA_HASH_ALGORITHM || "md5").toLowerCase();
   const dbOrigin = httpsUrl(env.SUPABASE_URL);
   const dbKey = env.SUPABASE_SERVICE_ROLE_KEY;
   const gatewaySecret = env.CORTEX_BILLING_TOKEN;
-  const liveReady = mode === "live" && uuid.test(merchant || "") && Boolean(secret && returnUrl);
+  const liveReady = mode === "live" && /^[A-Za-z0-9_.-]{1,128}$/.test(merchant || "") &&
+    Boolean(password1 && password2) && ["md5", "sha256"].includes(hashAlgorithm) &&
+    env.ROBOKASSA_LIVE_APPROVED === "true";
+
+  function digest(value) {
+    return createHash(hashAlgorithm).update(value, "utf8").digest("hex");
+  }
 
   async function database(path, payload, accessToken) {
     const headers = {
@@ -76,19 +99,6 @@ export function createBillingHandler(env = process.env, network = fetch) {
       throw new BillingError(accessToken ? 403 : 503, accessToken ? "forbidden" : "billing_unavailable");
     }
     return response.json();
-  }
-
-  async function provider(path, method = "GET", payload) {
-    const response = await network(providerHost + path, {
-      method, headers: { "X-MerchantId": merchant, "X-Secret": secret, "Content-Type": "application/json" },
-      body: payload ? JSON.stringify(payload) : undefined, redirect: "error", signal: AbortSignal.timeout(7000)
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new BillingError(502, "payment_provider");
-    }
-    const text = await response.text();
-    return text ? JSON.parse(text) : {};
   }
 
   function record(order, providerId, state, url) {
@@ -111,26 +121,23 @@ export function createBillingHandler(env = process.env, network = fetch) {
       test: order.mode === "test" };
   }
 
-  async function sync(providerId, order) {
-    if (!uuid.test(providerId || "")) throw new BillingError(400, "invalid");
-    const transaction = await provider("/transaction/" + providerId);
-    if (transaction.id !== providerId || (transaction.merchantId || transaction.mechantId) &&
-        (transaction.merchantId || transaction.mechantId) !== merchant) {
+  async function confirmCallback(req) {
+    const data = formBody(req);
+    const { OutSum: amount, InvId: invoice, SignatureValue: signature, Shp_order: id } = data;
+    if (!uuid.test(id || "") || typeof invoice !== "string" || !/^[1-9][0-9]{0,18}$/.test(invoice) ||
+        typeof signature !== "string" || !/^[a-f0-9]{32,64}$/i.test(signature) ||
+        amountInKopecks(amount) < 1) throw new BillingError(400, "invalid");
+    const expected = digest([amount, invoice, password2, "Shp_order=" + id].join(":"));
+    if (!matches(signature.toLowerCase(), expected)) throw new BillingError(401, "forbidden");
+    if (invoiceId(id) !== invoice) throw new BillingError(409, "payment_mismatch");
+    const order = await lookup(id, "live");
+    if (!order || order.mode !== "live" || order.amount !== amountInKopecks(amount) ||
+        (order.provider_id && order.provider_id !== id)) {
       throw new BillingError(409, "payment_mismatch");
     }
-    const payload = transaction.payload;
-    if (typeof payload !== "string" || !payload.startsWith("cortex:")) throw new BillingError(409, "payment_mismatch");
-    const orderId = payload.slice(7);
-    const original = order || await lookup(orderId, "live");
-    if (!original || original.id !== orderId || (original.provider_id && original.provider_id !== providerId) ||
-        transaction.paymentDetails?.currency !== "RUB" || kopecks(transaction.paymentDetails?.amount) !== original.amount) {
-      throw new BillingError(409, "payment_mismatch");
-    }
-    const state = paymentStates[transaction.status];
-    if (!state) return original;
-    const saved = await record(original, providerId, state);
-    if (!saved) throw new BillingError(409, "payment_mismatch");
-    return saved;
+    const saved = await record(order, id, "confirmed");
+    if (!saved || saved.state !== "confirmed") throw new BillingError(409, "payment_mismatch");
+    return invoice;
   }
 
   async function checkout(input) {
@@ -141,10 +148,6 @@ export function createBillingHandler(env = process.env, network = fetch) {
         email.indexOf("@") > 64 || email.startsWith(".") || email.includes("..") || email.includes(".@")) {
       throw new BillingError(400, "invalid_email");
     }
-    const method = Number(env.PLATEGA_PAYMENT_METHOD || 2);
-    if (mode === "live" && (!Number.isInteger(method) || method < 1)) {
-      throw new BillingError(503, "payments_disabled");
-    }
     const order = await database("rpc/cortex_billing_order", {
       p_subject: input.subject, p_plan: input.plan, p_mode: mode
     });
@@ -153,19 +156,25 @@ export function createBillingHandler(env = process.env, network = fetch) {
     if (order.existing) {
       if (order.plan !== input.plan) throw new BillingError(409, "payment_pending");
       if (order.state === "creating") throw new BillingError(409, "payment_creating");
-      return present(mode === "live" ? await sync(order.provider_id, order) : order);
+      return present(order);
     }
     if (mode === "test") {
       return present(await record(order, randomUUID(), "pending"));
     }
-    const response = await provider("/transaction/process", "POST", {
-      paymentMethod: method, paymentDetails: { amount: order.amount / 100, currency: "RUB" },
-      description: "CORTEX " + order.plan, return: returnUrl, failedUrl: returnUrl, payload: "cortex:" + order.id,
-      metadata: { user_email: email }
-    });
-    const url = httpsUrl(response.redirect, true);
-    if (!uuid.test(response.transactionId || "") || !url) throw new BillingError(502, "payment_provider");
-    const saved = await record(order, response.transactionId, "pending", url);
+    const sum = (order.amount / 100).toFixed(2);
+    const invoice = invoiceId(order.id);
+    const signature = digest([merchant, sum, invoice, password1, "Shp_order=" + order.id].join(":"));
+    const paymentUrl = new URL("/Merchant/Index.aspx", checkoutHost);
+    paymentUrl.search = new URLSearchParams({
+      MerchantLogin: merchant, OutSum: sum, InvId: invoice,
+      Description: "CORTEX " + order.plan + " subscription for one month",
+      Email: email, Culture: "ru", Shp_order: order.id, SignatureValue: signature
+    }).toString();
+    const url = httpsUrl(paymentUrl.href, true);
+    if (!url) throw new BillingError(502, "payment_provider");
+    // The database provider_id column is a UUID. Use the signed order UUID as its stable
+    // internal reference; Robokassa's numeric invoice is independently checked on callback.
+    const saved = await record(order, order.id, "pending", url);
     if (!saved) throw new BillingError(409, "payment_mismatch");
     return present(saved);
   }
@@ -180,12 +189,9 @@ export function createBillingHandler(env = process.env, network = fetch) {
       const isWebhook = req.query?.webhook === "1";
       if (isWebhook) {
         if (!liveReady) throw new BillingError(503, "payments_disabled");
-        if (!matches(req.headers["x-merchantid"], merchant) || !matches(req.headers["x-secret"], secret)) {
-          throw new BillingError(401, "forbidden");
-        }
-        const event = jsonObject(req);
-        await sync(event.id);
-        return res.status(200).json({ ok: true });
+        const invoice = await confirmCallback(req);
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        return res.status(200).send("OK" + invoice);
       }
       if (mode !== "test" && !liveReady) throw new BillingError(503, "payments_disabled");
       const input = jsonObject(req);
@@ -196,15 +202,9 @@ export function createBillingHandler(env = process.env, network = fetch) {
           throw new BillingError(401, "forbidden");
         }
         await database("rpc/cortex_admin_billing", { p_action: "authorize_refund", p_data: { id: input.id } }, auth.slice(7));
-        const order = await lookup(input.id, "live");
-        if (!order || !order.provider_id) throw new BillingError(404, "payment_not_found");
-        const refreshed = await sync(order.provider_id, order);
-        if (refreshed.state === "refunded") return res.status(200).json(present(refreshed));
-        if (refreshed.state !== "confirmed") throw new BillingError(409, "refund_unavailable");
-        const eligibility = await provider("/transaction/" + order.provider_id + "/cancel-supported");
-        if (eligibility.supported !== true) throw new BillingError(409, "refund_unavailable");
-        await provider("/transaction/" + order.provider_id + "/cancel", "POST");
-        return res.status(200).json(present(await sync(order.provider_id, order)));
+        // Merchant-initiated refunds require Robokassa Password #3 and verified operation IDs.
+        // Until configured, direct administrators to the provider dashboard.
+        throw new BillingError(409, "refund_unavailable");
       }
       if (!matches(req.headers.authorization, gatewaySecret && "Bearer " + gatewaySecret)) {
         throw new BillingError(401, "forbidden");
@@ -217,7 +217,7 @@ export function createBillingHandler(env = process.env, network = fetch) {
       const order = await lookup(input.id, mode, input.subject);
       if (!order) throw new BillingError(404, "payment_not_found");
       if (input.operation === "status") {
-        return res.status(200).json(present(mode === "live" && order.provider_id ? await sync(order.provider_id, order) : order));
+        return res.status(200).json(present(order));
       }
       if (input.operation === "simulate" && mode === "test" &&
           matches(req.headers["x-cortex-billing-test-key"], env.CORTEX_BILLING_TEST_KEY) &&

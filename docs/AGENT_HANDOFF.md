@@ -1,3 +1,7 @@
+## 2026-11-19 UTC · Robokassa website and API preparation, live OFF
+
+- Branch `feat/cortex-robokassa-site-20261119` from main `3fc7a7ad939fc37e1b12b0f7981ac93ca67f1e95`; user DOCX confirmed INN/phone/email but omitted full legal name. Website /offer, /terms, /privacy, /pricing, /support, homepage footer updated; web visual style preserved. `cortex-control/api/billing.js` switched from Platega to signed Robokassa checkout and ResultURL validation; admin auto-refund button hidden pending third password/operation key; regressions replaced in `cortex-control/tests/billing.test.js`. Updated README and docs/ROBOKASSA_SETUP_20261119.md. No server secrets, DB migrations, Android changes, live payment enablement or direct deployment in this branch. PR CI pending. Must reconcile seller OPERATOR_B vs supplied INN and verify merchant, receipts and checkout before live.
+
 # Передача работы по Android CORTEX
 
 ## 2026-11-19 UTC · beta.7 published after native Android regression and independent APK verification

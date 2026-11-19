@@ -3,10 +3,12 @@ import RegistrationCta from "@/components/RegistrationCta";
 import UiIcon from "@/components/UiIcon";
 import { safeHttpsDownloadUrl } from "@/lib/safe-url";
 import { registrationIsOpen } from "@/lib/registration-gate";
+import { paymentMerchant } from "@/lib/merchant-details";
 
 const downloadUrl = safeHttpsDownloadUrl(process.env.NEXT_PUBLIC_CORTEX_ANDROID_DOWNLOAD_URL);
 
 export default function Home() {
+  const merchant = paymentMerchant();
   return (
     <div className="shell">
       <header className="site-header">
@@ -35,7 +37,12 @@ export default function Home() {
       </main>
 
       <footer className="site-footer">
-        <span>© 2026 CORTEX</span>
+        <div className="footer-merchant">
+          <span>© 2026 CORTEX</span>
+          {merchant && <span>{merchant.name} · {merchant.registration}{merchant.address ? ` · ${merchant.address}` : ""}</span>}
+          <a href="tel:+79531817516">+7 953 181-75-16</a>
+          <a href="mailto:stasaleksandrov481@gmail.com">stasaleksandrov481@gmail.com</a>
+        </div>
         <div className="footer-links">
           <a href="/privacy"><UiIcon name="shield" size={15} />Конфиденциальность</a>
           <a href="/terms">Условия</a>

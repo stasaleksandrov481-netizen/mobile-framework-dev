@@ -375,7 +375,7 @@ async function subscriptions() {
   const budget = card("Расходы OpenRouter за 30 дней", form("billing-funding",
     field("usd", "Обеспеченный бюджет, USD", "number", funding.funded_micros / 1e6, 'min="0" step=".000001" required') +
     '<label class="check"><input name="checkout" type="checkbox"' + checked(funding.checkout_enabled) +
-    '>Разрешить оплату после подключения Platega</label>', "Сохранить бюджет") + '<ul class="record-list">' +
+    '>Разрешить оплату после подключения Robokassa</label>', "Сохранить бюджет") + '<ul class="record-list">' +
     result.models.map(m => '<li>' + escape(m.model) + ' · ' + dateNumber(m.calls) +
       ' <strong>' + dollars(m.measured_micros) + ' · резерв ' + dollars(m.unsettled_micros) + '</strong></li>').join("") + '</ul>');
   const grant = card("Выдать тестовый доступ", form("billing-grant",
@@ -391,8 +391,7 @@ async function subscriptions() {
   const states = { creating: "Создаётся", pending: "Ожидает оплаты", confirmed: "Подтверждено", canceled: "Отменено", refunded: "Возврат" };
   const entries = result.recent.map(p => '<li><span>' + escape(p.public_id || p.subject) + ' · ' + escape(planNames[p.plan]) +
     '<br><small>' + escape(states[p.state]) + ' · ' + (p.mode === "manual" ? "Промодоступ до " + date(p.ends_at) : rub(p.amount)) +
-    '</small></span>' + (p.state === "confirmed" ? button(p.mode === "manual" ? "Отозвать" : "Возврат",
-      p.mode === "manual" ? "billing-revoke" : "billing-refund", p.id) : "") + '</li>').join("");
+    '</small></span>' + (p.state === "confirmed" && p.mode === "manual" ? button("Отозвать", "billing-revoke", p.id) : "") + '</li>').join("");
   return '<div class="cards">' + summary + budget + grant + '</div><div class="cards">' + plans + '</div>' +
     card("Подписчики и платежи", entries ? '<ul class="record-list">' + entries + '</ul>' : '<p>Записей пока нет.</p>');
 }
