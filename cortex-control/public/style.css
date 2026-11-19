@@ -75,6 +75,17 @@ dialog::backdrop { background: #000c; }
 .site-actions { margin-bottom:14px; }
 .site-actions a { display:inline-flex; align-items:center; min-height:42px; padding:9px 14px; border:1px solid #444449; border-radius:11px; color:#fff; text-decoration:none; }
 .site-actions a:hover,.site-actions a:focus-visible { background:#27272a; border-color:#a4a4a8; }
+.beta-count { font-size:clamp(1.45rem,2vw,2rem)!important; overflow-wrap:anywhere; }
+.beta-cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.beta-cards .card { height:100%; }
+.beta-person > div:first-child,.beta-file > div:first-child { display:grid; gap:5px; min-width:0; }
+.beta-person small,.beta-file small { color:#a6a6ad; overflow-wrap:anywhere; }
+.beta-person .actions { justify-content:flex-end; }
+.beta-person button,.beta-file button { min-height:35px; padding:6px 10px; font-size:.8rem; }
+.beta-receipt { padding:13px 15px; margin-top:14px; border:1px solid #445447; border-radius:12px; background:#171f19; overflow-wrap:anywhere; }
+.beta-receipt code { font-size:.8rem; }
+.beta-receipt p { margin:5px 0 9px; }
+.beta-cards a,.beta-receipt a { color:#dae6ff; }
 .ticket-messages { display:flex; flex-direction:column; gap:10px; max-height:45vh; overflow:auto; padding:8px 2px; }
 .ticket-message { max-width:85%; align-self:flex-start; padding:10px 13px; border:1px solid #555; border-radius:15px 15px 15px 4px; }
 .ticket-message.from-control { align-self:flex-end; background:#eee; color:#111; border-radius:15px 15px 4px 15px; }
@@ -191,6 +202,9 @@ nav button[aria-current] { background:#f2f2f2; color:#111; }
   .metric-card .count { font-size:1.9rem; }
   .card { padding:17px; }
   #mobile-nav { background:#111113; border:1px solid #43434a; }
+  .beta-cards { grid-template-columns:1fr; }
+  .beta-person,.beta-file { align-items:flex-start!important; flex-direction:column; }
+  .beta-person .actions { justify-content:flex-start; }
 }
 @media (max-width:400px) {
   .brand-mark { width:30px; height:30px; }
