@@ -16,6 +16,18 @@ const labels = {
   beta: "ЗБТ", roles: "Доступы", quota: "Лимиты ИИ", billing: "Подписки", audit: "Журнал"
 };
 const ticketStates = { open: "Открыто", in_progress: "В работе", answered: "Есть ответ", closed: "Закрыто" };
+const pageDescriptions = {
+  overview: "Состояние сервиса и активность пользователей в реальном времени.",
+  site: "Регистрации, активность и состояние cortexapp.ru.",
+  support: "Диалоги с пользователями и обработка обращений.",
+  updates: "Доступные версии приложения и политика обновлений.",
+  maintenance: "Ограничения доступа и техническое обслуживание.",
+  beta: "Приглашения тестировщиков, устройства и сборки Android.",
+  roles: "Роли и права сотрудников CORTEX.",
+  quota: "Бюджеты моделей и персональные ограничения.",
+  billing: "Подписки, расходы и тестовые доступы.",
+  audit: "История административных изменений."
+};
 const roles = { owner: "Владелец", admin: "Администратор", support: "Поддержка" };
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
@@ -30,6 +42,9 @@ const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
 const date = value => value ? new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" }) : "—";
+const shortDate = value => value ? new Date(value).toLocaleString("ru-RU", {
+  timeZone: "Europe/Moscow", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+}) : "—";
 const dateNumber = value => Number(value || 0).toLocaleString("ru-RU");
 const checked = value => value ? " checked" : "";
 const button = (text, action, value = "") => '<button type="button" data-action="' + action + '" data-value="' +
@@ -164,16 +179,21 @@ function allowedTabs() {
 
 function drawShell() {
   if (!allowedTabs().includes(tab)) tab = "overview";
-  const navigation = allowedTabs().map(key => '<button type="button" data-action="tab" data-value="' + key + '"' +
-    (key === tab ? ' aria-current="page"' : '') + '>' + labels[key] + '</button>').join("");
+  const navigation = allowedTabs().map((key, index) => {
+    const group = index === 0 ? '<span class="nav-group">Рабочее пространство</span>' :
+      key === "updates" ? '<span class="nav-group">Управление сервисом</span>' :
+      key === "audit" ? '<span class="nav-group">Безопасность</span>' : "";
+    return group + '<button type="button" data-action="tab" data-value="' + key + '"' +
+      (key === tab ? ' aria-current="page"' : '') + '>' + labels[key] + '</button>';
+  }).join("");
   app.innerHTML = '<header class="top"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span>CORTEX <strong>CONTROL</strong></span></div>' +
     '<div class="top-status"><span class="status-dot"></span>Рабочая среда</div><span class="role">' +
     escape(roles[role]) + '</span>' + (ownId ? button("Мой ID · " + ownId, "copy-my-id") : "") +
     '<button type="button" class="menu-button" data-action="menu" aria-controls="mobile-nav" aria-expanded="false">Меню</button></header>' +
-    '<div class="layout"><aside><div class="sidebar-caption">УПРАВЛЕНИЕ</div><nav aria-label="Разделы">' + navigation + '</nav>' +
+    '<div class="layout"><aside><nav aria-label="Разделы">' + navigation + '</nav>' +
     '<div class="sidebar-footer"><div class="sidebar-session"><span class="status-dot"></span>Защищённая сессия<div class="subtle">Автовыход через 30 минут бездействия</div></div>' +
     button("Завершить сеанс", "logout") + '</div></aside>' +
-    '<main id="dashboard"><h1>' + labels[tab] + '</h1><p>Загрузка…</p></main></div>' +
+    '<main id="dashboard"><div class="page-loading" role="status">Загружаем раздел…</div></main></div>' +
     '<dialog id="mobile-nav" aria-label="Меню"><div class="dialog-head"><strong>CORTEX Control</strong>' +
     button("Закрыть", "close-menu") + '</div><nav aria-label="Разделы">' + navigation + '</nav>' + button("Выйти", "logout") + '</dialog>';
   const menu = document.querySelector("#mobile-nav");
@@ -187,8 +207,9 @@ async function loadTab() {
   const page = tab, version = ++renderVersion;
   try {
     const html = await views[page]();
-    if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div><span class="overline">CORTEX / ' +
-      escape(page.toUpperCase()) + '</span><h1>' + labels[page] + '</h1></div>' +
+    if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div><span class="overline">CORTEX CONTROL / ' +
+      escape(page.toUpperCase()) + '</span><h1>' + labels[page] + '</h1><p class="page-description">' +
+      escape(pageDescriptions[page] || "") + '</p></div>' +
       '<div class="heading-tools"><span class="muted">' + (page === "overview" ? "Автообновление раз в минуту" : "Обновлено " +
         new Date().toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }) + " МСК") +
       '</span>' + button("Обновить", "refresh") + '</div></div>' + html;
@@ -221,11 +242,12 @@ async function overview() {
   return '<div class="dashboard-intro"><div><span class="overline">ОБЩАЯ КАРТИНА</span><h2>Состояние CORTEX</h2>' +
     '<p>Актуальные показатели, активность и обращения пользователей.</p></div><span class="live-badge"><span class="status-dot"></span>Live</span></div>' +
     '<div class="metrics-grid">' + cards + '<section class="metric-card"><span class="metric-label">Открытые обращения</span><strong class="count">' + dateNumber(activity.support_open) + '</strong></section>' +
-    '</div><p class="muted">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
+    '</div><p class="data-note">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
     'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
     'старые записи не выдаются за достоверную статистику.</p>' +
+    '<div class="settings-grid">' +
     card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>') +
-    card("Кто открыл CORTEX сегодня", dailyList);
+    card("Кто открыл CORTEX сегодня", dailyList) + '</div>';
 }
 
 async function site() {
@@ -254,10 +276,10 @@ async function site() {
   return '<div class="dashboard-intro"><div><span class="overline">CORTEX / WEB</span>' +
     '<h2>Сайт cortexapp.ru</h2><p>Подтверждённые регистрации, аналитика и состояние сайта.</p></div></div>' +
     '<div class="metrics-grid">' + summary + '</div>' +
-    card("Регистрации за последние 7 дней", trend ? '<ul class="site-trend">' + trend + '</ul>' :
+    '<div class="settings-grid">' + card("Регистрации за последние 7 дней", trend ? '<ul class="site-trend">' + trend + '</ul>' :
       '<p>Пока нет данных за период.</p>') +
     card("Посещения сайта", '<p>Счётчик уникальных посетителей пока не подключён. Здесь показаны только подтверждённые ' +
-      'регистрации. Просмотры страниц и конверсию без отдельного сбора событий достоверно рассчитать нельзя.</p>') +
+      'регистрации. Просмотры страниц и конверсию без отдельного сбора событий достоверно рассчитать нельзя.</p>') + '</div>' +
     card("Инструменты сайта", links + '<p class="muted">Статистика регистрации обновляется по кнопке «Обновить». ' +
       'Доступна только владельцу и администратору после MFA.</p>');
 }
@@ -280,7 +302,9 @@ async function support() {
     ticket = null;
     return support();
   }
-  if (!tickets.length) return filterBar + '<p>В этой категории нет обращений.</p>';
+  if (!tickets.length) return '<section class="support-workspace"><div class="support-toolbar">' + filterBar +
+    '</div><div class="support-empty"><div class="empty-mark">✓</div><h2>Здесь пока пусто</h2>' +
+    '<p>Обращений с выбранным статусом нет. Выберите другой фильтр.</p></div></section>';
   const current = tickets.find(item => item.id === selected) || tickets[0];
   ticket = current.id;
   const [replies, attachment] = await Promise.all([
@@ -288,21 +312,35 @@ async function support() {
     db.from("cortex_support").select("screenshot").eq("id", current.id).maybeSingle()
   ]).then(results => results.map(data));
   const screenshot = attachment?.screenshot || "";
+  const stateBadge = (state, label) => '<span class="ticket-state state-' + escape(state) + '"><i aria-hidden="true"></i>' +
+    escape(label || ticketStates[state] || state) + '</span>';
   const list = tickets.map(item => '<button class="ticket-item" type="button" data-action="ticket" data-value="' + escape(item.id) +
-    '"' + (item.id === current.id ? ' aria-current="true"' : '') + '><strong>' +
-    escape(categories[item.category] || item.category) + ' · ' + escape(ticketStates[item.status] || item.status) +
-    '</strong><small>' + escape(item.message.slice(0, 70)) + '</small></button>').join("");
+    '"' + (item.id === current.id ? ' aria-current="true"' : '') + '><span class="ticket-item-top"><strong>' +
+    escape(categories[item.category] || item.category) + '</strong><time>' + escape(shortDate(item.created_at)) +
+    '</time></span><span class="ticket-excerpt">' + escape(item.message.slice(0, 140)) +
+    '</span><span class="ticket-item-bottom">' + stateBadge(item.status) + '<span class="ticket-code">№ ' +
+    escape(item.id.slice(0, 8).toUpperCase()) + '</span></span></button>').join("");
   const thread = (replies || []).map(reply => '<article class="ticket-message from-control"><small>Поддержка · ' + date(reply.created_at) + '</small><p>' +
     escape(reply.message) + '</p></article>').join("");
-  const details = '<p class="muted">' + date(current.created_at) + ' · № ' + escape(current.id.slice(0, 8).toUpperCase()) + '</p>' +
-    '<div class="ticket-messages"><article class="ticket-message"><small>Пользователь · ' + date(current.created_at) + '</small><p>' +
-    escape(current.message) + '</p></article>' + thread + '</div>' +
-    (current.reply_to ? '<p class="muted">Email: ' + escape(current.reply_to) + '</p>' : "") +
-    (current.app_version ? '<p class="muted">Версия: ' + escape(current.app_version) + '</p>' : "") +
-    (/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screenshot) ?
-      '<details><summary>Скриншот</summary><img class="attachment" src="' + escape(screenshot) + '" alt="Приложенный скриншот"></details>' : "") +
-    form("reply", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Ответ пользователю<textarea name="message" rows="4" maxlength="4000" required></textarea></label>', "Отправить ответ") +
-    form("ticket-status", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '"><label>Статус<select name="status">' + options(ticketStates, current.status) + '</select></label>', "Сохранить статус");
+  const metadata = (current.reply_to ? '<span>Почта: <strong>' + escape(current.reply_to) + '</strong></span>' : "") +
+    (current.app_version ? '<span>Версия: <strong>' + escape(current.app_version) + '</strong></span>' : "");
+  const attachmentHtml = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(screenshot) ?
+    '<details class="ticket-attachment"><summary>Скриншот пользователя</summary><img class="attachment" src="' +
+    escape(screenshot) + '" alt="Приложенный скриншот"></details>' : "";
+  const replyForm = form("reply", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '">' +
+    '<label>Ответ пользователю<textarea name="message" rows="3" maxlength="4000" placeholder="Напишите ответ…" required></textarea></label>',
+    "Отправить ответ");
+  const statusForm = form("ticket-status", '<input type="hidden" name="ticket_id" value="' + escape(current.id) + '">' +
+    '<label>Статус обращения<select name="status">' + options(ticketStates, current.status) + '</select></label>', "Сохранить");
+  const details = '<section class="conversation-panel" aria-label="Выбранный диалог"><header class="conversation-header"><div>' +
+    '<span class="overline">ОБРАЩЕНИЕ № ' + escape(current.id.slice(0, 8).toUpperCase()) + '</span>' +
+    '<h2>' + escape(categories[current.category] || current.category) + '</h2><p>' + escape(date(current.created_at)) +
+    ' МСК</p></div>' + stateBadge(current.status) + '</header>' +
+    (metadata ? '<div class="conversation-metadata">' + metadata + '</div>' : "") +
+    '<div class="ticket-messages"><article class="ticket-message"><small>Пользователь · ' + date(current.created_at) +
+    '</small><p>' + escape(current.message) + '</p></article>' + thread + '</div>' + attachmentHtml +
+    '<div class="conversation-actions"><div class="conversation-reply">' + replyForm + '</div>' +
+    '<div class="conversation-status">' + statusForm + '</div></div></section>';
   const pageControls = '<div class="ticket-pagination" aria-label="Страницы обращений"><span>Показаны ' +
     (paging.offset + 1) + '–' + paging.end + ' из ' + supportTotal + '</span>' +
     '<div><button type="button" data-action="ticket-page" data-value="prev"' +
@@ -310,8 +348,9 @@ async function support() {
     '<span> ' + (paging.page + 1) + ' / ' + paging.pages + ' </span>' +
     '<button type="button" data-action="ticket-page" data-value="next"' +
     (paging.page === paging.pages - 1 ? " disabled" : "") + '>Далее</button></div></div>';
-  return filterBar + pageControls + '<div class="support-layout"><div class="ticket-list">' + list +
-    '</div>' + card("Диалог", details) + '</div>';
+  return '<section class="support-workspace"><div class="support-toolbar">' + filterBar + pageControls +
+    '</div><div class="support-layout"><div class="ticket-list" aria-label="Список обращений">' + list +
+    '</div>' + details + '</div></section>';
 }
 
 async function controlConfig() {
@@ -320,13 +359,13 @@ async function controlConfig() {
 
 async function maintenance() {
   const config = await controlConfig();
-  return card("Режим технических работ", form("maintenance",
+  return '<div class="settings-grid">' + card("Режим технических работ", form("maintenance",
     '<label class="check"><input type="checkbox" name="enabled"' + checked(config.maintenance_enabled) + '>Включить режим</label>' +
     '<label>Сообщение пользователям<textarea name="message" rows="3" maxlength="400">' + escape(config.maintenance_message) +
     '</textarea></label>', "Сохранить")) + card("Доступ во время техработ", form("maintenance-access",
     field("public_id", "Короткий ID аккаунта", "text", "", 'placeholder="@id000001" required') +
     field("days", "Дней доступа (0 — отозвать)", "number", 1, 'min="0" max="31" required'),
-    "Применить"));
+    "Применить")) + '</div>';
 }
 
 async function updates() {
@@ -336,23 +375,24 @@ async function updates() {
   const list = (versions || []).map(version => '<li><div><strong>' + escape(version.version_name) + '</strong> · ' +
     escape(version.version_code) + '<p>' + escape(version.notes) + '</p></div>' +
     button(version.access === "blocked" ? "Разрешить" : "Заблокировать", version.access === "blocked" ? "allow-version" : "block-version", version.version_code) + '</li>').join("");
-  return card("Обязательное обновление", form("update-policy",
+  return '<div class="settings-grid">' + card("Обязательное обновление", form("update-policy",
     '<label class="check"><input type="checkbox" name="enabled"' + checked(config.block_old_versions) + '>Требовать новую версию</label>' +
     field("code", "Минимальный код версии", "number", config.min_version_code, 'min="1" max="2100000000" required') +
     field("url", "Ссылка на обновление", "url", config.update_url || "", 'placeholder="https://"'), "Сохранить")) +
-    card("Версии", '<ul class="record-list">' + list + '</ul>' + form("release",
+    card("Добавить версию", form("release",
       field("name", "Название версии", "text", "", 'maxlength="24" required') +
       field("code", "Код версии", "number", "", 'min="1" max="2100000000" required') +
-      '<label>Заметка<textarea name="notes" rows="2" maxlength="600"></textarea></label>', "Добавить версию"));
+      '<label>Заметка<textarea name="notes" rows="2" maxlength="600"></textarea></label>', "Добавить версию")) +
+    '</div>' + card("Версии", '<ul class="record-list">' + list + '</ul>');
 }
 
 async function access() {
   const grants = data(await db.rpc("cortex_list_admin_roles")) || [];
-  return card("Роли", '<ul class="record-list">' + grants.map(grant => '<li><span>' + escape(grant.email || grant.user_id) +
-    '</span><strong>' + escape(roles[grant.role] || grant.role) + '</strong></li>').join("") + '</ul>' +
+  return '<div class="settings-grid">' + card("Сотрудники", '<ul class="record-list">' + grants.map(grant => '<li><span>' + escape(grant.email || grant.user_id) +
+    '</span><strong>' + escape(roles[grant.role] || grant.role) + '</strong></li>').join("") + '</ul>') + card("Изменить доступ",
     form("role", field("email", "Email", "email", "", "required") +
       '<label>Роль<select name="role">' + options({ admin: "Разработчик", support: "Поддержка", remove: "Отозвать доступ" }) +
-      '</select></label>', "Применить"));
+      '</select></label>', "Применить")) + '</div>';
 }
 
 async function closedBeta() {
@@ -453,14 +493,14 @@ async function quotas() {
     '<p>Лимиты запросов ограничены параметрами аккаунта OpenRouter, указанными на сервере.</p>', "Сохранить"));
   const search = form("quota-search", field("id", "ID профиля или гостя", "text", quotaId,
     'maxlength="50" placeholder="@id000001" required autocomplete="off"'), "Найти");
-  if (!quotaId) return budget + card("Поиск по ID", search);
+  if (!quotaId) return '<div class="settings-grid">' + budget + card("Поиск по ID", search) + '</div>';
   const target = await resolveAccount(quotaId);
   const quota = target && data(await db.rpc("cortex_admin_ai", { p_subject: target }));
-  if (!quota) return budget + card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>");
+  if (!quota) return '<div class="settings-grid">' + budget + card("Поиск по ID", search + "<p>Запись с этим ID не найдена.</p>") + '</div>';
   const summary = "<p>" + escape(quotaId) + " · " + escape(planNames[quota.plan] || "—") + "</p><p>Использовано " + dateNumber(quota.used) +
     " · Осталось " + (quota.unlimited ? "безлимит" : dateNumber(quota.remaining)) + " токенов</p>" +
     "<p>Сброс в 03:00 по Москве.</p>";
-  return budget + card("Поиск по ID", search) + card("Суточный лимит", summary +
+  return '<div class="settings-grid">' + budget + card("Поиск по ID", search) + '</div>' + card("Суточный лимит", summary +
     form("quota-limit", field("limit", "Токенов в сутки", "number", quota.limit, 'min="0" max="1000000" required'),
       "Установить лимит") +
     '<div class="actions">' + button("Сбросить счётчик", "quota-change", "reset") +
@@ -560,7 +600,12 @@ app.addEventListener("click", async event => {
         break;
       }
       case "tab":
-        if (allowedTabs().includes(value)) { tab = value; drawShell(); await loadTab(); }
+        if (allowedTabs().includes(value)) {
+          document.querySelector("#mobile-nav")?.close();
+          tab = value;
+          drawShell();
+          await loadTab();
+        }
         break;
       case "refresh": await loadTab(); break;
       case "copy-my-id":
