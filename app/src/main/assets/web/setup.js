@@ -22,7 +22,7 @@ window.CortexSetup = (() => {
     { id: "notifications", name: "Уведомления", icon: "bell", action: "notification-permission",
       description: "Уведомления показывают шаг задачи и позволяют её остановить. Также можно получать уведомления о новых ответах поддержки." }
   ];
-  // Keep first run focused: no simulated command execution and no extra demo step.
+  // Permissions first; the separate, real Android demonstration is offered after completion.
   const pages = ["welcome", ...accesses.map(x => x.id), "personalize", "finish"];
 
   function native(operation, data = {}) {
@@ -130,7 +130,10 @@ window.CortexSetup = (() => {
     view = null;
     root.classList.remove("in-onboarding");
     for (const id of ["screen", "navigation", "composition"]) document.getElementById(id).inert = false;
-    dispatchEvent(new CustomEvent("cortex-onboarding-end", { detail: { configured: !single && complete } }));
+    dispatchEvent(new CustomEvent("cortex-onboarding-end", { detail: {
+      configured: !single && complete,
+      firstExperienceEligible: !single && complete && page === pages.length - 1
+    } }));
   }
 
   root.addEventListener("click", event => {

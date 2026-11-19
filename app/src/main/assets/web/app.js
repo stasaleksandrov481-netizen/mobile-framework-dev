@@ -394,6 +394,7 @@
   }
 
   function back() {
+    if (window.CortexFirstExperience?.back()) return true;
     if (window.CortexControl?.back()) return true;
     if (app.classList.contains("in-onboarding")) {
       window.CortexSetup?.back();
@@ -1770,6 +1771,10 @@
       } else sendDevice("microphone-permission");
     },
     "notification-permission": () => sendDevice("notification-permission"),
+    "brightness-permission": () => sendDevice("brightness-permission"),
+    "first-experience": () => {
+      if (!window.CortexFirstExperience?.open()) flash("Знакомство доступно в Android-приложении CORTEX.");
+    },
     "camera-permission": () => sendDevice("camera-permission"),
     "notification-listener-permission": () => sendDevice("notification-listener-permission"),
     "notification-journal-clear": () => confirm("Очистить журнал уведомлений?", "История новых событий будет удалена. Это не удалит уведомления из других приложений.", () => {
@@ -1984,6 +1989,11 @@
       sendDevice("overlay-config", { mode: S.preferences.overlayMode, hideLandscape: S.preferences.hideLandscape });
       if (S.preferences.hotwordEnabled) sendDevice("wake-config", { enabled: true });
     }
+    mountWave();
+    updateJumpLatest();
+  });
+  addEventListener("cortex-first-experience-end", event => {
+    if (event.detail?.finished) navigate("home");
     mountWave();
     updateJumpLatest();
   });

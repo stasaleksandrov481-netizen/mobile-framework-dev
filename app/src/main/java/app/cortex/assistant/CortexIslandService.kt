@@ -47,6 +47,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var legacyBars = Rect()
     private var legacyCutout: DisplayCutout? = null
     private var placement: IslandPlacement? = null
+    private var placementForDemo = false
+    private val demonstrating get() = CortexRuntime.firstExperienceActive
     private var keyboardFocus = false
     private var exiting = false
     private var poweringOff = false
@@ -159,8 +161,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val systemRequested = intent?.action == ACTION_SYSTEM_ASSIST
+        val demoRequested = intent?.action == ACTION_FIRST_EXPERIENCE && demonstrating
         if (poweringOff) {
-            if (!systemRequested && preferences.getBoolean(WAKE_PAUSED, false)) return START_NOT_STICKY
+            if (!systemRequested && !demoRequested && preferences.getBoolean(WAKE_PAUSED, false)) return START_NOT_STICKY
             poweringOff = false
             exiting = false
             removeIsland()
@@ -192,7 +195,21 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             openFromSystem()
             return if (backgroundDisabled()) START_NOT_STICKY else START_STICKY
         }
-        if (backgroundDisabled() && !systemInvocation) {
+        if (demoRequested) {
+            if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+            hiddenByVoice = false
+            if (exiting) { exiting = false; removeIsland() }
+            task = CortexActionState.status
+            render()
+            island?.let { visible ->
+                if (!preferences.getBoolean("reduceMotion", false) && style.motion != "none") {
+                    visible.alpha = 0f
+                    visible.animate().alpha(1f).setDuration(340L).start()
+                }
+            }
+            return START_NOT_STICKY
+        }
+        if (backgroundDisabled() && !systemInvocation && !demonstrating) {
             dismissIsland(power = true)
             return START_NOT_STICKY
         }
@@ -403,11 +420,12 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         }
         val hiddenInApp = CortexRuntime.appVisible && reminder == null && !moving
         val waitingForWake = mode == "wake" && phase == "idle" && task == null && reminder == null && !opening && !moving
-        if (!systemInvocation && (backgroundDisabled() || hiddenByVoice || hiddenInApp || waitingForWake)) {
+        if (!demonstrating && !systemInvocation && (backgroundDisabled() || hiddenByVoice || hiddenInApp || waitingForWake)) {
             if (island != null) dismissIsland(power = backgroundDisabled())
             return
         }
-        if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density, style)
+        if (placementForDemo != demonstrating) { placement = null; placementForDemo = demonstrating }
+        if (placement == null) placement = IslandPlacement(measureScreen(), overlayContext.resources.displayMetrics.density, style, demonstrating)
         val visible = island ?: createIsland() ?: return
         val state = if (reminder != null) "reminder" else if (busy && !actionBusy) phase else task?.phase ?: phase
         val progressText = task?.message.orEmpty()
@@ -422,8 +440,10 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             "understood" -> message
             else -> ""
         }
-        visible.appearance(style)
-        visible.phase(state, label, actionBusy)
+        visible.appearance(if (demonstrating) style.copy(background = android.graphics.Color.BLACK,
+            text = android.graphics.Color.WHITE, accent = android.graphics.Color.WHITE,
+            border = android.graphics.Color.WHITE, glass = false, mascot = false) else style)
+        visible.phase(state, label, actionBusy, demonstrating)
         visible.haptics = preferences.getBoolean("haptics", true)
         visible.reduceMotion(preferences.getBoolean("reduceMotion", false) || style.motion == "none")
         visible.conversation.status(state, label)
@@ -525,6 +545,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun submit(raw: String, fromVoice: Boolean = false) {
+        if (demonstrating) return
         val text = raw.trim().take(2400)
         handleControl(this, text)?.let { control ->
             if (control.startsWith("Выключить островок")) {
@@ -731,6 +752,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     override fun onDisplayRemoved(displayId: Int) = Unit
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
+        if (demonstrating) CortexFirstExperience.stop("Знакомство остановлено: островок недоступен.")
         reminder?.first?.let { CortexSchedule.showNotification(this, it) }
         if (CortexRuntime.reminder === showReminder) CortexRuntime.reminder = null
         if (CortexActionState.listener === actionStatus) CortexActionState.listener = null
@@ -751,6 +773,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         const val ACTION_CONFIG = "app.cortex.assistant.island.CONFIG"
         const val ACTION_ENSURE = "app.cortex.assistant.island.ENSURE"
         internal const val ACTION_SYSTEM_ASSIST = "app.cortex.assistant.island.SYSTEM_ASSIST"
+        private const val ACTION_FIRST_EXPERIENCE = "app.cortex.assistant.island.FIRST_EXPERIENCE"
         const val ACTION_WAKE = "app.cortex.assistant.island.WAKE"
         const val ACTION_WAKE_CLOSED = "app.cortex.assistant.island.WAKE_CLOSED"
         const val ACTION_SUBMIT = "app.cortex.assistant.island.SUBMIT"
@@ -766,6 +789,28 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         private const val CHANNEL = "cortex-island"
         private const val NOTIFICATION = 2810
         private var running: CortexIslandService? = null
+
+        internal fun beginFirstExperience(context: Context): Boolean {
+            if (running?.busy == true || !CortexRuntime.firstExperienceActive) return false
+            return runCatching {
+                context.startForegroundService(Intent(context, CortexIslandService::class.java).setAction(ACTION_FIRST_EXPERIENCE))
+                true
+            }.getOrDefault(false)
+        }
+
+        internal fun firstExperienceReady() = running?.let {
+            it.demonstrating && it.island?.let { view -> view.alpha >= .95f } == true && !it.exiting && !it.poweringOff && it.canShow()
+        } == true
+
+        internal fun pulseFirstExperience() { running?.island?.experiencePulse() }
+
+        internal fun endFirstExperience() {
+            running?.apply {
+                task = null
+                ui.removeCallbacks(clearTask)
+                updateStatus("idle", "")
+            }
+        }
 
         internal fun allowedInOrientation(context: Context) =
             context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE ||

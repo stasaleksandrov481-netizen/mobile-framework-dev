@@ -119,19 +119,20 @@ class CortexWakeService : Service() {
     }
 
     private fun updateAudio() {
-        if (CortexRuntime.recording || !canListenInMode()) {
+        if (CortexRuntime.recording || CortexRuntime.firstExperienceActive || !canListenInMode()) {
             ui.removeCallbacks(rearm)
             ui.removeCallbacks(expire)
             turn.reset()
             closeFeed()
             destroyRecognizer()
-            CortexRuntime.reportWake(if (CortexRuntime.recording) "Пауза на время голосового ввода в приложении."
+            CortexRuntime.reportWake(if (CortexRuntime.firstExperienceActive) "Пауза на время знакомства с CORTEX."
+                else if (CortexRuntime.recording) "Пауза на время голосового ввода в приложении."
                 else "Микрофон в паузе по настройкам энергопотребления.")
         } else schedule(110)
     }
 
     private fun listen() {
-        if (!enabled || CortexRuntime.recording || running || checkingLanguage || Build.VERSION.SDK_INT < 31) return
+        if (!enabled || CortexRuntime.recording || CortexRuntime.firstExperienceActive || running || checkingLanguage || Build.VERSION.SDK_INT < 31) return
         if (!canListenInMode()) {
             CortexRuntime.reportWake("Микрофон в паузе по настройкам энергопотребления.")
             return
@@ -228,7 +229,7 @@ class CortexWakeService : Service() {
     }
 
     private fun listener(ticket: Int, useStream: Boolean) = object : RecognitionListener {
-        private fun current() = enabled && running && ticket == generation && !CortexRuntime.recording
+        private fun current() = enabled && running && ticket == generation && !CortexRuntime.recording && !CortexRuntime.firstExperienceActive
 
         override fun onReadyForSpeech(params: Bundle?) {
             if (current()) CortexRuntime.reportWake("Слушаю слово «Кортекс».")
@@ -337,7 +338,7 @@ class CortexWakeService : Service() {
 
     private fun schedule(delay: Long) {
         ui.removeCallbacks(rearm)
-        if (enabled && !CortexRuntime.recording) ui.postDelayed(rearm, delay)
+        if (enabled && !CortexRuntime.recording && !CortexRuntime.firstExperienceActive) ui.postDelayed(rearm, delay)
     }
 
     private fun canListenInMode() = when (energy.getString("energy", "balanced")) {

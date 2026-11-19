@@ -435,6 +435,7 @@ internal object CortexSchedule {
 
 class CortexScheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (!CortexRuntime.firstExperienceActive) FirstExperienceBrightness.restorePending(context)
         CortexSchedule.receive(context.applicationContext, intent)
     }
 }

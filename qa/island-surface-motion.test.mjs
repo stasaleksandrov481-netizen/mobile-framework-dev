@@ -15,7 +15,9 @@ test("CORTEX compact island defaults to tinted glass with an optional character"
   assert.match(style, /settings\.optBoolean\("mascot", true\)/);
   assert.match(native("IslandGlass.kt"), /LinearGradient/);
   assert.match(style, /number\("opacity", 100\.0/);
-  assert.match(layout, /val width = minOf\(72 \* density/);
+  assert.match(layout, /demonstration: Boolean = false/);
+  assert.match(layout, /val width = minOf\(\(if \(demonstration\) 264 else 72\) \* density/);
+  assert.match(layout, /val height = minOf\(\(if \(demonstration\) 44 else 36\) \* density/);
   assert.match(surface, /signal\.mark\(canvas, logoX, cy/);
   assert.doesNotMatch(surface, /LinearGradient|drawFace\(|canvas\.drawText\("CORTEX"/);
   assert.match(surface, /postDelayed\(wakeMascot, wakeAt - now\)/);

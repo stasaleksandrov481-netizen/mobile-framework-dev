@@ -33,11 +33,23 @@ internal class CortexDeviceBridge(
     private var scenarioExport: String? = null
     private var pointRecorder: CortexPointRecorder? = null
     private val scheduleListener: () -> Unit = ::scheduleList
-    init { CortexRuntime.scheduleChanged = scheduleListener }
+    private val experienceListener: (JSONObject) -> Unit = { emit(it) }
+    init {
+        CortexRuntime.scheduleChanged = scheduleListener
+        CortexFirstExperience.listener = experienceListener
+    }
 
     fun handle(raw: String) {
         if (raw.length > 2_200_000) return
         val body = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        if (body.optString("operation").startsWith("first-experience-")) {
+            if (body.optString("operation") == "first-experience-start") {
+                speech.stop()
+                if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+            }
+            CortexFirstExperience.handle(context, body)
+            return
+        }
         when (body.optString("operation")) {
             "permissions" -> refreshPermissions()
             "open-settings" -> sendAction("settings") { open(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -46,6 +58,8 @@ internal class CortexDeviceBridge(
                     open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
             }
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            "brightness-permission" -> open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}")))
+            "display-settings" -> open(Intent(Settings.ACTION_DISPLAY_SETTINGS))
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -214,6 +228,7 @@ internal class CortexDeviceBridge(
         pointRecorder = null
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
+        if (CortexFirstExperience.listener === experienceListener) CortexFirstExperience.listener = null
         if (engineDelegate.isInitialized()) engine.close()
         if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
     }
@@ -287,7 +302,9 @@ internal class CortexDeviceBridge(
             .put("screenAutomation", CortexScreenService.connected != null)
             .put("verifyApps", CortexScreenService.connected != null)
             .put("overlay", Settings.canDrawOverlays(context))
+            .put("brightness", Settings.System.canWrite(context))
         emit(obj)
+        emit(CortexFirstExperience.snapshot(context))
     }
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == 505) {

@@ -47,8 +47,8 @@ class MainActivity : ComponentActivity() {
     private val leaveForAction: () -> Unit = { moveTaskToBack(true) }
     private val wakeCommand: (String) -> Boolean = { command ->
         val available = !rendererFailed && nativeReady && CortexRuntime.appVisible
-        if (available) deviceEvent(JSONObject().put("type", "wake-command").put("text", command))
-        available
+        if (available && !CortexRuntime.firstExperienceActive) deviceEvent(JSONObject().put("type", "wake-command").put("text", command))
+        available || CortexRuntime.firstExperienceActive
     }
     private val authTab = AuthTabIntent.registerActivityResultLauncher(this) { result ->
         val uri = result.resultUri
@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CortexActionState.restoreGate(this)
+        if (!CortexRuntime.firstExperienceActive) FirstExperienceBrightness.restorePending(this)
         pendingSchedule = intent.getStringExtra(CortexSchedule.EXTRA_TASK)
         CortexSchedule.initialize(applicationContext)
         if (cleanupStarted.compareAndSet(false, true)) {

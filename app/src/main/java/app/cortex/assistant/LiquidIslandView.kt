@@ -70,6 +70,9 @@ internal class LiquidIslandView(
     private var audioFrameAt = 0L
     private var press = false
     private var activeStop = false
+    private var demonstration = false
+    private var statusLabel = ""
+    private var experiencePulseAt = 0L
     private var pendingPlacementListener: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingPlacementTimeout: Runnable? = null
     var haptics = true
@@ -112,13 +115,20 @@ internal class LiquidIslandView(
         invalidate()
     }
 
-    fun phase(value: String, message: String, canStop: Boolean) {
+    fun phase(value: String, message: String, canStop: Boolean, demo: Boolean = false) {
         if (phase != value) phaseStartedAt = SystemClock.uptimeMillis()
         phase = value
         activeStop = canStop
+        demonstration = demo
+        statusLabel = message
         val description = if (message.isBlank()) "Островок CORTEX. Ввести команду." else "CORTEX. $message"
         if (contentDescription != description) contentDescription = description
         setContents()
+    }
+
+    fun experiencePulse() {
+        experiencePulseAt = SystemClock.uptimeMillis()
+        invalidate()
     }
 
     fun appearance(value: IslandAppearance) {
@@ -359,6 +369,15 @@ internal class LiquidIslandView(
         drawShell(canvas, body, panelAlpha, minOf(style.corner * density, body.height() / 2f), panel = true)
         val radius = minOf(style.corner * density, compactBody.height() / 2f)
         drawShell(canvas, compactBody, compactAlpha, radius, panel = false)
+        val elapsed = now - experiencePulseAt
+        if (demonstration && motion && experiencePulseAt > 0 && elapsed in 0..720) {
+            ink.style = Paint.Style.STROKE
+            ink.strokeWidth = 1.4f * density
+            ink.color = Color.WHITE
+            ink.alpha = (100 * (1f - elapsed / 720f)).roundToInt()
+            canvas.drawRoundRect(compactBody, radius, radius, ink)
+            postInvalidateOnAnimation()
+        }
         if (press && compactAlpha > .01f) {
             ink.style = Paint.Style.FILL
             ink.color = Color.WHITE
@@ -367,7 +386,21 @@ internal class LiquidIslandView(
         }
         if (style.progress && compactAlpha > .02f && disappearance == 0f) drawTrace(canvas, now, radius, compactAlpha)
         val decoration = mascotFrame(now, moving)
-        if (decoration != null && compactAlpha > .02f) {
+        if (demonstration && compactAlpha > .02f) {
+            ink.style = Paint.Style.FILL
+            ink.color = Color.WHITE
+            ink.alpha = (240 * compactAlpha).roundToInt()
+            ink.textSize = 12f * density
+            val available = (compactBody.width() - dp(48)).coerceAtLeast(1f)
+            val text = android.text.TextUtils.ellipsize(statusLabel,
+                android.text.TextPaint(ink), available, android.text.TextUtils.TruncateAt.END).toString()
+            canvas.drawText(text, compactBody.left + dp(15), compactBody.centerY() - (ink.ascent() + ink.descent()) / 2f, ink)
+            if (activeStop) {
+                val x = compactBody.right - dp(14)
+                val y = compactBody.centerY()
+                canvas.drawRoundRect(x - dp(3), y - dp(3), x + dp(3), y + dp(3), density, density, ink)
+            }
+        } else if (decoration != null && compactAlpha > .02f) {
             mascotClip.rewind()
             mascotClip.addRoundRect(compactBody, radius, radius, Path.Direction.CW)
             val save = canvas.save()

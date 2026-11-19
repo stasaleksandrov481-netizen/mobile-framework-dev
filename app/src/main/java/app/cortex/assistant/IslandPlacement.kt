@@ -24,7 +24,7 @@ internal data class IslandScreen(val bounds: Rect, val bars: Rect, val cutouts: 
         cutouts.filter { it.edge == edge }.maxOfOrNull { size(it.bounds) } ?: 0
 }
 
-internal class IslandPlacement(val screen: IslandScreen, density: Float, appearance: IslandAppearance) {
+internal class IslandPlacement(val screen: IslandScreen, density: Float, appearance: IslandAppearance, demonstration: Boolean = false) {
     val compact: RectF
     val panel: RectF
     val anchorX: Float
@@ -44,8 +44,8 @@ internal class IslandPlacement(val screen: IslandScreen, density: Float, appeara
         val panelWidth = minOf(352 * density * appearance.size * appearance.widthScale, safe.width()).coerceAtLeast(1f)
         val panelHeight = minOf(258 * density * appearance.size * appearance.heightScale, safe.height() * .62f).coerceAtLeast(1f)
         // The closed island only carries the animated CORTEX mark.
-        val width = minOf(72 * density * appearance.size * appearance.widthScale, panelWidth)
-        val height = minOf(36 * density * appearance.size * appearance.heightScale, panelHeight)
+        val width = minOf((if (demonstration) 264 else 72) * density * appearance.size * appearance.widthScale, panelWidth)
+        val height = minOf((if (demonstration) 44 else 36) * density * appearance.size * appearance.heightScale, panelHeight)
         val desiredX = when (camera?.edge) {
             Gravity.LEFT -> safe.left
             Gravity.RIGHT -> safe.right - width

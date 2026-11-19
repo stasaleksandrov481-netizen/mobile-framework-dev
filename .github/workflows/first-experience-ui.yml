@@ -1,0 +1,45 @@
+name: CORTEX First Experience UI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  first-experience-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: qa/browser/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: qa/browser
+        run: npm ci --no-audit --no-fund
+      - name: Locate the runner browser
+        shell: bash
+        run: |
+          browser=$(command -v google-chrome || command -v chromium || true)
+          test -n "$browser"
+          echo "CORTEX_BROWSER_EXECUTABLE=$browser" >> "$GITHUB_ENV"
+      - name: Check WebView pages and capture mobile layouts
+        working-directory: qa/browser
+        run: npm test
+      - name: Save screenshots and test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CORTEX-first-experience-ui
+          path: |
+            qa/browser/test-results/
+            qa/browser/playwright-report/
+          if-no-files-found: error
+          retention-days: 14
