@@ -43,13 +43,31 @@ jobs:
           publish=false
           if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
             subject="$(git log -1 --format=%s)"
+            version=$(sed -nE 's/^[[:space:]]*versionName = "([0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?)".*/\1/p' app/build.gradle.kts)
             if [[ "$EVENT" == "workflow_dispatch" ||
-                  ( "$EVENT" == "push" && "$subject" == "release(cortex): publish 1.0.17" ) ||
-                  ( "$EVENT" == "push" && "$subject" == "release(cortex): publish beta 1.0.18-beta.1" ) ]]; then
+                  ( "$EVENT" == "push" && "$subject" == "release(cortex): publish $version" ) ||
+                  ( "$EVENT" == "push" && "$subject" == "release(cortex): publish beta $version" ) ]]; then
               publish=true
             fi
           fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Validate Android release version before building
+        id: release_metadata
+        shell: bash
+        env:
+          PUBLISH_RELEASE: ${{ steps.release_request.outputs.publish }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$PUBLISH_RELEASE" == "true" ]]; then
+            published_tags="$RUNNER_TEMP/cortex-published-tags.txt"
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .tag_name' > "$published_tags"
+            python3 tools/android_release.py prepare --publish --commit "$GITHUB_SHA" \
+              --published-tags "$published_tags" --output "$GITHUB_OUTPUT"
+          else
+            python3 tools/android_release.py prepare --output "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -62,8 +80,8 @@ jobs:
       - name: Verify island onboarding, privacy and phone awareness
         run: node --test qa/island-onboarding.test.mjs qa/first-experience.test.mjs qa/island-command.test.mjs qa/island-surface-motion.test.mjs qa/memory.test.mjs qa/notification-awareness.test.mjs qa/account-email.test.mjs qa/markdown-layout.test.mjs qa/statistics.test.mjs qa/chat-beta-polish.test.mjs
 
-      - name: Verify signed WebView update packaging
-        run: python3 -m unittest discover -s tools -p 'test_package_web_update.py' -v
+      - name: Verify release metadata and signed WebView update packaging
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
 
       - name: Verify website and administrator console
         run: |
@@ -170,27 +188,23 @@ jobs:
         if: steps.signing.outputs.publish == 'true'
         id: apk
         shell: bash
+        env:
+          VERSION: ${{ steps.release_metadata.outputs.version }}
+          APK_NAME: ${{ steps.release_metadata.outputs.name }}
+          RELEASE_TAG: ${{ steps.release_metadata.outputs.tag }}
+          PRERELEASE: ${{ steps.release_metadata.outputs.prerelease }}
         run: |
-          version=$(sed -nE 's/^[[:space:]]*versionName = "([0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?)".*/\1/p' app/build.gradle.kts)
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]
+          # Recheck after signing in case another release created this tag during the build.
+          git fetch origin --tags
+          python3 tools/android_release.py prepare --publish --commit "$GITHUB_SHA"
           mkdir -p release
           test -s app/build/outputs/apk/release/app-release.apk
-          name="CORTEX-$version.apk"
-          tag="v$version"
-          if git show-ref --verify --quiet "refs/tags/$tag" && [[ "$(git rev-parse "$tag^{commit}")" != "$GITHUB_SHA" ]]; then
-            echo "::error::$tag already points to a different commit. Increment the Android version before publishing an update."
-            exit 1
-          fi
-          cp app/build/outputs/apk/release/app-release.apk "release/$name"
-          (cd release && sha256sum "$name" > SHA256SUMS.txt)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [[ "$version" == *"-beta."* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
+          cp app/build/outputs/apk/release/app-release.apk "release/$APK_NAME"
+          (cd release && sha256sum "$APK_NAME" > SHA256SUMS.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=$APK_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
 
       - name: Save APK artifact
         if: steps.signing.outputs.publish == 'true'
@@ -215,7 +229,7 @@ jobs:
           overwrite_files: true
           draft: false
           prerelease: ${{ steps.apk.outputs.prerelease == 'true' }}
-          make_latest: true
+          make_latest: ${{ steps.apk.outputs.prerelease != 'true' }}
 
       - name: Verify downloadable release
         if: steps.signing.outputs.publish == 'true'
@@ -225,14 +239,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.apk.outputs.tag }}
           APK_NAME: ${{ steps.apk.outputs.name }}
+          PRERELEASE: ${{ steps.apk.outputs.prerelease }}
         run: |
           verified="$(mktemp -d "$RUNNER_TEMP/cortex-download.XXXXXXXX")"
+          verify_release_identity() {
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$verified/release.json" || return 1
+            release_commit=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha) || return 1
+            python3 tools/android_release.py verify --response "$verified/release.json" \
+              --commit "$GITHUB_SHA" --tag-commit "$release_commit" || return 1
+            # GitHub /releases/latest deliberately excludes prereleases.
+            if [[ "$PRERELEASE" != "true" ]]; then
+              [[ "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" == "$TAG" ]] || return 1
+            fi
+          }
           for attempt in 1 2 3; do
             if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --clobber --dir "$verified" \
                     --pattern "$APK_NAME" --pattern SHA256SUMS.txt &&
                cmp release/SHA256SUMS.txt "$verified/SHA256SUMS.txt" &&
                (cd "$verified" && sha256sum --check SHA256SUMS.txt) &&
-               [[ "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" == "$TAG" ]]; then
+               verify_release_identity; then
               exit 0
             fi
             if [[ "$attempt" != 3 ]]; then sleep 8; fi
