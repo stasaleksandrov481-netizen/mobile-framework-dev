@@ -23,14 +23,14 @@ export default function Home() {
 
       <main className="hero">
         <div className="hero-copy">
-          <p className="release-status"><span className="live-dot" /> ОТКРЫТАЯ БЕТА · 20 НОЯБРЯ</p>
+          <p className="release-status"><span className="live-dot" /> ПОДГОТОВКА К ОТКРЫТОЙ БЕТЕ</p>
           <h1>Телефон,<br />который <span>слышит.</span></h1>
           <p className="hero-description">
             CORTEX управляет Android по твоей команде. Меньше нажатий. Больше свободы.
           </p>
           <div className="hero-actions">
             <RegistrationCta isOpen={registrationIsOpen()} />
-            <DownloadCTA url={downloadUrl} />
+            <DownloadCTA url={downloadUrl} released={process.env.CORTEX_PUBLIC_DOWNLOAD_ENABLED === "true"} />
           </div>
           <p className="bonus-note"><strong>+5 000 ИИ-токенов</strong> за раннюю регистрацию. О запуске сообщим по почте, если согласишься получать уведомление.</p>
         </div>
