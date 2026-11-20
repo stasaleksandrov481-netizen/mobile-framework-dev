@@ -44,4 +44,10 @@ class CortexScheduleIntentTest {
         assertEquals("позвонить маме", dashed.text)
         assertEquals(now.toLocalDate().plusDays(1).atTime(19, 5), dashed.time?.local)
     }
+
+    @Test fun aCoupleOfMinutesIsTwoMinutes() {
+        val result = CortexScheduleIntent.parse("напомни через пару минут выключить плиту", now)!!
+        assertEquals("выключить плиту", result.text)
+        assertEquals(now.toInstant().plusSeconds(120).toEpochMilli(), result.time?.epoch)
+    }
 }
