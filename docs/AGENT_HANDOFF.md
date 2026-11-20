@@ -1,3 +1,7 @@
+## 2026-11-20 UTC · remove unconfirmed November 20 website launch promise, payment UI blocked by source drift
+
+- User requests replacing Platega with Robokassa on live /payment and removing the 20 November installation promise. GitHub main based on `d47d212325e14cb15a7603fd44eb425c27b6e481` has no /payment, while production Vercel `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` does. **Production/source divergence is confirmed; do not deploy main or claim live fix.** This branch `fix/cortex-web-release-tbd-20261120` changes only date-related main UI, stops date-triggered public download, and creates the release blocker doc; a sibling branch `fix/cortex-payment-copy-20261120` updates Platega→Robokassa on the recovery-site candidate, not on production. No payment credentials, Vercel, Supabase, Android or deployment changed. Tests/PR pending; source mismatch and visual comparison unresolved. Details: `docs/WEB_RELEASE_DATE_AND_PAYMENT_COPY_20261120.md`.
+
 ## 2026-11-19 UTC · Beta.9 OEM calculator glyph fix after PR #94 merge
 
 - User merged PR #94 correctly; `main` became `9930120a839f6b3d64b0ccd006b6cb53f3295a1f`. The first automatic nonrelease Android build `44563964021` passed; the subsequent manually dispatched release run `44565132375` failed version validation because `v1.0.18-beta.8` already exists. **No signed APK with PR #94 was published**. Signed beta.8 remains rollback.

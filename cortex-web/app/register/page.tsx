@@ -7,7 +7,7 @@ import { registrationIsOpen } from "@/lib/registration-gate";
 
 export const metadata: Metadata = {
   title: "Регистрация — CORTEX",
-  description: "Регистрация в CORTEX до запуска открытой беты 20 ноября. Бонус 5 000 ИИ-токенов для ранних пользователей.",
+  description: "Регистрация в CORTEX до запуска открытой беты. Бонус 5 000 ИИ-токенов для ранних пользователей.",
 };
 
 export default function RegisterPage() {
