@@ -19,13 +19,9 @@ const CortexMarkdown = (() => {
     const token = tokens[index];
     token.attrSet("target", "_blank");
     token.attrSet("rel", "noopener noreferrer");
-    const href = webUrl(token.attrGet("href"));
-    if (!href) return renderer.renderToken(tokens, index, options);
-    const host = new URL(href).hostname.toLowerCase();
-    const safe = host.length <= 253 && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host);
-    return renderer.renderToken(tokens, index, options) + (safe
-      ? '<img class="cortex-site-favicon" src="/favicons/' + escape(host) + '" alt="" aria-hidden="true" loading="lazy" decoding="async">'
-      : '');
+    // No per-site favicons: fetching them would tell a third party which sites
+    // appear in the user's chats. A fixed local icon marks external links.
+    return renderer.renderToken(tokens, index, options);
   };
   parser.renderer.rules.image = (tokens, index, options, env, renderer) => {
     const token = tokens[index];

@@ -13,7 +13,7 @@ const CortexUI = (() => {
     notifications: "settings", data: "profile", memory: "profile", permissions: "profile",
     support: "profile", faq: "support", about: "profile", privacy: "about", guide: "home", "tool-list": "phone-tools", personality: "memory",
     chat: "home", "phone-tools": "settings", schedule: "profile", scenarios: "phone-tools",
-    "island-editor": "phone-tools", energy: "settings",
+    "island-editor": "phone-tools", energy: "settings", "ai-models": "home",
     account: "profile"
   };
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c =>
@@ -46,9 +46,10 @@ const CortexUI = (() => {
     return `<div class="filters">${Object.entries(values).map(([value, label]) => pill(label, action, value, selected === value)).join("")}</div>`;
   }
   function modelLogo(item) {
-    const src = item.domain ? `/favicons/${esc(item.domain)}` : "art/mark.svg";
-    return `<span class="ai-provider-badge"><img class="ai-provider-icon" src="${src}" alt="${esc(item.brand)}" loading="lazy"><span class="ai-provider-initials" hidden aria-hidden="true">${esc(item.brand.slice(0, 1))}</span></span>`;
+    const src = /^[a-z]{2,16}$/.test(item?.logo || "") && item.logo !== "cortex" ? `art/ai/${item.logo}.svg` : "art/mark.svg";
+    return `<span class="ai-provider-badge"><img class="ai-provider-icon" src="${src}" alt="" aria-hidden="true"></span>`;
   }
+  const currentModel = () => M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0];
   function modelChoices(selected, compact = false) {
     return `<div class="ai-model-list ${compact ? "compact" : ""}">${M.aiModels.map(item =>
       `<button type="button" class="ai-model-option" aria-pressed="${selected === item.id}" ${attributes("ai-model", item.id)}>
@@ -97,26 +98,38 @@ const CortexUI = (() => {
         </div>
       </div>
       <div class="composer-footer">
-        <details class="ai-model-picker"><summary aria-label="Выбрать модель ИИ" title="Выбрать модель ИИ">
-          ${modelLogo(M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0])}
-          <span class="ai-model-label">${esc((M.aiModels.find(item => item.id === M.state.preferences.aiModel) || M.aiModels[0]).name)}</span>
-          <span class="ai-model-chevron" aria-hidden="true"></span></summary>
-          <div class="ai-model-popover"><header>Выбрать модель</header>
-          ${modelChoices(M.state.preferences.aiModel, true)}</div>
-        </details>
-        <button class="quota-ring" type="button" aria-label="Остаток токенов" title="Остаток токенов" ${attributes("quota-detail")} hidden>
+        <button class="quota-ring" type="button" aria-label="Лимиты ИИ" title="Лимиты ИИ" ${attributes("quota-detail")} hidden>
           <span class="quota-ring-art" aria-hidden="true"></span>
         </button>
+        <span class="composer-hint" aria-hidden="true">Ответы ИИ могут быть неточными</span>
       </div>
     </form>`;
   }
 
+  const starters = [
+    ["Будильник на 7:30", "Поставь будильник на 7:30", "history"],
+    ["Напомнить позже", "Напомни через час проверить почту", "bell"],
+    ["Что ты умеешь?", "Что ты умеешь делать на моём телефоне?", "spark"],
+    ["Объясни простыми словами", "Объясни простыми словами, как работает ", "message"]
+  ];
+  function greeting(name) {
+    const hour = new Date().getHours();
+    const part = hour < 5 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
+    const first = String(name || "").trim().split(/\s+/u)[0];
+    return first ? `${part}, ${first}` : part;
+  }
   function home() {
-    return `<header class="home-header"><div class="brand">${sign}<span>CORTEX</span></div></header>
+    const model = currentModel();
+    return `<header class="home-header">
+        <button type="button" class="model-chip" aria-label="Модель: ${esc(model.name)}. Выбрать модель" ${attributes("go", "ai-models")}>
+          ${modelLogo(model)}<span>${esc(model.name)}</span><span class="model-chip-chevron" aria-hidden="true"></span></button>
+      </header>
       <section class="home-hero" aria-labelledby="home-title">
-        <div class="hero-core" data-home-core aria-hidden="true"><i class="core-orbit"></i><i class="core-orbit"></i><i class="core-orbit"></i>
-          <i class="core-glass"></i>${sign}</div>
-        <div class="hero-copy"><h1 id="home-title">Чем помочь?</h1></div>
+        <div class="home-mark" aria-hidden="true">${sign}</div>
+        <h1 id="home-title">${esc(greeting(M.state.preferences.addressName || M.state.account?.name))}</h1>
+        <p class="home-sub">Спросите что угодно или попросите сделать что-то на телефоне.</p>
+        <div class="home-starters">${starters.map(([title, text, glyph]) =>
+          `<button type="button" class="starter" ${attributes("starter", text)}>${icon(glyph, 17)}<span>${esc(title)}</span></button>`).join("")}</div>
       </section>`;
   }
 
@@ -144,7 +157,7 @@ const CortexUI = (() => {
       if (/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) hosts.add(host);
     }
     return hosts.size ? `<div class="web-source-badges" aria-label="Сайты-источники">${icon("globe", 14)}<span>Источники</span>` +
-      [...hosts].map(host => `<span class="web-source-badge"><img src="/favicons/${esc(host)}" alt="" loading="lazy">${esc(host)}</span>`).join("") +
+      [...hosts].map(host => `<span class="web-source-badge">${icon("link", 12)}${esc(host)}</span>`).join("") +
       "</div>" : "";
   }
 
@@ -239,7 +252,6 @@ const CortexUI = (() => {
             ${button("Войти", "user", "account-options", "", "primary")}
             ${button("Создать аккаунт", "", "email-auth", "signup", "outline")}</div>` : ""}
         </section>
-        ${CortexSubscription.balance(ctx.connection?.quota || ctx.connection?.subscription?.quota, esc)}
         ${group(tile("Напоминания", "Созданные голосом и вручную", "bell", "go", "schedule") +
           tile("Настройки", "", "sliders", "go", "settings") +
           tile("Данные и чаты", "", "folder", "go", "data") +
@@ -405,12 +417,24 @@ const CortexUI = (() => {
       <div>${icon("shield", 22)}<strong>Контролируйте доступ</strong><p>Разрешения выдаются для отдельных функций и всегда управляются через Android.</p></div>
       </section>` + button("Настроить CORTEX", "sliders", "go", "phone-tools", "primary"));
   }
-  function models(ctx) {
-    return detail("Модели ИИ", "", `<section class="panel stack">
-      ${modelChoices(M.state.preferences.aiModel)}
-      <h2 class="group-label">Режим авто</h2>${choices(M.models, M.state.preferences.model, "model-profile")}
-    </section>`);
+  function modelRow(item, selected) {
+    return `<button type="button" class="model-row" role="radio" aria-checked="${selected === item.id}" ${attributes("ai-model", item.id)}>
+      ${modelLogo(item)}<span class="tile-copy"><strong>${esc(item.name)}</strong><small>${esc(item.paid ? item.detail + " за 1 млн токенов" : item.detail)}</small></span>
+      ${item.paid ? '<span class="model-tier">PRO</span>' : ""}<span class="model-check" aria-hidden="true">${icon("check", 16)}</span></button>`;
   }
+  function aiModels() {
+    const selected = M.state.preferences.aiModel;
+    const free = M.aiModels.filter(item => !item.paid);
+    const brands = [...new Set(M.aiModels.filter(item => item.paid).map(item => item.brand))];
+    return detail("Модель", "Влияет на ответы в чате. Действия на телефоне работают с любой.", `
+      <section class="model-group" role="radiogroup" aria-label="Бесплатные модели">${free.map(item => modelRow(item, selected)).join("")}</section>
+      <h2 class="group-label">С подпиской</h2>
+      ${brands.map(brand => `<section class="model-group" role="radiogroup" aria-label="${esc(brand)}">
+        <h3 class="model-brand">${esc(brand)}</h3>
+        ${M.aiModels.filter(item => item.paid && item.brand === brand).map(item => modelRow(item, selected)).join("")}</section>`).join("")}
+      <h2 class="group-label">Режим «Авто»</h2>${choices(M.models, M.state.preferences.model, "model-profile")}`);
+  }
+  function models() { return aiModels(); }
   function language() {
     return detail("Язык", "Ответы и распознавание речи", `<section class="panel stack"><h2>Язык CORTEX</h2>
       ${choices(M.languages, M.state.preferences.language, "language")}
@@ -541,7 +565,7 @@ const CortexUI = (() => {
 
   function page(route, ctx) {
     const pages = { home, chat, chats, profile, account, settings, subscription: ctx => CortexSubscription.page(ctx, { detail, esc, button }), motion, "phone-tools": phoneTools, language, notifications,
-      data, memory, personality, permissions, support, faq, about, privacy, guide, models, "tool-list": toolList };
+      data, memory, personality, permissions, support, faq, about, privacy, guide, models, "ai-models": aiModels, "tool-list": toolList };
     return pages[route](ctx);
   }
   function navigation() {
@@ -561,7 +585,44 @@ const CortexUI = (() => {
     return text.replace(/\D/g, "").slice(0, 6);
   }
 
-  return { esc, icon, iconButton, button, tile, detail, codeDigits, get version() { return version; },
+  // Usage is shown in one place only: the ring under the composer opens this sheet.
+  function usageSheet(quota) {
+    const plans = { guest: "Гость", free: "Free", start: "Start", pro: "Pro", ultra: "Ultra" };
+    const whole = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+    const limit = whole(quota?.limit), left = whole(quota?.remaining);
+    const unlimited = quota?.unlimited === true;
+    const fraction = unlimited ? 1 : limit && left !== null ? Math.max(0, Math.min(1, left / limit)) : 0;
+    const percent = Math.round(fraction * 100);
+    const number = new Intl.NumberFormat("ru-RU");
+    const when = value => {
+      const parsed = value ? new Date(value) : null;
+      return parsed && Number.isFinite(+parsed) ? parsed.toLocaleString("ru-RU",
+        { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" }) + " МСК" : "";
+    };
+    const length = 2 * Math.PI * 52;
+    const rows = [
+      ["Тариф", plans[quota?.plan] || "Free"],
+      unlimited ? ["Лимит", "Без ограничений"] : limit !== null ? ["Дневной лимит", number.format(limit) + " токенов"] : null,
+      !unlimited && limit !== null && left !== null ? ["Использовано сегодня", number.format(Math.max(0, limit - left)) + " токенов"] : null,
+      when(quota?.reset_at) ? ["Обновится", when(quota.reset_at)] : null,
+      when(quota?.ends_at) ? ["Подписка до", when(quota.ends_at)] : null
+    ].filter(Boolean);
+    return `<div class="usage-sheet">
+      <div class="usage-ring" role="img" aria-label="Осталось ${percent}%">
+        <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="usage-track" cx="60" cy="60" r="52"/>
+          <circle class="usage-value" cx="60" cy="60" r="52" stroke-dasharray="${length.toFixed(1)}"
+            stroke-dashoffset="${(length * (1 - fraction)).toFixed(1)}"/></svg>
+        <div><strong>${unlimited ? "∞" : percent + "%"}</strong><span>осталось</span></div>
+      </div>
+      <p class="usage-headline">${unlimited ? "Облачный ИИ без дневного лимита" : left !== null && limit !== null
+        ? `${esc(number.format(left))} из ${esc(number.format(limit))} токенов` : "Остаток пока недоступен"}</p>
+      <dl class="usage-rows">${rows.map(([name, value]) => `<div><dt>${esc(name)}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>
+      <p class="usage-note">Локальные команды, сценарии и напоминания не расходуют токены.</p>
+      ${button("Тарифы и подписка", "star", "go", "subscription", "primary")}
+    </div>`;
+  }
+
+  return { esc, icon, iconButton, button, tile, detail, codeDigits, usageSheet, get version() { return version; },
     setVersion(value) { if (/^\d+\.\d+\.\d+(?:[-.][a-z0-9.]+)?$/i.test(value)) version = value; },
     tabs, parent, page, composer, navigation, history, chatItems, accountModes, accountAvailability };
 })();

@@ -201,3 +201,85 @@
 @media (prefers-reduced-motion: reduce) {
   #app :is(.tile, .switch-row, .action, .icon-btn, .switch-track, .switch-track i) { transition: none; }
 }
+
+/* ---------- Empty chat (home) ---------- */
+#app .home-header { display: flex; align-items: center; justify-content: center; min-height: 56px;
+  padding: calc(env(safe-area-inset-top) + 10px) var(--ui-pad) 6px; }
+#app .model-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 12px 0 6px;
+  border: 1px solid var(--ui-stroke); border-radius: 999px; background: var(--ui-surface); color: var(--ui-text);
+  font-size: 14px; font-weight: 600; }
+#app .model-chip .ai-provider-badge { width: 26px; height: 26px; }
+#app .model-chip-chevron { width: 7px; height: 7px; margin: -3px 2px 0 2px; border: solid var(--ui-text-2);
+  border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+#app .home-hero { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  min-height: 0; flex: 1; padding: 0 var(--ui-pad) 24px; text-align: center; }
+#app .home-hero .home-mark { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 18px;
+  border: 1px solid var(--ui-stroke-strong); border-radius: 16px; background: var(--ui-surface); }
+#app .home-hero .home-mark img { width: 28px; height: 28px; }
+#app .home-hero h1 { font-size: 26px; font-weight: 680; letter-spacing: -.03em; line-height: 1.15; }
+#app .home-sub { max-width: 300px; margin: 8px 0 0; color: var(--ui-text-2); font-size: 14.5px; line-height: 1.45; }
+#app .home-starters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 420px; margin-top: 26px; }
+#app .starter { display: flex; align-items: center; gap: 9px; min-height: 52px; padding: 10px 12px; border: 1px solid var(--ui-sep);
+  border-radius: 14px; background: var(--ui-surface); color: var(--ui-text); font-size: 13.5px; font-weight: 560; line-height: 1.25;
+  text-align: start; transition: background .15s, transform .15s var(--ui-ease); }
+#app .starter svg { flex: none; width: 17px; height: 17px; color: var(--ui-text-2); }
+#app .starter:active { transform: scale(.97); background: var(--ui-surface-2); }
+#app[data-route="home"] .ambient { opacity: .28; }
+
+/* ---------- Composer ---------- */
+#app .composer { display: flex; flex-direction: column; gap: 0; padding: 10px 10px 8px 16px; border: 1px solid var(--ui-stroke);
+  border-radius: 26px; background: var(--ui-surface); }
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  #app .composer { background: rgb(16 16 17 / .88); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+}
+#app .composer:focus-within { border-color: var(--ui-stroke-strong); }
+#app .composer-input-row { display: flex; align-items: flex-end; gap: 8px; min-height: 40px; }
+#app .composer textarea { flex: 1; min-height: 24px; max-height: 168px; padding: 8px 0; border: 0; background: transparent;
+  line-height: 1.45; resize: none; outline: 0; }
+#app .composer-button { display: grid; place-items: center; flex: none; width: 38px; height: 38px; padding: 0; border: 0;
+  border-radius: 50%; background: var(--ui-surface-3); color: var(--ui-text); }
+#app .composer-button svg { width: 20px; height: 20px; }
+#app .send-button:not([disabled]), #app .stop-button { background: var(--ui-text); color: #000; }
+#app .composer-footer { display: flex; align-items: center; gap: 8px; min-height: 26px; margin-top: 2px; }
+#app .composer-hint { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-text-3); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+#app .quota-ring { display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; background: transparent; }
+#app .quota-ring-art { width: 18px; height: 18px; border-radius: 50%;
+  background: conic-gradient(var(--ui-text) var(--quota-fraction, 0%), rgb(255 255 255 / .14) 0); }
+#app .quota-ring-art::after { inset: 3px; background: var(--ui-surface); }
+
+/* ---------- Model page ---------- */
+#app .model-group { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--ui-sep);
+  border-radius: var(--ui-radius); background: var(--ui-surface); }
+#app .model-group + .model-group { margin-top: 2px; }
+#app .model-brand { margin: 0; padding: 12px 14px 4px; color: var(--ui-text-3); font-size: 12px; font-weight: 600; }
+#app .model-row { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; margin: 0;
+  padding: 9px 14px; border: 0; background: transparent; color: var(--ui-text); text-align: start; }
+#app .model-row + .model-row::before { content: ""; position: absolute; top: 0; right: 0; left: 56px; height: 1px; background: var(--ui-sep); }
+#app .model-row:active { background: rgb(255 255 255 / .04); }
+#app .ai-provider-badge { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px;
+  background: var(--ui-surface-3); overflow: hidden; }
+#app .ai-provider-icon { width: 70%; height: 70%; object-fit: contain; }
+#app .model-tier { flex: none; padding: 2px 7px; border: 1px solid var(--ui-stroke); border-radius: 6px; color: var(--ui-text-2);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; }
+#app .model-check { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; color: #000;
+  background: transparent; opacity: 0; }
+#app .model-row[aria-checked="true"] .model-check { background: var(--ui-text); opacity: 1; }
+
+/* ---------- Usage sheet ---------- */
+#app .usage-sheet { display: grid; justify-items: center; gap: 10px; padding: 4px 4px 8px; text-align: center; }
+#app .usage-ring { position: relative; width: 132px; height: 132px; }
+#app .usage-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+#app .usage-ring circle { fill: none; stroke-width: 9; stroke-linecap: round; }
+#app .usage-track { stroke: rgb(255 255 255 / .1); }
+#app .usage-value { stroke: var(--ui-text); transition: stroke-dashoffset .6s var(--ui-ease); }
+#app .usage-ring > div { position: absolute; inset: 0; display: grid; place-content: center; }
+#app .usage-ring strong { font-size: 28px; font-weight: 700; letter-spacing: -.03em; }
+#app .usage-ring span { color: var(--ui-text-2); font-size: 12px; }
+#app .usage-headline { margin: 0; font-size: 15px; font-weight: 600; }
+#app .usage-rows { width: 100%; margin: 4px 0 0; overflow: hidden; border: 1px solid var(--ui-sep); border-radius: 14px; background: var(--ui-surface-2); text-align: start; }
+#app .usage-rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 14px; }
+#app .usage-rows > div + div { border-top: 1px solid var(--ui-sep); }
+#app .usage-rows dt { color: var(--ui-text-2); }
+#app .usage-rows dd { margin: 0; font-weight: 600; text-align: end; }
+#app .usage-note { margin: 0; color: var(--ui-text-3); font-size: 12.5px; }
+#app .usage-sheet .action { width: 100%; }

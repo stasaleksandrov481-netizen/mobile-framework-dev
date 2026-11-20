@@ -46,7 +46,7 @@ const CortexSubscription = (() => {
     const paid = ["start", "pro", "ultra"].includes(current);
     const canBuy = subscription?.checkout === true;
     const loadError = ctx.connection.subscriptionError;
-    const hero = `${balance(quota, esc)}<section class="sub-hero"><header><span>Текущий тариф</span><strong>${esc(names[current])}</strong></header>
+    const hero = `<section class="sub-hero"><header><span>Текущий тариф</span><strong>${esc(names[current])}</strong></header>
       ${paid && quota?.ends_at ? `<p class="sub-note">Подписка до ${esc(date(quota.ends_at))} МСК</p>` : ""}
       ${paid ? `<p class="sub-note">Продление вручную</p>` : ""}</section>`;
     const catalogue = plans.map(plan => {

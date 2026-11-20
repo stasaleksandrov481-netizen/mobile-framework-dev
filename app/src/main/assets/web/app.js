@@ -52,7 +52,6 @@
   const input = form.querySelector("#composer-input");
   const send = form.querySelector(".send-button");
   const quotaRing = form.querySelector(".quota-ring");
-  const modelPicker = form.querySelector(".ai-model-picker");
   const voiceButton = form.querySelector(".voice-button");
   const stop = form.querySelector(".stop-button");
   const voicePanel = form.querySelector("#voice-inline");
@@ -412,25 +411,6 @@
   addEventListener("popstate", () => { closeSheet(); closeHistory(true); readRoute(); });
 
   function syncComposer() {
-    if (modelPicker) {
-      const selected = M.aiModels.find(item => item.id === S.preferences.aiModel) || M.aiModels[0];
-      const summary = modelPicker.querySelector("summary");
-      const icon = summary?.querySelector("img");
-      const url = selected.domain ? `/favicons/${selected.domain}` : "art/mark.svg";
-      if (icon && icon.getAttribute("src") !== url) {
-        icon.hidden = false;
-        if (icon.nextElementSibling?.classList.contains("ai-provider-initials")) {
-          icon.nextElementSibling.hidden = true;
-          icon.nextElementSibling.textContent = selected.brand.slice(0, 1);
-        }
-        icon.src = url;
-      }
-      if (summary) summary.title = `Модель: ${selected.name}`;
-      const label = summary?.querySelector(".ai-model-label");
-      if (label) label.textContent = selected.name;
-      modelPicker.querySelectorAll(".ai-model-option").forEach(button =>
-        button.setAttribute("aria-pressed", String(button.dataset.value === selected.id)));
-    }
     const quota = connection.quota;
     if (quotaRing) {
       const known = quota?.unit === "tokens" && (quota.unlimited || Number(quota.limit) > 0);
@@ -1769,8 +1749,7 @@
     "quota-detail": () => {
       const quota = connection.quota;
       if (!quota || quota.unit !== "tokens") return flash("Баланс пока недоступен.");
-      showSheet("Использование", `<p>${quota.unlimited ? "Без лимита" :
-        `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")}`}</p>`);
+      showSheet("Лимиты ИИ", U.usageSheet(quota));
     },
     "copy-code"(_, control) { return copyText(control.closest(".code-block")?.querySelector("code")?.textContent); },
     dictate: (_, control) => startVoice(true, control),
@@ -1829,8 +1808,15 @@
         navigate("subscription");
         return;
       }
-      if (modelPicker) modelPicker.open = false;
       preference("aiModel", value);
+      if (route === "ai-models") back();
+    },
+    starter(value) {
+      // Starters only fill the composer: phone actions still need the user's own send.
+      input.value = String(value || "").slice(0, 300);
+      syncComposer();
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
     },
     "account-options": accountOptions,
     "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),

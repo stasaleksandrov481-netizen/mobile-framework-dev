@@ -1,0 +1,7 @@
+Provider logos in this folder come from @lobehub/icons-static-svg 1.104.0
+(https://github.com/lobehub/lobe-icons), MIT License, Copyright (c) LobeHub.
+Monochrome marks were recoloured white for the dark interface; no other changes.
+
+The logos are trademarks of their respective owners (NVIDIA, Google, Cohere,
+Anthropic, OpenAI, DeepSeek, Alibaba Qwen, Moonshot AI, Mistral AI, xAI, Z.ai)
+and are shown only to identify the model a user selects.

@@ -1,3 +1,11 @@
+## 2026-11-20 UTC · PR #100: model page, usage ring sheet, favicon leak removed
+
+- Composer: model picker removed; footer = usage ring + short hint. Home: model chip (→ new route `ai-models`, parent `home`), time-based greeting, four starters (`starter` action only fills the input, never sends). `ai-models` page: free models, then paid grouped by brand, radio rows; selecting navigates back.
+- Logos: 12 SVGs from `@lobehub/icons-static-svg` 1.104.0 (MIT) in `art/ai/` with `LICENSE.txt`; scanned for script/href/foreignObject; mono marks recoloured white. `model.js` models gain `logo`.
+- Usage: `CortexUI.usageSheet(quota)` (ring, remaining/limit, plan, reset, subscription end; all values escaped/validated) opened by the composer ring; profile and subscription hero no longer show balance.
+- **Privacy fix:** removed `CortexSiteFavicon` and the `/favicons/` WebView path; it sent every citation domain from chats to `www.google.com/s2/favicons`. Links/source badges use a local link icon.
+- JS QA 88/88 (tests updated for the owner's new requirements), `compileDebugKotlin` OK. Screens checked in local Playwright at 393×852; not on a device.
+
 ## 2026-11-20 UTC · PR #100: app UI system (`ui.css`), stage 1
 
 - New `ui.css` (after legacy layers, before `markdown.css`), all rules scoped under `#app`: unified headers, grouped `tile-group`/`access-list` cards with inset separators, glyph tiles, monochrome switches, `.action` variants, chat rows as cards, dock with white core, composer, sheets/toasts/search, minimal splash (rings hidden). `screens.js`: `access-state` gets `is-on`/`is-needed` classes only. Fixed task-list checkboxes hidden by legacy `margin-inline: -1.38em`.

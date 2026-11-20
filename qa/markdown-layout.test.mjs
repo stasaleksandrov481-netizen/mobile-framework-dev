@@ -55,7 +55,7 @@ test("the entire app uses compact spacing and the composer exposes an accessible
   const screens = content("screens.js");
   const app = content("app.js");
   const css = content("style.css");
-  assert.match(screens, /class="quota-ring"[^>]*aria-label="Остаток токенов"/);
+  assert.match(screens, /class="quota-ring"[^>]*aria-label="Лимиты ИИ"/);
   assert.match(app, /quotaRing\.style\.setProperty\("--quota-fraction"/);
   assert.match(app, /quotaRing\.setAttribute\("aria-label", label/);
   assert.match(css, /\.quota-ring-art\s*\{[^}]*conic-gradient/s);
@@ -118,7 +118,7 @@ test("rich metric cards and timelines render only trusted fields", () => {
 
 test("Markdown adds same-origin site icon to safe citation links only", () => {
   const result = markdown()('[OpenRouter](https://openrouter.ai/docs) [unsafe](javascript:alert(1))');
-  assert.match(result, /src="\/favicons\/openrouter\.ai"/);
+  assert.doesNotMatch(result, /\/favicons\//);
   assert.doesNotMatch(result, /\/favicons\/javascript/);
   assert.doesNotMatch(result, /href="javascript:/);
 });
