@@ -18,8 +18,10 @@ test("APK download is closed in code: no link, env switch or launch timer", () =
   assert.doesNotMatch(cta, /href=|process\.env|setTimeout|reload\(/);
   assert.match(cta, /Скачивание закрыто/);
   const home = read("app/page.tsx");
-  assert.match(home, /<DownloadCTA \/>/);
-  assert.doesNotMatch(home, /ANDROID_DOWNLOAD_URL|PUBLIC_DOWNLOAD_ENABLED|\.apk/);
+  const details = read("components/LandingDetails.tsx");
+  assert.match(home, /<LandingDetails /);
+  assert.match(details, /<DownloadCTA \/>/);
+  assert.doesNotMatch(home + details, /ANDROID_DOWNLOAD_URL|PUBLIC_DOWNLOAD_ENABLED|\.apk/);
 });
 
 test("No user-facing page promises the withdrawn 20 November launch date", () => {
