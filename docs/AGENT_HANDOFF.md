@@ -1,3 +1,8 @@
+## 2026-11-20 UTC · PR #100: dative name forms for messaging
+
+- `ConversationMatch.nameForms/searchQuery`: dative `-ю/-е` now also maps to soft-sign names (Игорю → Игорь) and `-ии` to `-ия` (Марии → Мария, search stem «мари»). Exact full-title match and the tie → no-send rule are unchanged. Tests `softSignAndIyaNamesMatchTheirDativeForms` (+negative cases Марина, Игорёк) pass locally.
+- Merged `origin/main` (8e56d8a) into PR #100: PR was CONFLICTING, which is why no CI ran on 6d55caf/e05326c. Conflicts were only in handoff docs; both sides kept.
+
 ## 2026-11-20 UTC · PR #100: GitHub branch cleanup, exact reminders, dotted clock times
 
 - **GitHub cleanup (owner request "наведи порядок, не ломай"):** 115 → 38 remote branches. Deleted only 76 branches whose content is already in `main` (ancestor) or in the base of a merged PR (head SHA == merged PR head). Each first got an annotated tag `archive/<branch>` on the same SHA (76/76 verified via `ls-remote`), deletion was one atomic push with `--force-with-lease`. Kept: `main`, production sources (`fix/cortex-web-safe-recovery-20261118`, `feat/cortex-control-hardening-20261117`), `feat/cortex-web-black-glass-20261120`, all 25 open-PR heads, and 10 branches with unique unmerged commits. No PR closed, no tag rewritten. Details and restore command in `docs/BRANCH_REGISTRY.md`. Note: this departs from the AGENTS.md "no mass branch deletion" rule at the owner's explicit request; it is fully reversible.

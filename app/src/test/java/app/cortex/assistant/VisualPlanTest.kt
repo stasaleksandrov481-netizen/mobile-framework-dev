@@ -161,6 +161,16 @@ class VisualPlanTest {
         assertEquals(0, ConversationMatch.score("Рыба", listOf("Рыба"), "рыбке"))
     }
 
+    @Test fun softSignAndIyaNamesMatchTheirDativeForms() {
+        assertEquals(100, ConversationMatch.score("Игорь", listOf("Игорь"), "Игорю"))
+        assertEquals(100, ConversationMatch.score("Мария", listOf("Мария"), "Марии"))
+        assertEquals("мари", ConversationMatch.searchQuery("Марии"))
+        assertEquals("игор", ConversationMatch.searchQuery("Игорю"))
+        // A different contact sharing the stem is still not accepted.
+        assertEquals(0, ConversationMatch.score("Марина", listOf("Марина"), "Марии"))
+        assertEquals(0, ConversationMatch.score("Игорёк", listOf("Игорёк"), "Игорю"))
+    }
+
     @Test fun youtubeSearchParsesNaturalLocationPhrasesBeforeLaunching() {
         assertEquals(AppSearchRequest("YouTube", "гта 6"),
             AppSearchRequest.parse("Открой в Ютубе и найди гта 6", installed))

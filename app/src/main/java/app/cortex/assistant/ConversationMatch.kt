@@ -24,6 +24,7 @@ internal object ConversationMatch {
         if (!singleRussianWord.matches(target)) return name
         return when {
             target.endsWith('е') || target.endsWith('у') || target.endsWith('ю') -> target.dropLast(1)
+            target.endsWith("ии") -> target.dropLast(1) // Марии → «мари» finds «Мария».
             target.endsWith("ой") || target.endsWith("ей") -> target.dropLast(2)
             else -> name
         }
@@ -36,6 +37,7 @@ internal object ConversationMatch {
         if (!singleRussianWord.matches(target)) return setOf(target)
         val stem = when {
             target.endsWith('е') || target.endsWith('у') || target.endsWith('ю') -> target.dropLast(1)
+            target.endsWith("ии") -> target.dropLast(1)
             target.endsWith("ой") || target.endsWith("ей") -> target.dropLast(2)
             else -> return setOf(target)
         }
@@ -43,8 +45,9 @@ internal object ConversationMatch {
             add(target)
             add(stem) // Антоне → Антон; require the complete contact title to match.
             add(stem + "а")
-            add(stem + "я")
+            add(stem + "я") // Марии → Мария.
             if (target.endsWith('ю')) add(stem + "й") // Андрею → Андрей.
+            if (target.endsWith('ю') || target.endsWith('е')) add(stem + "ь") // Игорю → Игорь.
         }
     }
 
