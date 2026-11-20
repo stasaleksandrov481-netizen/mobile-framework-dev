@@ -1,3 +1,98 @@
+## 2026-11-20 UTC · PR #100: one male voice, reliable wake word
+
+- Server (`handler.ts`): `/v1/speech` always uses Gemini voice `Charon` (male); no longer reads `cortex_voice_preferences` (default was female `Kore`, legacy rows differed per account). Edge tests updated, local `node --experimental-transform-types --test` 78/78. **Not deployed** — redeploy Edge `cortex` only after the standard checks and owner approval. The table/migration are left untouched (no DB change).
+- Android TTS fallback: `CortexVoicePick` chooses an installed male `ru` voice when the engine names gender (Google `#male_N`, RHVoice male speakers), else engine default. Test `CortexVoicePickTest`. Gender detection is heuristic; not verified on devices.
+- Wake word: `CortexHotword` matches on a lower-cased copy (ICU `IGNORE_CASE` Cyrillic folding is not guaranteed; final results are often capitalised), adds common misrecognitions and fillers. Test `CortexHotwordTest` (incl. negatives «Кортеж», «кортексный», mid-sentence mention). Wake remains API 31+ on-device only by design; the error message now states the Android 12 requirement or how to install offline Russian recognition.
+- Not changed: fallback timing (10 s without first cloud chunk → Android voice).
+
+## 2026-11-20 UTC · выкладка Control и Edge, кандидат Android beta.11
+
+- Production CORTEX Control: коммит `c1b4941`, Vercel `dpl_AqfS2QJUFV4gdCWZiKzmRUcnjjmo`, READY, домены назначены. Проверены экран входа и новые стили панели. Предыдущий production `dpl_54SwDppQ5MhE1XFZzUMRKt9NXhHQ`.
+- Edge `cortex` v50 ACTIVE из `6a6a9dc`; 11 исходников совпадают с кандидатом, статус отвечает. Откат — исходники v49 из `8e56d8a`.
+- Ветка `release/cortex-20261120` от `6a6a9dc`: Android beta.11 (128), панель уточнения для приостановленных задач, отдельное состояние островка, отмена и срок ответа. Проверки Android WebView прошли локально. Подписанную сборку выпускает основной GitHub Actions после проверок PR. Физическое устройство ещё не проверено.
+- Первый запуск device regression: 14/15, временная потеря окна при запуске тестового калькулятора. По логу Android Activity стартовала непосредственно перед отказом. Перед первым нажатием теперь повторно ждём свежий снимок готового окна до двух секунд.
+- Android, эмулятор API 34 (15/15) и Edge CI на `081ea0e` зелёные. Два замечания CodeQL относятся к проверочным выражениям Markdown в QA. Сравнение ссылок теперь проверяет точный список, проверка тега регистронезависима. Код приложения после зелёного прогона не менялся.
+
+## 2026-11-20 UTC · PR #100: prompt-leak guard + Android exposure review
+
+- Client: `SECRECY` line in the client context; `Cortex.guardReply()` canary (13 phrases unique to client/server instructions, case/ё/whitespace-normalised) replaces leaked replies with a refusal at stream paint, final save and stop. Test `qa/prompt-secrecy.test.mjs`.
+- Server: stronger non-disclosure sentence in `CORTEX_IDENTITY` (`supabase/functions/cortex/provider.ts`). **Not deployed** — Edge `cortex` must be redeployed only after the usual 11-file/migration check and owner approval. Deno tests not run locally (no deno); CI is the check.
+- Reviewed, no change needed: `allowBackup=false`, cleartext off, default system-only CA trust (targetSdk 35), WebView file/content access off, mixed content never, debugging only in DEBUG, no sensitive Log calls, OAuth return carries no data, schedule extra only opens a task by UUID, Assist activity acts only for the role holder. Remaining hardening ideas (not done): certificate pinning (operational risk), encrypting WebView localStorage chats at rest.
+
+## 2026-11-20 UTC · PR #100: model page, usage ring sheet, favicon leak removed
+
+- Composer: model picker removed; footer = usage ring + short hint. Home: model chip (→ new route `ai-models`, parent `home`), time-based greeting, four starters (`starter` action only fills the input, never sends). `ai-models` page: free models, then paid grouped by brand, radio rows; selecting navigates back.
+- Logos: 12 SVGs from `@lobehub/icons-static-svg` 1.104.0 (MIT) in `art/ai/` with `LICENSE.txt`; scanned for script/href/foreignObject; mono marks recoloured white. `model.js` models gain `logo`.
+- Usage: `CortexUI.usageSheet(quota)` (ring, remaining/limit, plan, reset, subscription end; all values escaped/validated) opened by the composer ring; profile and subscription hero no longer show balance.
+- **Privacy fix:** removed `CortexSiteFavicon` and the `/favicons/` WebView path; it sent every citation domain from chats to `www.google.com/s2/favicons`. Links/source badges use a local link icon.
+- JS QA 88/88 (tests updated for the owner's new requirements), `compileDebugKotlin` OK. Screens checked in local Playwright at 393×852; not on a device.
+
+## 2026-11-20 UTC · PR #100: app UI system (`ui.css`), stage 1
+
+- New `ui.css` (after legacy layers, before `markdown.css`), all rules scoped under `#app`: unified headers, grouped `tile-group`/`access-list` cards with inset separators, glyph tiles, monochrome switches, `.action` variants, chat rows as cards, dock with white core, composer, sheets/toasts/search, minimal splash (rings hidden). `screens.js`: `access-state` gets `is-on`/`is-needed` classes only. Fixed task-list checkboxes hidden by legacy `margin-inline: -1.38em`.
+- Review helper `qa/browser/shots.mjs` captures 13 routes at 393×852 via local Playwright (needs `python -m http.server 3124` in assets/web). JS QA 87/87. Not checked on a device.
+- Pending from owner requests: clarifying-questions panel, system prompt hardening, single male voice + intermittent wake bug, island redesign with Markdown.
+
+## 2026-11-20 UTC · PR #100: ChatGPT-level answer Markdown
+
+- New `markdown-code.js` (escaped single-pass highlighter, fixed `tok-*` classes) and `markdown-math.js` (LaTeX subset → MathML: frac/sqrt/scripts/greek/operators/large ops/functions/accents/fonts/matrix/cases; every node name fixed, all text escaped, 1500-char limit). `markdown.js`: `==mark==`, `++u++` (word-boundary guarded, C++ stays text), `:badge[tone]{text}`, inline/block math (`$5 и $10` stays text), fences `cortex-hero`, `cortex-chart` (bar/line/donut SVG from validated numbers + accessible data table), `cortex-flow`, `details <title>` (nested Markdown, depth ≤ 2), `math/latex`; callouts NOTE/INFO/TIP/IMPORTANT/WARNING/CAUTION/SUCCESS/SECURITY; streaming typed blocks render a placeholder instead of raw JSON.
+- `markdown.css` loaded last, scoped `:is(.message.assistant, body) .markdown` to win over layered `style.css` rules.
+- `model.js` `FORMAT_GUIDE` tells the model which constructs exist (client context, not server authority).
+- QA: `qa/markdown-layout.test.mjs` 15 tests incl. TeX/chart injection; all JS QA 87/87. Visually checked at 393px in a browser fixture (not committed). MathML needs WebView ≥ Chromium 109; older WebView shows unstyled math text.
+
+## 2026-11-20 UTC · PR #100: duck media during voice replies
+
+- `CortexVoiceOutput` now requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (USAGE_ASSISTANT/SPEECH) before cloud PCM or Android TTS playback and abandons it on completion of the current turn, on `stop()` and `close()`. A superseded turn never abandons the newer turn's focus. Focus denial is ignored (still speaks). Compiles; not verified on a device with music playing.
+
+## 2026-11-20 UTC · PR #100: dative name forms for messaging
+
+- `ConversationMatch.nameForms/searchQuery`: dative `-ю/-е` now also maps to soft-sign names (Игорю → Игорь) and `-ии` to `-ия` (Марии → Мария, search stem «мари»). Exact full-title match and the tie → no-send rule are unchanged. Tests `softSignAndIyaNamesMatchTheirDativeForms` (+negative cases Марина, Игорёк) pass locally.
+- Merged `origin/main` (8e56d8a) into PR #100: PR was CONFLICTING, which is why no CI ran on 6d55caf/e05326c. Conflicts were only in handoff docs; both sides kept.
+
+## 2026-11-20 UTC · PR #100: GitHub branch cleanup, exact reminders, dotted clock times
+
+- **GitHub cleanup (owner request "наведи порядок, не ломай"):** 115 → 38 remote branches. Deleted only 76 branches whose content is already in `main` (ancestor) or in the base of a merged PR (head SHA == merged PR head). Each first got an annotated tag `archive/<branch>` on the same SHA (76/76 verified via `ls-remote`), deletion was one atomic push with `--force-with-lease`. Kept: `main`, production sources (`fix/cortex-web-safe-recovery-20261118`, `feat/cortex-control-hardening-20261117`), `feat/cortex-web-black-glass-20261120`, all 25 open-PR heads, and 10 branches with unique unmerged commits. No PR closed, no tag rewritten. Details and restore command in `docs/BRANCH_REGISTRY.md`. Note: this departs from the AGENTS.md "no mass branch deletion" rule at the owner's explicit request; it is fully reversible.
+- **Reminders:** added `USE_EXACT_ALARM` (granted at install on API 33+) next to `SCHEDULE_EXACT_ALARM`; Android 14+ denies the latter by default, so reminders fell back to inexact `setAndAllowWhileIdle`. Play policy restricts `USE_EXACT_ALARM` to alarm/calendar apps — revisit before any Play release.
+- **Clock parsing:** `CortexScheduleIntent.clock` accepts `7.30` / `7-30` as well as `7:30`; previously «в 7.30» scheduled 7:00 and left «.30» in the reminder text. New test `dottedOrDashedClockTimeKeepsMinutesOutOfTheText`; regex verified with Unicode boundaries locally (JDK 21 cannot run the Cyrillic JVM tests, see A5) — CI on JDK 17 is the authority.
+- Lint 0 errors, JS QA 81/81. Not verified on a device.
+
+## 2026-11-20 UTC · PR #100: registration / six-digit code input
+
+- Reviewed `screens.js` account form (single hidden `one-time-code` input + 6 visual cells, so paste/autofill/Backspace/rotation are native), `app.js` `submitAccount`/`resendCode`, native `CortexServerBridge` auth ops and Edge `emailAuth` (rate buckets per IP/email, identical response for unknown addresses, `auth_credentials` for wrong and expired codes).
+- Fixed: (1) `maxlength=6` + strip-non-digits turned a pasted "Код действует 10 минут: 482913" into `101234`; new `CortexUI.codeDigits` picks a single standalone 6-digit group, plus a `paste` handler that runs before maxlength truncation. (2) Verify mode auto-submits on the sixth digit (guarded by `aria-busy`, `checkValidity`, and the existing `submit.disabled`); reset mode does not, it still needs passwords. (3) Rejected code is selected for overwrite; code-mode `auth_credentials` copy says the code is wrong/expired instead of mentioning the password.
+- Not changed: server accepts 6–10 digit codes while the UI enforces 6. If the Supabase Auth OTP length is ever set above 6, the app cannot verify — keep project OTP length at 6 or widen the UI together. Live Auth config was not inspected.
+- Local JS QA 74/74 (`qa/account-email.test.mjs` +1 test). Not verified on a device keyboard/autofill.
+
+## 2026-11-20 UTC · PR #100: cross-shell app roles and background access
+
+- `CortexAppRoles` (pure, `CortexAppRolesTest`) + `CortexPhoneActions.roleApp`: after exact label/alias lookup, spoken role words (inflected RU/EN) resolve through `makeMainSelectorActivity` categories, `ACTION_DIAL`, `SHOW_ALARMS`, `ACTION_SETTINGS`; default handler first, else a launchable system handler; never the chooser package `android`. Manifest `<queries>` added for these intents. "интернет" deliberately not mapped (conflicts with network panel commands).
+- `CortexBackgroundAccess` (+ test): `background-permission` bridge op opens `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (new normal permission `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; revisit if publishing to Google Play), then the battery list, then a vendor autostart screen resolved on device, then app details. Manifest `<queries><package>` for those vendor packages. UI: one `item()` row "Работа в фоне" in the existing Android access screen, state = `compatibility.batteryUnrestricted` (autostart state is not detectable). Copy in compatibility panel updated. No new styles.
+- `FirstExperienceCalculator.PACKAGES` + OnePlus, Transsion, Meizu.
+- Local: new JVM tests pass, lint 0 errors, JS QA 73/73. UI change not screenshot-verified; vendor components are from public OEM knowledge and must be confirmed per `docs/ANDROID_TEST_MATRIX.md`.
+
+- CI note: device regression on intermediate commit 7f3bb28 failed 14/15 — `stopDuringRealBrightnessRampRestoresSettings` timed out after 12 s; that commit did not touch first-experience brightness and the next commit 7c406bd passed 15/15. Treat as emulator timing flakiness, watch for recurrence.
+
+## 2026-11-20 UTC · PR #100: brightness command on vendor ranges
+
+- `CortexBrightness` assumed `screen_brightness` max 255 and returned `unavailable` for any larger value, so "увеличь/уменьши яркость" could never work on OEM builds storing 0..1023/2047/4095, although `FirstExperienceBrightness` already scaled such ranges. Now `Port.maximum()` (framework `config_screenBrightnessSettingMaximum`, trusted only if >=255 and >= current value) or a range inferred from the current value; readback verification unchanged. Existing test that asserted 1023 = unsupported updated (70_000 stays unsupported); 2 new tests; `CortexBrightnessTest` 8/8 locally.
+- Percent is linear in the raw value, not Android's gamma slider percent; first-experience scaling left untouched. Needs real Xiaomi/vivo check.
+
+## 2026-11-20 UTC · Follow-up on PR #100: off-main-thread file work, risk gate, HTTPS links
+
+- Same branch. `CortexDeviceBridge.handleActivityResult`: image decode/JPEG compression (501), chat export (502), scenario import (503) and export (504) now run on a short background thread (`background {}`); `emit` is safe off-thread because `MainActivity.deviceEvent` uses `runOnUiThread`. Chat export previously reported `ok:true` when `openOutputStream` returned null; now requires a stream.
+- `VisualSafety.irreversible` adds call/dial, accept/agree/consent, sign-out/выйти, unsubscribe, format. Deliberately NOT added: clear/очистить (calculator and search fields would prompt constantly). New `VisualPlanTest.callsConsentAndAccountExitAlwaysNeedConfirmation`.
+- `markdown.js` `webUrl` is HTTPS-only to match native `CortexSafeUrl`; `qa/markdown-layout.test.mjs` new case. `CortexServerBridge.speechBytes` now gates `X-Cortex-Device` on `approvedApkSignature` like `call()`/`streamSpeechBytes()`.
+- Local: JS QA 66/66; JVM new tests pass; `VisualPlanTest` 2 failures identical to baseline on JDK 21 (``), see entry below. Not verified on device.
+
+## 2026-11-20 UTC · WebView OTA bundle pinned to its native APK build
+
+- Branch `fix/cortex-webview-ota-native-pin-20261120` from `main` `d47d212325e14cb15a7603fd44eb425c27b6e481` (beta.10, versionCode 127). Android native + JVM test + docs only. No version bump, APK publication, Supabase/Edge/DB, Vercel/site, payments, signing keys or OTA keys touched.
+- Confirmed defect (code inspection): `CortexWebUpdates.snapshot()` kept serving a downloaded OTA WebView bundle after the APK was upgraded or reinstalled with a different versionCode. The newer APK's own CI-tested `assets/web` was then shadowed by an older bundle built for an older native bridge (only `min_native` was checked, at install time). Also, superseded `v*` bundles and abandoned `staging-*` folders were never deleted (comment promised cold-start cleanup that did not exist), so app storage grew by up to ~8 MB per OTA.
+- Fix: record the activating `versionCode` (`native`) with each activation; when it differs (including legacy activations without it) the active/rollback bundles are dropped, the APK assets are served, and a `floor` makes only a strictly newer signed bundle eligible again. `cleanupAsync(inUse)` removes non-active/non-rollback/not-in-use bundles and staging folders older than 30 minutes, under the same lock as activation. Pure policy in `WebUpdatePolicy`, tests `WebUpdatePolicyTest` (3/3 locally).
+- Known limitation: an OTA that was never installed on a device but was published before a newer APK can still be applied over that APK if its signed version is newer than the floor. Closing that needs a bundled-web version or `max_native` in the signed manifest (packager + server change); not done here.
+- Local environment note: on JDK 21 the existing suite shows 14/118 failures (Cyrillic `` regexes; `java.util.regex` `` became ASCII-only in JDK 19+). CI uses JDK 17 and Android uses ICU regex, so this is not a device regression, but upgrading CI to JDK 21 will break those tests. Run unit tests with JDK 17.
+- Not verified: CI on this branch, emulator/physical device upgrade path (install beta.10 + OTA → install this build → confirm APK assets load and old bundle folders disappear). Next: PR checks, then that manual upgrade check before including in a new signed beta.
+
 ## 2026-11-20 UTC · remove unconfirmed November 20 website launch promise, payment UI blocked by source drift
 
 - User requests replacing Platega with Robokassa on live /payment and removing the 20 November installation promise. GitHub main based on `d47d212325e14cb15a7603fd44eb425c27b6e481` has no /payment, while production Vercel `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` does. **Production/source divergence is confirmed; do not deploy main or claim live fix.** This branch `fix/cortex-web-release-tbd-20261120` changes only date-related main UI, stops date-triggered public download, and creates the release blocker doc; a sibling branch `fix/cortex-payment-copy-20261120` updates Platega→Robokassa on the recovery-site candidate, not on production. No payment credentials, Vercel, Supabase, Android or deployment changed. Tests/PR pending; source mismatch and visual comparison unresolved. Details: `docs/WEB_RELEASE_DATE_AND_PAYMENT_COPY_20261120.md`.

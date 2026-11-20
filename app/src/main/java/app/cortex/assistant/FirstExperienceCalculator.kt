@@ -68,7 +68,10 @@ internal class FirstExperienceCalculator(
         if (!navigation.launch(intent) || navigation.await(8_000L, ::ready) == null) return false
         // Readiness alone does not mean that the user has had time to see the app.
         pause(FirstExperienceTempo.BEFORE_ACTION)
-        return service.frame(fresh = true)?.let(::ready) == true
+        // Android can briefly replace a ready window while attaching the new activity.
+        return navigation.await(2_000L) { frame ->
+            ready(frame) && service.frame(fresh = true)?.let(::ready) == true
+        } != null
     }
 
     private fun controls(frame: VisualFrame): Map<String, VisualNode> {
@@ -234,6 +237,7 @@ internal class FirstExperienceCalculator(
         val PACKAGES = setOf("com.sec.android.app.popupcalculator", "com.google.android.calculator", "com.android.calculator2",
             "com.miui.calculator", "com.huawei.calculator", "com.hihonor.calculator", "com.coloros.calculator",
             "com.oplus.calculator", "com.asus.calculator", "com.vivo.calculator", "com.vivo.calculator2",
-            "com.bbk.calculator", "com.iqoo.calculator")
+            "com.bbk.calculator", "com.iqoo.calculator", "com.oneplus.calculator", "com.transsion.calculator",
+            "com.meizu.flyme.calculator")
     }
 }

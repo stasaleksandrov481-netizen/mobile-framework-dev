@@ -37,14 +37,29 @@ test("recent native app commands inform pronouns but not private messages", () =
   assert.equal(context.at(-1).content, "Почему он открылся?");
 });
 
-test("chat composer keeps only model picker and quota below the input", () => {
+test("composer has no model picker; models live on their own page with bundled logos", () => {
   const { ui } = fixture();
   const html = ui.composer();
   assert.match(html, /class="composer-input-row"[\s\S]*?<textarea[\s\S]*?<div class="composer-send-actions"/);
-  assert.match(html, /class="composer-footer"[\s\S]*?class="ai-model-picker"[\s\S]*?class="quota-ring"/);
+  assert.match(html, /class="composer-footer"[\s\S]*?class="quota-ring"/);
+  assert.doesNotMatch(html, /ai-model-picker|ai-model-option/);
   assert.doesNotMatch(html, /class="composer-button mic-button"/);
-  assert.ok(html.includes('/favicons/nvidia.com'));
-  assert.ok(!html.includes('www.google.com/s2/favicons'));
+  const models = ui.page("ai-models", {});
+  assert.match(models, /role="radiogroup"/);
+  assert.ok(models.includes('art/ai/nvidia.svg'));
+  assert.ok(models.includes('art/ai/claude.svg'));
+  assert.ok(!models.includes('/favicons/') && !html.includes('/favicons/'));
+  assert.ok(!models.includes('www.google.com/s2/favicons'));
+});
+
+test("usage numbers appear only in the ring sheet, with escaped values", () => {
+  const { ui } = fixture();
+  const sheet = ui.usageSheet({ unit: "tokens", plan: "pro", limit: 100000, remaining: 25000, reset_at: "2026-11-21T00:00:00Z" });
+  assert.match(sheet, /25&nbsp;000|25\s000/);
+  assert.match(sheet, /Pro/);
+  assert.match(sheet, />25%</);
+  assert.doesNotMatch(ui.usageSheet({ unit: "tokens", plan: "<img src=x>", limit: -1, remaining: "x" }), /<img/);
+  assert.doesNotMatch(ui.page("profile", { connection: { quota: { unit: "tokens", limit: 5, remaining: 1 } } }), /cortex-quota-card/);
 });
 
 test("call and scenarios are primary tabs and the empty chat keeps its mark", () => {
@@ -53,6 +68,21 @@ test("call and scenarios are primary tabs and the empty chat keeps its mark", ()
   const markup = ui.page("chat", { chat: model.createChat(), pending: null, error: null });
   assert.match(markup, /class="chat-empty" aria-label="CORTEX"/);
   assert.doesNotMatch(markup, /На связи|chat-empty-signal/);
+});
+
+test("a clarification offers reply and dismiss only while it is the latest turn", () => {
+  const { ui, model, saved } = fixture();
+  const chat = model.createChat(true);
+  chat.messages.push({ role: "assistant", text: "В каком браузере открыть сайт?",
+    local: true, clarification: { id: "local-task-id" } });
+  const markup = () => ui.page("chat", { chat, pending: null, error: null });
+  assert.match(markup(), /class="clarification-panel"/);
+  assert.match(markup(), /data-action="clarification-focus"/);
+  assert.match(markup(), /data-action="clarification-dismiss"/);
+  model.save();
+  assert.doesNotMatch(saved.get("cortex.interface.v2"), /local-task-id/);
+  chat.messages.push({ role: "user", text: "В Chrome." });
+  assert.doesNotMatch(markup(), /class="clarification-panel"/);
 });
 
 test("call settings keep normal commands independent from beta screen control", () => {
@@ -103,8 +133,8 @@ test("support links to a searchable FAQ and profile shows reminder access and qu
   assert.match(faq, /Как открыть островок кнопкой «Домой»/);
   const quota = { unit: "tokens", remaining: 700, limit: 1000, reset_at: "2026-11-19T00:00:00Z" };
   const profile = ui.page("profile", { connection: { quota }, native: false });
-  assert.match(profile, /<progress[^>]+value="700" max="1000"/);
-  assert.match(profile, /Обновление/);
+  // Owner decision 2026-11-20: usage is shown only in the composer ring sheet.
+  assert.doesNotMatch(profile, /<progress|Лимит ИИ/);
   assert.match(profile, /data-value="schedule"/);
   assert.equal(ui.parent.schedule, "profile");
   const subscription = ui.page("subscription", { connection: { quota, subscription: {

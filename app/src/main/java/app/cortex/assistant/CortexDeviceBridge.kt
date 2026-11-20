@@ -60,6 +60,7 @@ internal class CortexDeviceBridge(
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "brightness-permission" -> open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}")))
             "display-settings" -> open(Intent(Settings.ACTION_DISPLAY_SETTINGS))
+            "background-permission" -> sendAction("background-permission") { CortexBackgroundAccess.open(context, ::open) }
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -134,19 +135,23 @@ internal class CortexDeviceBridge(
                 CortexSchedule.clearDraft(source)
                 CortexActionEngine.clearPaused(source)
             }
+            "action-clarification-dismiss" -> CortexActionEngine.dismissClarification(
+                body.optString("source").take(100), body.optString("clarificationId").take(36))
             "action-start" -> {
                 val id = body.optString("id")
                 fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false,
-                          ephemeral: Boolean = false) =
+                          ephemeral: Boolean = false, clarificationId: String? = null) =
                     emit(JSONObject().put("type", "action").put("id", id).put("phase", phase).put("text", text)
                         .put("ok", ok).put("resumable", resumable).put("ephemeral", ephemeral)
+                        .put("clarificationId", clarificationId)
                         .put("external", !CortexRuntime.appVisible))
                 val handled = engine.start(body.optString("text"), body.optString("profile"),
                     force = body.optBoolean("force"), allowPhone = body.optBoolean("allowPhone", true),
                     source = body.optString("source", "chat").take(100),
+                    clarificationId = body.optString("clarificationId").take(36).ifBlank { null },
                     beforeScreen = { activity.moveTaskToBack(true) },
                     progress = { event("progress", it) }) { result ->
-                    event("result", result.text, result.ok, result.resumable, result.ephemeral)
+                    event("result", result.text, result.ok, result.resumable, result.ephemeral, result.clarificationId)
                 }
                 if (!handled) event("pass")
             }
@@ -244,6 +249,10 @@ internal class CortexDeviceBridge(
 
     private fun scenarioList() = emit(JSONObject().put("type", "scenario-list").put("items", CortexScenarios.list(context)))
 
+    // Document providers may be remote or slow, and photo decoding is CPU-heavy: keep both off the UI thread.
+    // emit() is thread-safe because MainActivity delivers events with runOnUiThread.
+    private fun background(work: () -> Unit) = Thread(work, "CortexDeviceFile").start()
+
     private fun scenarioStatus(text: String, ok: Boolean, operation: String) = emit(JSONObject()
         .put("type", "scenario-result").put("text", text).put("ok", ok).put("operation", operation))
 
@@ -314,7 +323,7 @@ internal class CortexDeviceBridge(
         if (requestCode == 501 && pendingImage) {
             pendingImage = false
             val e = JSONObject().put("type", "image")
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) background {
                 val value = runCatching {
                     val uri = requireNotNull(data.data)
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -339,21 +348,21 @@ internal class CortexDeviceBridge(
                 }.getOrNull()
                 e.put("ok", !value.isNullOrBlank())
                 if (!value.isNullOrBlank()) e.put("data", value)
-            } else e.put("cancelled", true)
-            emit(e)
+                emit(e)
+            } else emit(e.put("cancelled", true))
         }
         if (requestCode == 502) {
             val e = JSONObject().put("type", "export")
             val text = pendingExport
             pendingExport = null
-            if (resultCode == Activity.RESULT_OK && data?.data != null && text != null) {
-                e.put("ok", runCatching {
-                    context.contentResolver.openOutputStream(data.data!!)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-                }.isSuccess)
-            } else e.put("cancelled", true)
-            emit(e)
+            if (resultCode == Activity.RESULT_OK && data?.data != null && text != null) background {
+                // A provider that returns no stream has not saved anything.
+                emit(e.put("ok", runCatching {
+                    requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                }.isSuccess))
+            } else emit(e.put("cancelled", true))
         }
-        if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) {
+        if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) background {
             val item = runCatching {
                 val input = requireNotNull(context.contentResolver.openInputStream(data.data!!))
                 val bytes = input.use { stream ->
@@ -375,7 +384,7 @@ internal class CortexDeviceBridge(
         if (requestCode == 504) {
             val value = scenarioExport
             scenarioExport = null
-            if (resultCode == Activity.RESULT_OK && data?.data != null && value != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null && value != null) background {
                 val ok = runCatching {
                     requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use {
                         it.write(value.toByteArray(Charsets.UTF_8))

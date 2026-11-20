@@ -24,32 +24,36 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
     fun send(
         text: String, profile: String, modelId: String? = null, beforeScreen: () -> Unit,
         toolsAllowed: () -> Boolean, progress: (String) -> Unit, delta: (String) -> Unit,
-        finished: (String, Boolean) -> Unit
+        clarificationId: String? = null,
+        finished: (String, Boolean, String?) -> Unit
     ) {
         if (request != null) return
         refreshGate()
-        CortexActionState.gateMessage()?.let { finished(it, false); return }
+        CortexActionState.gateMessage()?.let { finished(it, false, null); return }
         val turn = ++generation
         val tools = toolsAllowed()
         val unlocked = !context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-        memory.takeCommand(text)?.let { finished(it, true); return }
-        IslandAppearanceCommands.apply(context, text)?.let { finished(it, true); return }
+        if (clarificationId == null) {
+            memory.takeCommand(text)?.let { finished(it, true, null); return }
+            IslandAppearanceCommands.apply(context, text)?.let { finished(it, true, null); return }
+        }
         val address = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
             .getString("addressName", "").orEmpty().trim().take(60)
         fun finish(answer: String, ok: Boolean) {
             if (turn != generation) return
             engine.observeAssistantAnswer(answer)
             if (ok && unlocked) memory.remember(text, answer)
-            finished(answer, ok)
+            finished(answer, ok, null)
         }
-        if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress) { result ->
+        if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress,
+                clarificationId = clarificationId) { result ->
                 if (turn == generation) {
                     engine.observeAssistantAnswer(result.text)
-                    finished(result.text, result.ok)
+                    finished(result.text, result.ok, result.clarificationId)
                 }
             }) return
         if (ConversationRequest.wantsMessage(text) || VisualRequest.isAction(text)) {
-            finished("Уточните приложение и действие. Пока ни одного шага Android не подтверждено.", false)
+            finished("Уточните приложение и действие. Пока ни одного шага Android не подтверждено.", false, null)
             return
         }
         val facts = if (unlocked) memory.listFacts() else emptyList()

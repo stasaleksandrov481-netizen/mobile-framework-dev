@@ -63,6 +63,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var message = ""
     private var draft = ""
     private var reply = ""
+    private var clarificationId: String? = null
+    private val expireClarification = Runnable { clearClarification() }
     private var opening = false
     private var moving = false
     private var busy = false
@@ -451,9 +453,11 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         visible.conversation.status(state, label)
         visible.conversation.busy(busy || actionBusy)
         visible.conversation.reminder(reminderActions)
+        val asking = clarificationId != null && !busy && !actionBusy && reminder == null
+        visible.conversation.clarification(asking)
         val resultText = task?.takeUnless { actionBusy }?.answer.orEmpty()
         visible.conversation.answer(reminder?.second ?: when {
-            busy -> reply
+            busy || asking -> reply
             !style.results -> ""
             reply.isNotBlank() -> reply
             else -> resultText
@@ -463,7 +467,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun createIsland(): LiquidIslandView? {
         val panel = IslandConversationPanel(overlayContext, { submit(it) }, ::stopAnswer,
-            ::closeComposer, ::openApplication)
+            ::closeComposer, ::openApplication, { clearClarification() })
         panel.draft(draft)
         panel.onKeyboardFocus = { focused ->
             keyboardFocus = focused && opening && !exiting
@@ -549,7 +553,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private fun submit(raw: String, fromVoice: Boolean = false) {
         if (demonstrating) return
         val text = raw.trim().take(2400)
-        handleControl(this, text)?.let { control ->
+        if (clarificationId == null) handleControl(this, text)?.let { control ->
             if (control.startsWith("Выключить островок")) {
                 reply = control
                 updateStatus("understood", control)
@@ -557,6 +561,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             return
         }
         if (busy || actionBusy || text.isEmpty() || poweringOff) return
+        val answering = clarificationId
+        clarificationId = null
+        ui.removeCallbacks(expireClarification)
         if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
         if (fromVoice) island?.conversation?.hideKeyboard()
         busy = true
@@ -568,6 +575,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
             modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
             beforeScreen = { setExpanded(false) },
+            clarificationId = answering,
             toolsAllowed = { preferences.getBoolean("phoneActions", true) && Settings.canDrawOverlays(this) },
             progress = { updateStatus("executing", it) },
             delta = { chunk ->
@@ -581,10 +589,16 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                     }
                 }
             },
-            finished = { answer, ok ->
+            finished = { answer, ok, questionId ->
                 busy = false
                 reply = answer.trim()
-                updateStatus(if (ok) "done" else "error", "")
+                clarificationId = questionId
+                if (questionId != null) ui.postDelayed(expireClarification, CortexActionEngine.CLARIFICATION_TIMEOUT_MS)
+                updateStatus(when {
+                    questionId != null -> "understood"
+                    ok -> "done"
+                    else -> "error"
+                }, if (questionId != null) "Уточнение" else "")
                 if (!hiddenByVoice && !poweringOff) {
                     setExpanded(true)
                     if (opening && CortexActionState.gate == "open") {
@@ -596,6 +610,16 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 if (fromVoice && !poweringOff && reply.isNotBlank() && preferences.getBoolean("voiceReplies", true))
                     voiceOutput.speak(reply) { /* The answer stays visible if Android cannot play audio. */ }
             })
+    }
+
+    private fun clearClarification() {
+        val id = clarificationId ?: return
+        CortexActionEngine.dismissClarification("island", id)
+        clarificationId = null
+        ui.removeCallbacks(expireClarification)
+        reply = ""
+        if (task?.phase == "understood") task = null
+        updateStatus("idle", "")
     }
 
     private fun stopAnswer() {

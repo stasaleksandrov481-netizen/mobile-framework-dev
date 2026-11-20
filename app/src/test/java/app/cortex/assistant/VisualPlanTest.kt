@@ -95,6 +95,18 @@ class VisualPlanTest {
         assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
             "", "com.example:id/btnOpen", "Button"))
     }
+
+    @Test fun callsConsentAndAccountExitAlwaysNeedConfirmation() {
+        for ((label, resource) in listOf("Позвонить" to "button", "" to "com.example:id/btnCall",
+                "Принять" to "button", "Я согласен" to "terms", "Agree" to "button", "Выйти" to "profile_row",
+                "Log out" to "settings", "Отписаться" to "button", "Форматировать" to "sd_card")) {
+            assertEquals(label + resource, VisualRisk.CONFIRM, VisualSafety.risk("Открой настройки",
+                VisualStep(VisualAction.TAP), label, resource, "Button"))
+        }
+        // Ordinary navigation still runs without interrupting the user.
+        assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой настройки", VisualStep(VisualAction.TAP),
+            "Звонки", "settings_calls", "TextView"))
+    }
     @Test fun colloquialMessageRetainsRecipientAndTextAcrossMessengerClarification() {
         val pending = requireNotNull(ConversationRequest.parse("напиши рыбке как дела", installed))
         assertEquals("рыбке", pending.recipient)
@@ -147,6 +159,16 @@ class VisualPlanTest {
         assertEquals(0, ConversationMatch.score("Рыбка Новости", listOf("Рыбка Новости"), "рыбке"))
         assertEquals(0, ConversationMatch.score("Медиа", listOf("Медиа", "Рыбка"), "рыбке"))
         assertEquals(0, ConversationMatch.score("Рыба", listOf("Рыба"), "рыбке"))
+    }
+
+    @Test fun softSignAndIyaNamesMatchTheirDativeForms() {
+        assertEquals(100, ConversationMatch.score("Игорь", listOf("Игорь"), "Игорю"))
+        assertEquals(100, ConversationMatch.score("Мария", listOf("Мария"), "Марии"))
+        assertEquals("мари", ConversationMatch.searchQuery("Марии"))
+        assertEquals("игор", ConversationMatch.searchQuery("Игорю"))
+        // A different contact sharing the stem is still not accepted.
+        assertEquals(0, ConversationMatch.score("Марина", listOf("Марина"), "Марии"))
+        assertEquals(0, ConversationMatch.score("Игорёк", listOf("Игорёк"), "Игорю"))
     }
 
     @Test fun youtubeSearchParsesNaturalLocationPhrasesBeforeLaunching() {

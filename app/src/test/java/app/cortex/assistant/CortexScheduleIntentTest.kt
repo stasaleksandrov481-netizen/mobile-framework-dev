@@ -35,4 +35,19 @@ class CortexScheduleIntentTest {
         assertNull(CortexScheduleIntent.parse("Напомни через 0 минут проверить курицу", now)?.time)
         assertNull(CortexScheduleIntent.parse("Открой настройки", now))
     }
+
+    @Test fun dottedOrDashedClockTimeKeepsMinutesOutOfTheText() {
+        val dotted = CortexScheduleIntent.parse("напомни в 7.30 выпить таблетку", now)!!
+        assertEquals("выпить таблетку", dotted.text)
+        assertEquals(now.toLocalDate().atTime(7, 30), dotted.time?.local)
+        val dashed = CortexScheduleIntent.parse("завтра в 19-05 напомни позвонить маме", now)!!
+        assertEquals("позвонить маме", dashed.text)
+        assertEquals(now.toLocalDate().plusDays(1).atTime(19, 5), dashed.time?.local)
+    }
+
+    @Test fun aCoupleOfMinutesIsTwoMinutes() {
+        val result = CortexScheduleIntent.parse("напомни через пару минут выключить плиту", now)!!
+        assertEquals("выключить плиту", result.text)
+        assertEquals(now.toInstant().plusSeconds(120).toEpochMilli(), result.time?.epoch)
+    }
 }

@@ -57,8 +57,8 @@ android {
         applicationId = if (previousPreview.get()) "app.cortex.assistant.preview.v105" else "app.cortex.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 127
-        versionName = "1.0.18-beta.10"
+        versionCode = 128
+        versionName = "1.0.18-beta.11"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "CORTEX_WEB_UPDATE_ROOT", quotedBuildValue(webUpdateRoot))
         buildConfigField("String", "CORTEX_WEB_UPDATE_PUBLIC_KEY", quotedBuildValue(webUpdatePublicKey))

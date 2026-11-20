@@ -1,0 +1,192 @@
+/* CORTEX answer typography. Loaded last: one consistent, compact rhythm for chat
+   and island answers. Monochrome base with muted semantic tones. */
+:root {
+  --md-ink: #f2f2f2;
+  --md-muted: rgb(255 255 255 / .62);
+  --md-faint: rgb(255 255 255 / .42);
+  --md-line: rgb(255 255 255 / .1);
+  --md-line-strong: rgb(255 255 255 / .16);
+  --md-panel: rgb(255 255 255 / .045);
+  --md-panel-strong: rgb(255 255 255 / .075);
+  --md-radius: 14px;
+  --md-mono: ui-monospace, "JetBrains Mono", "Roboto Mono", "SFMono-Regular", Consolas, monospace;
+  --tone-success: #4ade80;
+  --tone-warning: #fb923c;
+  --tone-error: #f87171;
+  --tone-info: #60a5fa;
+  --tone-accent: #c084fc;
+  --tone-neutral: #d4d4d4;
+}
+
+:is(.message.assistant, body) .markdown { color: var(--md-ink); font-size: 15.5px; line-height: 1.62; overflow-wrap: anywhere; }
+:is(.message.assistant, body) .markdown > * + * { margin-top: .72em; }
+:is(.message.assistant, body) .markdown > :is(h1, h2, h3, h4) + * { margin-top: .42em; }
+:is(.message.assistant, body) .markdown :is(h1, h2, h3, h4) { font-weight: 680; letter-spacing: -.02em; line-height: 1.3; }
+:is(.message.assistant, body) .markdown > :is(h1, h2, h3, h4):not(:first-child) { margin-top: 1.25em; }
+:is(.message.assistant, body) .markdown h1 { font-size: 1.32em; }
+:is(.message.assistant, body) .markdown h2 { font-size: 1.17em; }
+:is(.message.assistant, body) .markdown h3 { font-size: 1.05em; }
+:is(.message.assistant, body) .markdown h4 { font-size: 1em; color: var(--md-muted); }
+:is(.message.assistant, body) .markdown strong { font-weight: 680; }
+:is(.message.assistant, body) .markdown mark { background: rgb(250 204 21 / .2); color: #fde68a; border-radius: 4px; padding: 0 .2em; }
+:is(.message.assistant, body) .markdown u { text-decoration-thickness: 1px; text-underline-offset: .2em; }
+:is(.message.assistant, body) .markdown del { color: var(--md-faint); }
+:is(.message.assistant, body) .markdown :is(ul, ol) { padding-inline-start: 1.3em; }
+:is(.message.assistant, body) .markdown li { line-height: 1.55; }
+:is(.message.assistant, body) .markdown li + li { margin-top: .3em; }
+:is(.message.assistant, body) .markdown li::marker { color: var(--md-faint); }
+:is(.message.assistant, body) .markdown ol > li::marker { font-variant-numeric: tabular-nums; }
+:is(.message.assistant, body) .markdown .task-item { list-style: none; margin-inline-start: -1.3em; display: flex; gap: 9px; }
+:is(.message.assistant, body) .markdown .task-check { display: inline-grid; place-items: center; flex: none; width: 17px; height: 17px; margin: .2em 0 0; vertical-align: 0;
+  border: 1.5px solid var(--md-line-strong); border-radius: 5px; color: #000; }
+:is(.message.assistant, body) .markdown .task-check:has(svg) { background: var(--md-ink); border-color: var(--md-ink); }
+:is(.message.assistant, body) .markdown hr { height: 1px; border: 0; background: var(--md-line); margin-block: 1.2em; }
+:is(.message.assistant, body) .markdown a { color: var(--md-ink); text-decoration-color: rgb(255 255 255 / .35); text-underline-offset: .2em; }
+:is(.message.assistant, body) .markdown :not(pre) > code { padding: .12em .38em; border-radius: 6px; background: var(--md-panel-strong);
+  border: 1px solid var(--md-line); font: .86em/1.4 var(--md-mono); }
+
+/* Quotes and callouts */
+:is(.message.assistant, body) .markdown blockquote:not(.cortex-callout) { margin-inline: 0; padding: 2px 0 2px 14px; color: var(--md-muted);
+  border-inline-start: 2px solid var(--md-line-strong); }
+:is(.message.assistant, body) .markdown blockquote:not(.cortex-callout)::before { content: none; }
+:is(.message.assistant, body) .markdown .cortex-callout { --tone: var(--tone-neutral); position: relative; margin-inline: 0; width: 100%;
+  padding: 11px 13px 11px 15px; border: 1px solid color-mix(in srgb, var(--tone) 28%, transparent);
+  border-radius: var(--md-radius); background: color-mix(in srgb, var(--tone) 8%, transparent); color: var(--md-ink); }
+:is(.message.assistant, body) .markdown .cortex-callout::before { content: ""; position: absolute; inset: 9px auto 9px 0; width: 3px; border-radius: 3px; background: var(--tone); }
+:is(.message.assistant, body) .markdown .callout-title { display: flex; align-items: center; gap: 7px; margin-bottom: 3px; color: var(--tone); font-size: .9em; }
+:is(.message.assistant, body) .markdown .callout-title svg { width: 15px; height: 15px; }
+:is(.message.assistant, body) .markdown .callout-note, :is(.message.assistant, body) .markdown .callout-info { --tone: var(--tone-info); }
+:is(.message.assistant, body) .markdown .callout-tip, :is(.message.assistant, body) .markdown .callout-success { --tone: var(--tone-success); }
+:is(.message.assistant, body) .markdown .callout-important { --tone: var(--tone-accent); }
+:is(.message.assistant, body) .markdown .callout-warning { --tone: var(--tone-warning); }
+:is(.message.assistant, body) .markdown .callout-caution { --tone: var(--tone-error); }
+:is(.message.assistant, body) .markdown .callout-security { --tone: var(--tone-neutral); }
+
+/* Badges */
+:is(.message.assistant, body) .markdown .md-badge { --tone: var(--tone-neutral); display: inline-flex; align-items: center; padding: .1em .55em;
+  border-radius: 6px; font-size: .78em; font-weight: 620; line-height: 1.5; white-space: nowrap; vertical-align: .08em;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 22%, transparent); }
+:is(.message.assistant, body) .markdown .md-badge + .md-badge { margin-inline-start: .3em; }
+:is(.message.assistant, body) .markdown :is(.md-badge, .md-hero-status, small, li).success { --tone: var(--tone-success); }
+:is(.message.assistant, body) .markdown :is(.md-badge, .md-hero-status, small, li).warning { --tone: var(--tone-warning); }
+:is(.message.assistant, body) .markdown :is(.md-badge, .md-hero-status, small, li).error { --tone: var(--tone-error); }
+:is(.message.assistant, body) .markdown :is(.md-badge, .md-hero-status, small, li).info { --tone: var(--tone-info); }
+:is(.message.assistant, body) .markdown :is(.md-badge, .md-hero-status, small, li).accent { --tone: var(--tone-accent); }
+
+/* Code */
+:is(.message.assistant, body) .markdown .code-block { margin-inline: 0; overflow: hidden; border: 1px solid var(--md-line); border-radius: var(--md-radius); background: #0b0b0b; }
+:is(.message.assistant, body) .markdown .code-block figcaption { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 36px; padding: 0 6px 0 13px; border-bottom: 1px solid var(--md-line); background: var(--md-panel);
+  color: var(--md-muted); font-size: 12px; font-weight: 560; }
+:is(.message.assistant, body) .markdown .code-copy { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border: 0;
+  border-radius: 8px; background: transparent; color: var(--md-muted); font-size: 12px; }
+:is(.message.assistant, body) .markdown .code-copy:hover, :is(.message.assistant, body) .markdown .code-copy:focus-visible { background: var(--md-panel-strong); color: var(--md-ink); }
+:is(.message.assistant, body) .markdown .code-copy svg { width: 15px; height: 15px; }
+:is(.message.assistant, body) .markdown .code-block pre { margin: 0; padding: 12px 14px; overflow: auto; background: transparent; border: 0; }
+:is(.message.assistant, body) .markdown .code-block pre code { font: 13px/1.6 var(--md-mono); color: #e5e5e5; tab-size: 2; white-space: pre; }
+:is(.message.assistant, body) .markdown .tok-k { color: #c4b5fd; }
+:is(.message.assistant, body) .markdown .tok-s { color: #86efac; }
+:is(.message.assistant, body) .markdown .tok-n { color: #fdba74; }
+:is(.message.assistant, body) .markdown .tok-c { color: #737373; font-style: italic; }
+:is(.message.assistant, body) .markdown .tok-f { color: #93c5fd; }
+:is(.message.assistant, body) .markdown .tok-t { color: #f9a8d4; }
+:is(.message.assistant, body) .markdown .tok-p { color: #93c5fd; }
+:is(.message.assistant, body) .markdown .tok-a { color: #fcd34d; }
+
+/* Tables */
+:is(.message.assistant, body) .markdown .table-scroll { overflow-x: auto; border: 1px solid var(--md-line); border-radius: var(--md-radius); }
+:is(.message.assistant, body) .markdown table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .92em; }
+:is(.message.assistant, body) .markdown :is(th, td) { padding: 8px 12px; text-align: start; vertical-align: top; min-width: 72px; max-width: 280px; }
+:is(.message.assistant, body) .markdown :is(th, td) + :is(th, td) { border-inline-start: 0; }
+:is(.message.assistant, body) .markdown thead th { background: var(--md-panel); color: var(--md-muted); font-size: .9em; font-weight: 620; }
+:is(.message.assistant, body) .markdown tbody tr { border-top: 1px solid var(--md-line); }
+:is(.message.assistant, body) .markdown tbody tr:nth-child(even) { background: rgb(255 255 255 / .018); }
+:is(.message.assistant, body) .markdown td[style*="right"], :is(.message.assistant, body) .markdown th[style*="right"] { font-variant-numeric: tabular-nums; }
+
+/* Math */
+:is(.message.assistant, body) .markdown math { font-size: 1.08em; }
+:is(.message.assistant, body) .markdown .math-scroll { display: block; max-width: 100%; overflow-x: auto; padding: 4px 0; }
+:is(.message.assistant, body) .markdown math[display="block"] { margin: .2em 0; }
+
+/* Details */
+:is(.message.assistant, body) .markdown .md-details { border: 1px solid var(--md-line); border-radius: var(--md-radius); background: var(--md-panel); }
+:is(.message.assistant, body) .markdown .md-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 44px; padding: 0 14px; cursor: pointer; list-style: none; font-weight: 620; }
+:is(.message.assistant, body) .markdown .md-details > summary::-webkit-details-marker { display: none; }
+:is(.message.assistant, body) .markdown .md-details > summary::after { content: ""; width: 7px; height: 7px; flex: none; margin-top: -3px;
+  border: solid var(--md-muted); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform .2s; }
+:is(.message.assistant, body) .markdown .md-details[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+:is(.message.assistant, body) .markdown .md-details-body { padding: 2px 14px 14px; }
+:is(.message.assistant, body) .markdown .md-details-body > * + * { margin-top: .65em; }
+
+/* Hero card */
+:is(.message.assistant, body) .markdown .md-hero { padding: 16px; border: 1px solid var(--md-line); border-radius: 18px;
+  background: linear-gradient(160deg, rgb(255 255 255 / .07), rgb(255 255 255 / .02) 55%); }
+:is(.message.assistant, body) .markdown .md-hero-head { display: flex; align-items: flex-start; gap: 12px; }
+:is(.message.assistant, body) .markdown .md-hero-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+:is(.message.assistant, body) .markdown .md-hero-icon { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 12px;
+  background: var(--md-panel-strong); border: 1px solid var(--md-line); }
+:is(.message.assistant, body) .markdown .md-hero-titles { display: grid; min-width: 0; flex: 1; }
+:is(.message.assistant, body) .markdown .md-hero-titles strong { margin-top: 2px; font-size: 1.12em; line-height: 1.25; }
+:is(.message.assistant, body) .markdown .md-hero-eyebrow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--md-faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+:is(.message.assistant, body) .markdown .md-hero-status { --tone: var(--tone-success); display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, transparent); }
+:is(.message.assistant, body) .markdown .md-hero-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+:is(.message.assistant, body) .markdown .md-hero > p { margin-top: 10px; color: var(--md-muted); }
+:is(.message.assistant, body) .markdown .md-hero-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+:is(.message.assistant, body) .markdown .md-hero-tags .md-badge + .md-badge { margin: 0; }
+:is(.message.assistant, body) .markdown .md-hero-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 10px;
+  margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--md-line); }
+:is(.message.assistant, body) .markdown .md-hero-stats div { display: grid; gap: 1px; min-width: 0; }
+:is(.message.assistant, body) .markdown .md-hero-stats dt { color: var(--md-faint); font-size: 12px; }
+:is(.message.assistant, body) .markdown .md-hero-stats dd { margin: 0; font-size: 1.22em; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+:is(.message.assistant, body) .markdown .md-hero-stats small { color: var(--md-muted); font-size: 12px; }
+:is(.message.assistant, body) .markdown .md-hero-stats small:is(.success, .warning, .error, .info, .accent) { color: var(--tone); }
+:is(.message.assistant, body) .markdown .md-hero-note { margin-top: 10px; color: var(--md-faint); font-size: 12.5px; }
+
+/* Charts */
+:is(.message.assistant, body) .markdown .md-chart { margin-inline: 0; padding: 12px 14px; border: 1px solid var(--md-line); border-radius: var(--md-radius); background: var(--md-panel); }
+:is(.message.assistant, body) .markdown .md-chart figcaption { margin-bottom: 8px; font-weight: 640; }
+:is(.message.assistant, body) .markdown .md-plot { display: block; width: 100%; height: auto; overflow: visible; }
+:is(.message.assistant, body) .markdown .md-plot .g { stroke: rgb(255 255 255 / .08); stroke-width: 1; }
+:is(.message.assistant, body) .markdown .md-plot text { fill: var(--md-faint); font-size: 9px; text-anchor: middle; }
+:is(.message.assistant, body) .markdown .md-plot .l { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+:is(.message.assistant, body) .markdown .md-donut { display: block; width: min(160px, 50%); margin: 4px auto; }
+:is(.message.assistant, body) .markdown .md-donut .s { fill: none; stroke-width: 16; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c0, :is(.message.assistant, body) .markdown .md-chart-legend .c0 { fill: #e5e5e5; stroke: #e5e5e5; background: #e5e5e5; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c1, :is(.message.assistant, body) .markdown .md-chart-legend .c1 { fill: #60a5fa; stroke: #60a5fa; background: #60a5fa; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c2, :is(.message.assistant, body) .markdown .md-chart-legend .c2 { fill: #4ade80; stroke: #4ade80; background: #4ade80; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c3, :is(.message.assistant, body) .markdown .md-chart-legend .c3 { fill: #fb923c; stroke: #fb923c; background: #fb923c; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c4, :is(.message.assistant, body) .markdown .md-chart-legend .c4 { fill: #c084fc; stroke: #c084fc; background: #c084fc; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c5, :is(.message.assistant, body) .markdown .md-chart-legend .c5 { fill: #f87171; stroke: #f87171; background: #f87171; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c6, :is(.message.assistant, body) .markdown .md-chart-legend .c6 { fill: #facc15; stroke: #facc15; background: #facc15; }
+:is(.message.assistant, body) .markdown :is(.md-plot, .md-donut) .c7, :is(.message.assistant, body) .markdown .md-chart-legend .c7 { fill: #2dd4bf; stroke: #2dd4bf; background: #2dd4bf; }
+:is(.message.assistant, body) .markdown .md-plot .l:is(.c0, .c1, .c2) { fill: none; }
+:is(.message.assistant, body) .markdown .md-donut .s:is(.c0, .c1, .c2, .c3, .c4, .c5, .c6, .c7) { fill: none; }
+:is(.message.assistant, body) .markdown .md-chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0 0; padding: 0; list-style: none;
+  color: var(--md-muted); font-size: 12px; }
+:is(.message.assistant, body) .markdown .md-chart-legend li { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+:is(.message.assistant, body) .markdown .md-chart-legend i { width: 8px; height: 8px; border-radius: 2px; }
+:is(.message.assistant, body) .markdown .md-chart-data { margin-top: 8px; color: var(--md-muted); font-size: 12px; }
+:is(.message.assistant, body) .markdown .md-chart-data > summary { cursor: pointer; width: max-content; }
+:is(.message.assistant, body) .markdown .md-chart-data .table-scroll { margin-top: 6px; }
+
+/* Flow */
+:is(.message.assistant, body) .markdown .md-flow { margin-inline: 0; }
+:is(.message.assistant, body) .markdown .md-flow figcaption { margin-bottom: 8px; font-weight: 640; }
+:is(.message.assistant, body) .markdown .md-flow ol { display: grid; gap: 18px; margin: 0 !important; padding: 0 !important; list-style: none; }
+:is(.message.assistant, body) .markdown .md-flow li { margin: 0 !important; --tone: var(--md-line-strong); position: relative; display: grid; gap: 2px; padding: 10px 13px;
+  border: 1px solid var(--md-line); border-inline-start: 3px solid var(--tone); border-radius: 12px; background: var(--md-panel); }
+:is(.message.assistant, body) .markdown .md-flow li:not(:last-child)::after { content: "↓"; position: absolute; left: 50%; bottom: -17px;
+  transform: translateX(-50%); color: var(--md-faint); font-size: 12px; line-height: 1; }
+:is(.message.assistant, body) .markdown .md-flow li small { color: var(--md-muted); font-size: 12.5px; }
+
+/* Streaming placeholder */
+:is(.message.assistant, body) .markdown .cortex-block-pending { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 14px;
+  border: 1px dashed var(--md-line-strong); border-radius: var(--md-radius); color: var(--md-muted); font-size: 13px; }
+:is(.message.assistant, body) .markdown .cortex-block-pending svg { animation: md-pulse 1.4s ease-in-out infinite; }
+@keyframes md-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { :is(.message.assistant, body) .markdown .cortex-block-pending svg { animation: none; } }

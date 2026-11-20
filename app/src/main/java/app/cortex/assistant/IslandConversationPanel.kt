@@ -36,12 +36,15 @@ internal class IslandConversationPanel(
     private val sendMessage: (String) -> Unit,
     private val stopMessage: () -> Unit,
     close: () -> Unit,
-    openApp: () -> Unit
+    openApp: () -> Unit,
+    private val dismissClarification: () -> Unit
 ) : LinearLayout(context) {
     private val density = resources.displayMetrics.density
     private val status = label(11.5f, 0xFFBABABA.toInt())
     private val signal = Signal()
     private val response = label(15f, Color.WHITE)
+    private val questionHeader = LinearLayout(context)
+    private val questionTitle = label(13f, Color.WHITE)
     private val answerScroll = ScrollView(context)
     private val header = LinearLayout(context)
     private val divider = View(context)
@@ -54,12 +57,13 @@ internal class IslandConversationPanel(
     private var player: CortexMedia.Player? = null
     private var busy = false
     private var answer = ""
+    private var asking = false
     private var motion = ValueAnimator.areAnimatorsEnabled()
     var onKeyboardFocus: ((Boolean) -> Unit)? = null
 
     init {
         orientation = VERTICAL
-        setPadding(dp(17), dp(12), dp(15), dp(14))
+        setPadding(dp(16), dp(10), dp(16), dp(12))
         isSoundEffectsEnabled = false
         isFocusableInTouchMode = true
         isClickable = true
@@ -68,7 +72,7 @@ internal class IslandConversationPanel(
 
         header.gravity = Gravity.CENTER_VERTICAL
         val identity = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-        identity.addView(signal, LayoutParams(dp(42), dp(42)))
+        identity.addView(signal, LayoutParams(dp(36), dp(36)))
         status.maxLines = 1
         status.ellipsize = TextUtils.TruncateAt.END
         status.text = ""
@@ -90,6 +94,19 @@ internal class IslandConversationPanel(
             marginEnd = dp(2)
         })
         divider.setBackgroundColor(0x1FFFFFFF)
+
+        questionHeader.apply {
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = GONE
+            questionTitle.text = "Уточнение"
+            questionTitle.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            if (Build.VERSION.SDK_INT >= 28) questionTitle.isAccessibilityHeading = true
+            addView(questionTitle, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            addView(Glyph("close", "Отменить уточнение").apply {
+                setOnClickListener { dismissClarification() }
+            }, LayoutParams(dp(44), dp(44)))
+        }
+        addView(questionHeader, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
 
         answerScroll.apply {
             isFillViewport = false
@@ -214,6 +231,15 @@ internal class IslandConversationPanel(
         renderWidgets()
     }
 
+    fun clarification(active: Boolean) {
+        if (asking == active) return
+        asking = active
+        questionHeader.visibility = if (active) VISIBLE else GONE
+        editor.hint = if (active) "Ответьте на вопрос…" else "Спросить CORTEX…"
+        editor.contentDescription = if (active) "Ответ на уточнение" else "Сообщение Кортексу"
+        renderWidgets()
+    }
+
     fun answer(value: String) {
         if (answer == value) return
         val wasEmpty = answer.isBlank()
@@ -251,6 +277,7 @@ internal class IslandConversationPanel(
         val density = resources.displayMetrics.density
         header.translationY = (1f - progress) * 5 * density
         divider.alpha = progress
+        questionHeader.alpha = progress
         answerScroll.alpha = ((progress - .12f) / .88f).coerceIn(0f, 1f)
         answerScroll.translationY = (1f - progress) * 8 * density
         entry.alpha = ((progress - .28f) / .72f).coerceIn(0f, 1f)
@@ -263,6 +290,7 @@ internal class IslandConversationPanel(
         appearance = value
         decorateReply()
         response.setTextColor(value.text)
+        questionTitle.setTextColor(value.text)
         response.setLinkTextColor(value.accent)
         status.setTextColor((value.text and 0x00FFFFFF) or 0xB0000000.toInt())
         divider.setBackgroundColor((value.text and 0x00FFFFFF) or 0x24000000)
@@ -272,6 +300,7 @@ internal class IslandConversationPanel(
         entry.invalidate()
         sendButton.invalidate()
         for (i in 0 until header.childCount) header.getChildAt(i).invalidate()
+        questionHeader.getChildAt(1).invalidate()
         renderWidgets()
     }
 
@@ -291,6 +320,10 @@ internal class IslandConversationPanel(
 
     private fun renderWidgets() {
         widgets.removeAllViews()
+        if (asking) {
+            widgets.visibility = GONE
+            return
+        }
         val reminder = reminderActions
         val media = player
         if (reminder == null && media != null) {

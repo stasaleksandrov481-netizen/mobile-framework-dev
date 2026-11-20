@@ -73,7 +73,7 @@ class CortexBrightnessTest {
     }
 
     @Test fun `missing settings and unsupported ranges cause no writes`() {
-        for (raw in listOf(null, -1, 1023)) {
+        for (raw in listOf(null, -1, 70_000)) {
             val settings = Settings(raw = raw)
             assertEquals("unavailable", CortexBrightness.apply(settings, "up").status)
             assertTrue(settings.writes.isEmpty())
@@ -94,5 +94,30 @@ class CortexBrightnessTest {
         val refusing = Settings(acceptMode = false)
         assertEquals("unavailable", CortexBrightness.apply(refusing, "manual").status)
         assertEquals(1, refusing.automaticMode)
+    }
+
+    @Test fun `vendor brightness ranges above 255 are changed instead of reported unavailable`() {
+        val xiaomi = Settings(raw = 2047, automaticMode = 0)
+        val down = CortexBrightness.apply(xiaomi, "set", 50)
+        assertEquals("done", down.status)
+        assertEquals(50, down.percent)
+        assertEquals(1024, xiaomi.raw)
+        assertEquals(50, CortexBrightness.apply(xiaomi, "status").percent)
+
+        val reported = object : CortexBrightness.Port by Settings(raw = 300, automaticMode = 0) {
+            override fun maximum() = 4095
+        }
+        assertEquals(7, CortexBrightness.apply(reported, "status").percent)
+    }
+
+    @Test fun `brightness scale prefers a plausible framework maximum`() {
+        assertEquals(255, CortexBrightness.scale(128, null))
+        assertEquals(1023, CortexBrightness.scale(800, null))
+        assertEquals(2047, CortexBrightness.scale(1500, null))
+        assertEquals(4095, CortexBrightness.scale(3000, null))
+        assertEquals(4095, CortexBrightness.scale(300, 4095))
+        // A reported maximum below the current value or below 255 is not trusted.
+        assertEquals(1023, CortexBrightness.scale(900, 255))
+        assertEquals(255, CortexBrightness.scale(100, 100))
     }
 }

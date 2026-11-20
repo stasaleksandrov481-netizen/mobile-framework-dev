@@ -52,7 +52,6 @@
   const input = form.querySelector("#composer-input");
   const send = form.querySelector(".send-button");
   const quotaRing = form.querySelector(".quota-ring");
-  const modelPicker = form.querySelector(".ai-model-picker");
   const voiceButton = form.querySelector(".voice-button");
   const stop = form.querySelector(".stop-button");
   const voicePanel = form.querySelector("#voice-inline");
@@ -412,25 +411,6 @@
   addEventListener("popstate", () => { closeSheet(); closeHistory(true); readRoute(); });
 
   function syncComposer() {
-    if (modelPicker) {
-      const selected = M.aiModels.find(item => item.id === S.preferences.aiModel) || M.aiModels[0];
-      const summary = modelPicker.querySelector("summary");
-      const icon = summary?.querySelector("img");
-      const url = selected.domain ? `/favicons/${selected.domain}` : "art/mark.svg";
-      if (icon && icon.getAttribute("src") !== url) {
-        icon.hidden = false;
-        if (icon.nextElementSibling?.classList.contains("ai-provider-initials")) {
-          icon.nextElementSibling.hidden = true;
-          icon.nextElementSibling.textContent = selected.brand.slice(0, 1);
-        }
-        icon.src = url;
-      }
-      if (summary) summary.title = `Модель: ${selected.name}`;
-      const label = summary?.querySelector(".ai-model-label");
-      if (label) label.textContent = selected.name;
-      modelPicker.querySelectorAll(".ai-model-option").forEach(button =>
-        button.setAttribute("aria-pressed", String(button.dataset.value === selected.id)));
-    }
     const quota = connection.quota;
     if (quotaRing) {
       const known = quota?.unit === "tokens" && (quota.unlimited || Number(quota.limit) > 0);
@@ -836,7 +816,7 @@
     const field = screen.querySelector("[data-account-code]");
     const input = field?.querySelector(".account-code-input");
     if (!input) return;
-    const digits = input.value.replace(/\D/g, "").slice(0, 6);
+    const digits = U.codeDigits(input.value);
     if (input.value !== digits) input.value = digits;
     const active = Math.min(digits.length, 5);
     field.dataset.complete = String(digits.length === 6);
@@ -957,8 +937,13 @@
           const fieldName = failure.code === "invalid_email" ? "email"
             : failure.code === "invalid_code" || (failure.code === "auth_credentials" && mode !== "password") ? "code"
             : ["invalid_password", "auth_credentials"].includes(failure.code) ? "password" : "";
-          if (fieldName) form.querySelector(`[name="${fieldName}"]`)?.setAttribute("aria-invalid", "true");
-          error.textContent = failure.message || "Что-то пошло не так. Попробуйте ещё раз.";
+          const invalid = fieldName ? form.querySelector(`[name="${fieldName}"]`) : null;
+          invalid?.setAttribute("aria-invalid", "true");
+          // Let the user overwrite a rejected code immediately instead of erasing it digit by digit.
+          if (fieldName === "code") invalid?.select?.();
+          error.textContent = fieldName === "code" && failure.code === "auth_credentials"
+            ? "Код не подошёл или устарел. Введите код из последнего письма или запросите новый."
+            : failure.message || "Что-то пошло не так. Попробуйте ещё раз.";
           error.hidden = false;
         }
       }
@@ -996,7 +981,7 @@
     const scroll = screen.querySelector(".conversation");
     const stick = pinned(scroll);
     node.closest(".message").classList.add("has-reply");
-    node.innerHTML = Markdown.renderStream(job.text);
+    node.innerHTML = Markdown.renderStream(M.guardReply(job.text));
     if (!job.streamPainted && !reduced()) Motion.reply(node);
     job.streamPainted = true;
     if (stick) scroll.scrollTop = scroll.scrollHeight;
@@ -1031,12 +1016,13 @@
           if (activeChat(job) && appVisible()) render({ bottom: true });
         } else if (value.phase === "result") {
           done({ text: value.text, local: true, external: value.external === true || !appVisible(),
-            resumable: value.resumable === true, ephemeral: value.ephemeral === true });
+            resumable: value.resumable === true, ephemeral: value.ephemeral === true,
+            clarificationId: typeof value.clarificationId === "string" ? value.clarificationId : "" });
         } else done(null);
       });
       job.controller.signal.addEventListener("abort", cancel, { once: true });
       if (!sendDevice("action-start", { id, text, profile: S.preferences.model, force: job.force,
-        allowPhone: S.preferences.phoneActions, source: job.chatId })) done(null);
+        allowPhone: S.preferences.phoneActions, source: job.chatId, clarificationId: job.clarificationId })) done(null);
     });
   }
 
@@ -1101,30 +1087,43 @@
   async function answer(chat, text, { retry = false, from, voiceTurn, explain = false, includeScreen = true, force = false } = {}) {
     if (!chat || !text || pending) return;
     if (voiceTurn && voice === voiceTurn) voiceStatus("thinking", "Думаю…");
+    const question = chat.messages.at(-1)?.clarification;
     if (!retry) {
       if (!chat.messages.length) chat.title = text.replace(/\s+/g, " ").slice(0, 72);
       chat.messages.push({ role: "user", text });
       drafts.delete(chat.id);
     }
-    const attachment = includeScreen && screenContext?.attached ? { app: screenContext.app, text: screenContext.text } : null;
+    const attachment = includeScreen && !question && screenContext?.attached ? { app: screenContext.app, text: screenContext.text } : null;
     if (attachment) { screenContext = null; refreshScreen(); }
     errors.delete(chat.id);
     M.touch(chat);
     if (chat.saved) saved();
-    const job = { chatId: chat.id, text: "", completed: false, renderTimer: 0, controller: new AbortController(), voice: voiceTurn, explain, force, screen: attachment };
+    const clarificationId = !retry && !explain ? question?.id : undefined;
+    const job = { chatId: chat.id, text: "", completed: false, renderTimer: 0, controller: new AbortController(),
+      voice: voiceTurn, explain, force, screen: attachment, clarificationId };
     pending = job;
     if (from) navigate("chat", { id: chat.id, origin: from, messageEnter: true });
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
+      const localReply = retry || clarificationId ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
       const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
-      chat.messages.push({ role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
-        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
+      if (!outcome.local) outcome.text = M.guardReply(outcome.text);
+      const message = { role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
+        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && !outcome.clarificationId && { resumable: true }) };
+      if (outcome.clarificationId) {
+        message.clarification = { id: outcome.clarificationId };
+        setTimeout(() => {
+          if (message.clarification?.id !== outcome.clarificationId) return;
+          delete message.clarification;
+          if (activeChat(job)) render();
+        }, 180000);
+      }
+      chat.messages.push(message);
       job.completed = true;
       M.touch(chat);
       const memorized = localReply === null && !outcome.local && M.learnFromUser(text);
@@ -1158,7 +1157,7 @@
     const chat = M.chat(job.chatId);
     if (!chat || !keep) return;
     if (job.text.trim()) {
-      chat.messages.push({ role: "assistant", text: job.text.trim() });
+      chat.messages.push({ role: "assistant", text: M.guardReply(job.text.trim()) });
       M.touch(chat);
       if (chat.saved) saved();
     } else errors.set(chat.id, Object.assign(new Error("Действие остановлено."), { explain: job.explain }));
@@ -1752,6 +1751,14 @@
     regenerate,
     "feedback-up": index => rateAnswer(index, "up"),
     "feedback-down": index => rateAnswer(index, "down"),
+    "clarification-focus"() { input.focus(); },
+    "clarification-dismiss"() {
+      const chat = current(), message = chat?.messages.at(-1);
+      if (!message?.clarification || pending) return;
+      sendDevice("action-clarification-dismiss", { source: chat.id, clarificationId: message.clarification.id });
+      delete message.clarification;
+      render();
+    },
     "refine-answer": index => {
       const message = current()?.messages[Number(index)];
       if (!message || message.role !== "assistant") return;
@@ -1764,8 +1771,7 @@
     "quota-detail": () => {
       const quota = connection.quota;
       if (!quota || quota.unit !== "tokens") return flash("Баланс пока недоступен.");
-      showSheet("Использование", `<p>${quota.unlimited ? "Без лимита" :
-        `Осталось ${Math.max(0, Number(quota.remaining) || 0).toLocaleString("ru-RU")} из ${Number(quota.limit).toLocaleString("ru-RU")}`}</p>`);
+      showSheet("Лимиты ИИ", U.usageSheet(quota));
     },
     "copy-code"(_, control) { return copyText(control.closest(".code-block")?.querySelector("code")?.textContent); },
     dictate: (_, control) => startVoice(true, control),
@@ -1792,6 +1798,7 @@
     },
     "notification-permission": () => sendDevice("notification-permission"),
     "brightness-permission": () => sendDevice("brightness-permission"),
+    "background-permission": () => { if (!sendDevice("background-permission")) flash("Настройка доступна в приложении Android."); },
     "first-experience": () => {
       if (!window.CortexFirstExperience?.open()) flash("Знакомство доступно в Android-приложении CORTEX.");
     },
@@ -1823,8 +1830,15 @@
         navigate("subscription");
         return;
       }
-      if (modelPicker) modelPicker.open = false;
       preference("aiModel", value);
+      if (route === "ai-models") back();
+    },
+    starter(value) {
+      // Starters only fill the composer: phone actions still need the user's own send.
+      input.value = String(value || "").slice(0, 300);
+      syncComposer();
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
     },
     "account-options": accountOptions,
     "email-auth": mode => emailForm(mode, screen.querySelector('#account-form input[name="email"]')?.value || ""),
@@ -1945,6 +1959,17 @@
     if (event.target.matches("[data-visual-beta]")) changeVisualBeta(event.target);
   });
 
+  app.addEventListener("paste", event => {
+    const input = event.target;
+    if (!input.classList?.contains("account-code-input")) return;
+    // maxlength would cut "Код действует 10 минут: 482913" before the code is reached.
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    input.value = U.codeDigits(text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
   app.addEventListener("input", event => {
     const input = event.target;
     if (input.closest?.("#account-form")) {
@@ -1952,7 +1977,14 @@
       const error = input.form?.querySelector(".form-error");
       if (error) error.hidden = true;
     }
-    if (input.classList?.contains("account-code-input")) updateCodeCells();
+    if (input.classList?.contains("account-code-input")) {
+      updateCodeCells();
+      // Email confirmation needs only the code: submit once the sixth digit arrives (typing,
+      // paste or Android one-time-code autofill). Password reset still needs its password fields.
+      const form = input.form;
+      if (form?.dataset.mode === "verify" && input.value.length === 6 && form.getAttribute("aria-busy") !== "true" &&
+          form.checkValidity()) form.requestSubmit();
+    }
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
     if (input.id === "faq-search") filterFaq();
     if (input.id === "history-search") {
