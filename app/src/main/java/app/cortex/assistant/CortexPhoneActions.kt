@@ -357,7 +357,7 @@ internal class CortexPhoneActions(private val context: Context) {
             ?.activityInfo?.packageName?.takeIf(launchable)
         // Several handlers without a chosen default resolve to the system chooser ("android").
         @Suppress("DEPRECATION")
-        val pkg = preferred ?: runCatching { manager.queryIntentActivities(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) }
+        val pkg = preferred ?: runCatching { manager.queryIntentActivities(intent, 0) }
             .getOrDefault(emptyList()).map { it.activityInfo }
             .sortedByDescending { it.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0 }
             .map { it.packageName }.firstOrNull(launchable) ?: return null
