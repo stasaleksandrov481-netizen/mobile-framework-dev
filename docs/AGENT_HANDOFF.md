@@ -5,6 +5,8 @@
 - `FirstExperienceCalculator.PACKAGES` + OnePlus, Transsion, Meizu.
 - Local: new JVM tests pass, lint 0 errors, JS QA 73/73. UI change not screenshot-verified; vendor components are from public OEM knowledge and must be confirmed per `docs/ANDROID_TEST_MATRIX.md`.
 
+- CI note: device regression on intermediate commit 7f3bb28 failed 14/15 — `stopDuringRealBrightnessRampRestoresSettings` timed out after 12 s; that commit did not touch first-experience brightness and the next commit 7c406bd passed 15/15. Treat as emulator timing flakiness, watch for recurrence.
+
 ## 2026-11-20 UTC · PR #100: brightness command on vendor ranges
 
 - `CortexBrightness` assumed `screen_brightness` max 255 and returned `unavailable` for any larger value, so "увеличь/уменьши яркость" could never work on OEM builds storing 0..1023/2047/4095, although `FirstExperienceBrightness` already scaled such ranges. Now `Port.maximum()` (framework `config_screenBrightnessSettingMaximum`, trusted only if >=255 and >= current value) or a range inferred from the current value; readback verification unchanged. Existing test that asserted 1023 = unsupported updated (70_000 stays unsupported); 2 new tests; `CortexBrightnessTest` 8/8 locally.
