@@ -3,8 +3,9 @@
 - Ветка `feat/cortex-web-monochrome-20261120` от `release/cortex-web-20261120` (`0bf3cb7`). Основа сайта сверена с действующей сборкой `62b3dd6`.
 - Главная получила чёрно-белую иллюстрацию WebP, свободную левую часть первого экрана, плавное появление изображения справа и одинаковые кнопки под заголовком. На узких экранах изображение, текст и действия идут одной колонкой. Сокращены тексты, добавлены примеры команд. При включённом уменьшении движения изображение видно сразу.
 - Изменены `cortex-web/app/page.tsx`, `cortex-web/app/landing.css`, `cortex-web/components/RegistrationCta.tsx`, `cortex-web/components/DownloadCTA.tsx` и `cortex-web/public/cortex-hero-monochrome.webp`. Переключатель регистрации и закрытое скачивание сохранены.
-- Проверки: 51 тест, TypeScript, Next.js production build и `release:verify` прошли. Браузерная проверка охватывает размеры 320, 390, 768, 1024 и 1440 px.
-- На `cortexapp.ru` действует `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB`. Новая ветка предназначена для Vercel Preview и проверки дизайна владельцем перед переключением доменов.
+- Проверки: 51 тест, TypeScript, Next.js production build и `release:verify` прошли. В Chromium проверены размеры 320, 390, 768, 1024 и 1440 px, геометрия кнопок, отсутствие горизонтальной прокрутки, переход к возможностям, раскрытие FAQ и режим уменьшенного движения.
+- Vercel Preview `dpl_CqtcbChb2VkLxvpzc8rRmiQFXs1m` READY, коммит `0787df9`. Главная, WebP, регистрация и API статуса отвечают HTTP 200. Кэш в Preview возвращает `degraded`.
+- На `cortexapp.ru` действует `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB`. Перед переключением доменов требуется одобрение владельцем предпросмотра.
 
 ## 2026-11-20 UTC · новый сайт и восстановление функций production
 
