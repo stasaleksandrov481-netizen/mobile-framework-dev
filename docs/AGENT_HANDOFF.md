@@ -1,3 +1,9 @@
+## 2026-11-20 UTC · PR #100: app UI system (`ui.css`), stage 1
+
+- New `ui.css` (after legacy layers, before `markdown.css`), all rules scoped under `#app`: unified headers, grouped `tile-group`/`access-list` cards with inset separators, glyph tiles, monochrome switches, `.action` variants, chat rows as cards, dock with white core, composer, sheets/toasts/search, minimal splash (rings hidden). `screens.js`: `access-state` gets `is-on`/`is-needed` classes only. Fixed task-list checkboxes hidden by legacy `margin-inline: -1.38em`.
+- Review helper `qa/browser/shots.mjs` captures 13 routes at 393×852 via local Playwright (needs `python -m http.server 3124` in assets/web). JS QA 87/87. Not checked on a device.
+- Pending from owner requests: clarifying-questions panel, system prompt hardening, single male voice + intermittent wake bug, island redesign with Markdown.
+
 ## 2026-11-20 UTC · PR #100: ChatGPT-level answer Markdown
 
 - New `markdown-code.js` (escaped single-pass highlighter, fixed `tok-*` classes) and `markdown-math.js` (LaTeX subset → MathML: frac/sqrt/scripts/greek/operators/large ops/functions/accents/fonts/matrix/cases; every node name fixed, all text escaped, 1500-char limit). `markdown.js`: `==mark==`, `++u++` (word-boundary guarded, C++ stays text), `:badge[tone]{text}`, inline/block math (`$5 и $10` stays text), fences `cortex-hero`, `cortex-chart` (bar/line/donut SVG from validated numbers + accessible data table), `cortex-flow`, `details <title>` (nested Markdown, depth ≤ 2), `math/latex`; callouts NOTE/INFO/TIP/IMPORTANT/WARNING/CAUTION/SUCCESS/SECURITY; streaming typed blocks render a placeholder instead of raw JSON.

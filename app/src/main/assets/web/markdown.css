@@ -37,7 +37,7 @@
 :is(.message.assistant, body) .markdown li::marker { color: var(--md-faint); }
 :is(.message.assistant, body) .markdown ol > li::marker { font-variant-numeric: tabular-nums; }
 :is(.message.assistant, body) .markdown .task-item { list-style: none; margin-inline-start: -1.3em; display: flex; gap: 9px; }
-:is(.message.assistant, body) .markdown .task-check { display: inline-grid; place-items: center; flex: none; width: 17px; height: 17px; margin-top: .2em;
+:is(.message.assistant, body) .markdown .task-check { display: inline-grid; place-items: center; flex: none; width: 17px; height: 17px; margin: .2em 0 0; vertical-align: 0;
   border: 1.5px solid var(--md-line-strong); border-radius: 5px; color: #000; }
 :is(.message.assistant, body) .markdown .task-check:has(svg) { background: var(--md-ink); border-color: var(--md-ink); }
 :is(.message.assistant, body) .markdown hr { height: 1px; border: 0; background: var(--md-line); margin-block: 1.2em; }

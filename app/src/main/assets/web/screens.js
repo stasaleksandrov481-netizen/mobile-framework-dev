@@ -470,7 +470,7 @@ const CortexUI = (() => {
       Некоторые оболочки дополнительно ограничивают фоновые службы: «Работа в фоне» открывает нужный системный экран, если он есть на этом телефоне.</p></details>` : "";
     const item = (glyph, title, desc, enabled, action, required = false) =>
       `<div class="access-row"><span class="access-symbol">${icon(glyph, 21)}</span><div class="tile-copy"><strong>${esc(title)}</strong>
-        <small>${esc(desc)}</small><span class="access-state">${enabled ? "Разрешено" : required ? "Требуется разрешение" : "Необязательно"}</span></div>
+        <small>${esc(desc)}</small><span class="access-state${enabled ? " is-on" : required ? " is-needed" : ""}">${enabled ? "Разрешено" : required ? "Требуется разрешение" : "Необязательно"}</span></div>
         <button class="access-open" type="button" ${attributes(action)}>${enabled ? "Проверить" : "Настроить"}</button></div>`;
     return detail("Доступы Android", "Давайте только те разрешения, которые нужны вам", `<section class="access-list">
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
