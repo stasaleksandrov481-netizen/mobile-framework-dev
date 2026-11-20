@@ -836,7 +836,7 @@
     const field = screen.querySelector("[data-account-code]");
     const input = field?.querySelector(".account-code-input");
     if (!input) return;
-    const digits = input.value.replace(/\D/g, "").slice(0, 6);
+    const digits = U.codeDigits(input.value);
     if (input.value !== digits) input.value = digits;
     const active = Math.min(digits.length, 5);
     field.dataset.complete = String(digits.length === 6);
@@ -957,8 +957,13 @@
           const fieldName = failure.code === "invalid_email" ? "email"
             : failure.code === "invalid_code" || (failure.code === "auth_credentials" && mode !== "password") ? "code"
             : ["invalid_password", "auth_credentials"].includes(failure.code) ? "password" : "";
-          if (fieldName) form.querySelector(`[name="${fieldName}"]`)?.setAttribute("aria-invalid", "true");
-          error.textContent = failure.message || "Что-то пошло не так. Попробуйте ещё раз.";
+          const invalid = fieldName ? form.querySelector(`[name="${fieldName}"]`) : null;
+          invalid?.setAttribute("aria-invalid", "true");
+          // Let the user overwrite a rejected code immediately instead of erasing it digit by digit.
+          if (fieldName === "code") invalid?.select?.();
+          error.textContent = fieldName === "code" && failure.code === "auth_credentials"
+            ? "Код не подошёл или устарел. Введите код из последнего письма или запросите новый."
+            : failure.message || "Что-то пошло не так. Попробуйте ещё раз.";
           error.hidden = false;
         }
       }
@@ -1946,6 +1951,17 @@
     if (event.target.matches("[data-visual-beta]")) changeVisualBeta(event.target);
   });
 
+  app.addEventListener("paste", event => {
+    const input = event.target;
+    if (!input.classList?.contains("account-code-input")) return;
+    // maxlength would cut "Код действует 10 минут: 482913" before the code is reached.
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    input.value = U.codeDigits(text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
   app.addEventListener("input", event => {
     const input = event.target;
     if (input.closest?.("#account-form")) {
@@ -1953,7 +1969,14 @@
       const error = input.form?.querySelector(".form-error");
       if (error) error.hidden = true;
     }
-    if (input.classList?.contains("account-code-input")) updateCodeCells();
+    if (input.classList?.contains("account-code-input")) {
+      updateCodeCells();
+      // Email confirmation needs only the code: submit once the sixth digit arrives (typing,
+      // paste or Android one-time-code autofill). Password reset still needs its password fields.
+      const form = input.form;
+      if (form?.dataset.mode === "verify" && input.value.length === 6 && form.getAttribute("aria-busy") !== "true" &&
+          form.checkValidity()) form.requestSubmit();
+    }
     if (input.id === "composer-input") { drafts.set(draftKey(), input.value); syncComposer(); }
     if (input.id === "faq-search") filterFaq();
     if (input.id === "history-search") {

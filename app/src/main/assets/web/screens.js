@@ -552,7 +552,16 @@ const CortexUI = (() => {
         `<button type="button" class="dock-tab" data-tab="${key}" ${attributes("tab", key)}>
           <span class="nav-icon">${icon(name, 20)}</span><span>${title}</span></button>`).join("");
   }
-  return { esc, icon, iconButton, button, tile, detail, get version() { return version; },
+  // A pasted e-mail line such as "Код действует 10 минут: 482913" must yield the standalone
+  // six-digit code, not the first six digits of the whole sentence.
+  function codeDigits(value) {
+    const text = String(value ?? "");
+    const groups = text.match(/(?<!\d)\d{6}(?!\d)/g);
+    if (groups?.length === 1) return groups[0];
+    return text.replace(/\D/g, "").slice(0, 6);
+  }
+
+  return { esc, icon, iconButton, button, tile, detail, codeDigits, get version() { return version; },
     setVersion(value) { if (/^\d+\.\d+\.\d+(?:[-.][a-z0-9.]+)?$/i.test(value)) version = value; },
     tabs, parent, page, composer, navigation, history, chatItems, accountModes, accountAvailability };
 })();

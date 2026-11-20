@@ -148,3 +148,19 @@ test("Supabase authentication email templates contain only variable OTPs and con
     assert.match(html, /https:\/\/cortexapp\.ru/);
   }
 });
+
+test("six-digit code input extracts the code from pasted e-mail text and auto-submits confirmation", () => {
+  const source = read("app/src/main/assets/web/screens.js");
+  const UI = runInNewContext(`${source}
+CortexUI;`, { Cortex: { state: { account: null } }, CortexIcons: () => "" });
+  assert.equal(UI.codeDigits("Код действует 10 минут: 482913"), "482913");
+  assert.equal(UI.codeDigits("482 913"), "482913");
+  assert.equal(UI.codeDigits("48a29"), "4829");
+  assert.equal(UI.codeDigits("1234567890"), "123456");
+  assert.equal(UI.codeDigits(null), "");
+  const app = read("app/src/main/assets/web/app.js");
+  assert.match(app, /addEventListener\("paste"[\s\S]{0,400}U\.codeDigits\(text\)/);
+  assert.match(app, /dataset\.mode === "verify" && input\.value\.length === 6[\s\S]{0,160}requestSubmit\(\)/);
+  assert.match(app, /fieldName === "code"\) invalid\?\.select/);
+  assert.match(app, /Код не подошёл или устарел/);
+});

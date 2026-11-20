@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · PR #100: registration / six-digit code input
+
+- Reviewed `screens.js` account form (single hidden `one-time-code` input + 6 visual cells, so paste/autofill/Backspace/rotation are native), `app.js` `submitAccount`/`resendCode`, native `CortexServerBridge` auth ops and Edge `emailAuth` (rate buckets per IP/email, identical response for unknown addresses, `auth_credentials` for wrong and expired codes).
+- Fixed: (1) `maxlength=6` + strip-non-digits turned a pasted "Код действует 10 минут: 482913" into `101234`; new `CortexUI.codeDigits` picks a single standalone 6-digit group, plus a `paste` handler that runs before maxlength truncation. (2) Verify mode auto-submits on the sixth digit (guarded by `aria-busy`, `checkValidity`, and the existing `submit.disabled`); reset mode does not, it still needs passwords. (3) Rejected code is selected for overwrite; code-mode `auth_credentials` copy says the code is wrong/expired instead of mentioning the password.
+- Not changed: server accepts 6–10 digit codes while the UI enforces 6. If the Supabase Auth OTP length is ever set above 6, the app cannot verify — keep project OTP length at 6 or widen the UI together. Live Auth config was not inspected.
+- Local JS QA 74/74 (`qa/account-email.test.mjs` +1 test). Not verified on a device keyboard/autofill.
+
 ## 2026-11-20 UTC · PR #100: cross-shell app roles and background access
 
 - `CortexAppRoles` (pure, `CortexAppRolesTest`) + `CortexPhoneActions.roleApp`: after exact label/alias lookup, spoken role words (inflected RU/EN) resolve through `makeMainSelectorActivity` categories, `ACTION_DIAL`, `SHOW_ALARMS`, `ACTION_SETTINGS`; default handler first, else a launchable system handler; never the chooser package `android`. Manifest `<queries>` added for these intents. "интернет" deliberately not mapped (conflicts with network panel commands).
