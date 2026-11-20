@@ -41,9 +41,33 @@ internal class CortexWebUpdates(context: Context) {
         KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(value))
     }.getOrNull()
 
-    fun snapshot(): Long {
+    @Synchronized fun snapshot(): Long {
         val active = preferences.getLong("active", 0L)
+        if (active > 0 && WebUpdatePolicy.supersededByApk(preferences.getInt("native", 0), BuildConfig.VERSION_CODE)) {
+            // A newer or reinstalled APK ships its own CI-tested WebView assets for its native bridge.
+            // Never keep serving a bundle activated under another native build; only a strictly newer
+            // signed bundle may replace the APK assets again.
+            val floor = maxOf(preferences.getLong("floor", 0L), active, preferences.getLong("previous", 0L))
+            preferences.edit().putLong("active", 0L).putLong("previous", 0L).putLong("floor", floor)
+                .putInt("native", BuildConfig.VERSION_CODE).commit()
+            return 0L
+        }
         return if (active > 0 && File(storage, "v$active").isDirectory) active else 0L
+    }
+
+    /** Removes bundles that can no longer become active; [inUse] is the snapshot a live WebView reads. */
+    fun cleanupAsync(inUse: Long) {
+        Thread({
+            runCatching {
+                synchronized(this) {
+                    val keep = setOf(inUse, preferences.getLong("active", 0L), preferences.getLong("previous", 0L))
+                    val now = System.currentTimeMillis()
+                    storage.listFiles().orEmpty().filter { it.isDirectory }.forEach { dir ->
+                        if (WebUpdatePolicy.obsolete(dir.name, keep, now - dir.lastModified())) dir.deleteRecursively()
+                    }
+                }
+            }.onFailure { android.util.Log.w("CortexWebUpdates", "Cleanup skipped: ${it.javaClass.simpleName}") }
+        }, "CortexWebUpdatesCleanup").start()
     }
 
     fun handler(version: Long): WebViewAssetLoader.PathHandler = WebViewAssetLoader.PathHandler { path ->
@@ -95,7 +119,8 @@ internal class CortexWebUpdates(context: Context) {
         require(manifest.optInt("schema") == 1)
         val version = manifest.getLong("version")
         require(version > 0 && version < 10_000_000_000_000L)
-        if (version <= snapshot() || version == preferences.getLong("blocked", 0L)) return
+        if (version <= snapshot() || version <= preferences.getLong("floor", 0L) ||
+            version == preferences.getLong("blocked", 0L)) return
         require(manifest.optInt("min_native") in 1..BuildConfig.VERSION_CODE)
         val name = "web-v$version.zip"
         require(manifest.getString("archive") == name)
@@ -113,16 +138,18 @@ internal class CortexWebUpdates(context: Context) {
             unpack(archive, stage)
             synchronized(this) {
                 // A rollback may have happened while the download was in flight.
-                require(version > snapshot() && version != preferences.getLong("blocked", 0L))
+                require(version > snapshot() && version > preferences.getLong("floor", 0L) &&
+                    version != preferences.getLong("blocked", 0L))
                 val destination = File(storage, "v$version")
                 require(!destination.exists() && stage.renameTo(destination))
                 val previous = snapshot()
-                if (!preferences.edit().putLong("previous", previous).putLong("active", version).commit()) {
+                if (!preferences.edit().putLong("previous", previous).putLong("active", version)
+                        .putInt("native", BuildConfig.VERSION_CODE).commit()) {
                     throw IllegalStateException("Could not activate update")
                 }
             }
             // Keep older immutable bundles while a running WebView may still read them.
-            // Cleanup belongs to cold startup, after no old asset snapshot is active.
+            // cleanupAsync() removes them on the next WebView start.
         } finally {
             if (stage.exists()) stage.deleteRecursively()
         }
@@ -209,5 +236,19 @@ internal class CortexWebUpdates(context: Context) {
         val REQUIRED = setOf("index.html", "app.js", "model.js", "gateway.js", "setup.js", "screens.js",
             "icons.js", "style.css", "planner.js", "planner.css", "cortex-control-client.js",
             "cortex-control.css", "subscription.js", "subscription.css", "transitions.js", "markdown.js")
+    }
+}
+
+internal object WebUpdatePolicy {
+    private const val STALE_STAGING_MILLIS = 30 * 60_000L
+    private val bundle = Regex("v[1-9][0-9]{0,12}")
+
+    /** An OTA bundle is valid only for the APK versionCode it was activated under (0 = unknown, legacy). */
+    fun supersededByApk(activatedNative: Int, installedNative: Int): Boolean = activatedNative != installedNative
+
+    fun obsolete(name: String, keep: Set<Long>, ageMillis: Long): Boolean = when {
+        name.startsWith("staging-") -> ageMillis > STALE_STAGING_MILLIS
+        bundle.matches(name) -> name.drop(1).toLong() !in keep
+        else -> false
     }
 }

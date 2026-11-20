@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         webSnapshot = webUpdates.snapshot()
+        webUpdates.cleanupAsync(webSnapshot)
         val loader = WebViewAssetLoader.Builder()
             .addPathHandler("/favicons/", CortexSiteFavicon())
             .addPathHandler("/assets/web/", webUpdates.handler(webSnapshot))
