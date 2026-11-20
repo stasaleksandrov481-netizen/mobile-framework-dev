@@ -3,6 +3,8 @@ import Link from "next/link";
 import { supportUrl, supportUsername } from "@/lib/merchant-details";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import SupportChat from "@/components/SupportChat";
+import "../restored-pages.css";
 
 export const metadata: Metadata = {
   title: "Поддержка — CORTEX",
@@ -17,6 +19,7 @@ export default function SupportPage() {
       <main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <h1>Поддержка CORTEX</h1>
+        <div className="support-chat-shell"><SupportChat /></div>
         <p className="legal-lead">Поможем со входом, работой приложения, подпиской и запросами по персональным данным.</p>
         <h2>Электронная почта</h2>
         <p>Напишите на <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a>. Укажите, что произошло, версию приложения и модель телефона, если вопрос технический. Пароли и коды подтверждения отправлять не нужно.</p>

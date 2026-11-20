@@ -201,8 +201,10 @@ test("Payment selection is a separate page and never passes client-selected amou
   const catalog = readFileSync(new URL("../lib/public-catalog.ts", import.meta.url), "utf8");
   const methods = readFileSync(new URL("../components/PaymentMethods.tsx", import.meta.url), "utf8");
   const pricing = readFileSync(new URL("../app/pricing/page.tsx", import.meta.url), "utf8");
+  const pricingButton = readFileSync(new URL("../components/PricingBuyButton.tsx", import.meta.url), "utf8");
   assert.match(page, /starsConfigured=/);
-  assert.match(pricing, /href=\{`\/payment\?plan=\$\{plan\.code\}`\}/);
+  assert.match(pricing, /<PricingBuyButton plan=\{plan\.code\}/);
+  assert.match(pricingButton, /href=\{`\/payment\?plan=\$\{plan\}`\}/);
   assert.match(methods, /Robokassa/);
   assert.doesNotMatch(methods, /Platega/);
   assert.match(methods, /payment-option--unavailable/);

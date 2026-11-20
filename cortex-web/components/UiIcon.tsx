@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 type IconName = "arrow-up-right" | "arrow-right" | "download" | "clock" | "check" | "close" | "shield" | "telegram" |
-  "lock" | "mic" | "bolt" | "layers" | "bell" | "spark" | "phone" | "user" | "mail";
+  "lock" | "mic" | "bolt" | "layers" | "bell" | "spark" | "phone" | "user" | "mail" | "copy" | "paperclip" | "send";
 type IconProps = SVGProps<SVGSVGElement> & { name: IconName; size?: number };
 
 /** A single crisp, consistent set of rounded 1.8px icons for the marketing UI. */
@@ -38,6 +38,9 @@ export default function UiIcon({ name, size = 18, ...props }: IconProps) {
       {name === "phone" && <><rect x="6.5" y="2.5" width="11" height="19" rx="3" /><path d="M10.5 18.5h3" /></>}
       {name === "user" && <><circle cx="12" cy="8.5" r="4" /><path d="M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5" /></>}
       {name === "mail" && <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" /></>}
+      {name === "copy" && <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M15 4H6a2 2 0 0 0-2 2v9" /></>}
+      {name === "paperclip" && <path d="m9 13 5.4-5.4a2 2 0 0 1 2.8 2.8l-7 7a4 4 0 0 1-5.7-5.6l7.8-7.8" />}
+      {name === "send" && <><path d="m21 3-6 18-4-8-8-4Z" /><path d="M11 13 21 3" /></>}
     </svg>
   );
 }

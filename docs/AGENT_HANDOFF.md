@@ -1,3 +1,9 @@
+## 2026-11-20 UTC · новый сайт и восстановление функций production
+
+- Ветка `release/cortex-web-20261120` от `dc67c12`. Интерфейс Black Glass, дата открытого запуска без фиксации, скачивание APK с сайта закрыто.
+- Из текущего production восстановлены верифицированные исходники чата поддержки, вкладки токенов, checkout, доступности Stars и фонового компонента. Карточки тарифов открывают страницу выбора оплаты; платёжные флаги и секреты не менялись. Сохранён публичный URL логотипа для писем.
+- Локально: 51 тест, TypeScript, Next.js build и `release:verify` прошли. Перед выкладкой production проверяются публичные маршруты и текущие зависимости. Предыдущий deployment для отката — `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj`.
+
 ## 2026-11-20 UTC · website redesign (black + liquid glass), download closed — NOT deployed
 
 - Branch `feat/cortex-web-black-glass-20261120` from `fix/cortex-web-safe-recovery-20261118` (`5cc4414`). Owner asked for a global redesign of the landing, account and site in black with liquid-glass buttons, and to close app download access completely.
