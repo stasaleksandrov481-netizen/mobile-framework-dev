@@ -3,7 +3,9 @@ package app.cortex.assistant
 import android.content.Context
 import android.content.SharedPreferences
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Bundle
 import android.os.Handler
@@ -21,6 +23,14 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         if (name == "voiceReplies" && !prefs.getBoolean(name, true)) stop()
     }
     private val handler = Handler(Looper.getMainLooper())
+    private val audio = applicationContext.getSystemService(AudioManager::class.java)
+    // Duck music and podcasts while CORTEX speaks, like other voice assistants;
+    // without focus a reply played at full volume on top of the user's media.
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+        .setOnAudioFocusChangeListener({ }, handler)
+        .build()
     private var request: String? = null
     private var track: AudioTrack? = null
     private var localTts: TextToSpeech? = null
@@ -31,12 +41,19 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
 
     init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
 
-    @Synchronized fun speak(text: String, complete: (Boolean) -> Unit) {
+    @Synchronized fun speak(text: String, done: (Boolean) -> Unit) {
         stop()
-        if (!options.getBoolean("voiceReplies", true)) { handler.post { complete(false) }; return }
+        if (!options.getBoolean("voiceReplies", true)) { handler.post { done(false) }; return }
         val turn = generation
         val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
-        if (normalized.isBlank()) { handler.post { complete(false) }; return }
+        if (normalized.isBlank()) { handler.post { done(false) }; return }
+        // Speaking without focus is still better than staying silent, so the result is ignored.
+        runCatching { audio?.requestAudioFocus(focus) }
+        val complete: (Boolean) -> Unit = { ok ->
+            // A newer turn owns the same focus request; only the current turn releases it.
+            if (synchronized(this) { turn == generation }) releaseFocus()
+            done(ok)
+        }
         if (BuildConfig.DEBUG) {
             useAndroidVoice(turn, normalized, complete)
             return
@@ -203,8 +220,11 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         }
     }
 
+    private fun releaseFocus() { runCatching { audio?.abandonAudioFocusRequest(focus) } }
+
     @Synchronized fun stop() {
         ++generation
+        releaseFocus()
         request?.let(bridge::cancel)
         request = null
         val previous = track

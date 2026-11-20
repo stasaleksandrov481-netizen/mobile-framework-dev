@@ -1,3 +1,7 @@
+## 2026-11-20 UTC · PR #100: duck media during voice replies
+
+- `CortexVoiceOutput` now requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (USAGE_ASSISTANT/SPEECH) before cloud PCM or Android TTS playback and abandons it on completion of the current turn, on `stop()` and `close()`. A superseded turn never abandons the newer turn's focus. Focus denial is ignored (still speaks). Compiles; not verified on a device with music playing.
+
 ## 2026-11-20 UTC · PR #100: dative name forms for messaging
 
 - `ConversationMatch.nameForms/searchQuery`: dative `-ю/-е` now also maps to soft-sign names (Игорю → Игорь) and `-ии` to `-ия` (Марии → Мария, search stem «мари»). Exact full-title match and the tie → no-send rule are unchanged. Tests `softSignAndIyaNamesMatchTheirDativeForms` (+negative cases Марина, Игорёк) pass locally.
