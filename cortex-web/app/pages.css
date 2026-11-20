@@ -120,17 +120,6 @@
 .legal-links a:hover { border-color: rgb(255 255 255 / .3); color: #fff; }
 .questions-page h2 { margin-top: 34px; }
 
-/* ---------- Pricing ---------- */
-.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 8px 0 32px; }
-.plan-card { display: flex; flex-direction: column; gap: 10px; padding: 24px; color: #a5a5a5; }
-.plan-card h2 { margin: 0 !important; padding: 0 !important; border: 0 !important; color: #fff; font-size: 19px !important; }
-.plan-card p { margin: 0 !important; font-size: 13px !important; line-height: 1.6 !important; }
-.plan-price { margin-top: 8px; color: #fff; font-size: 30px; font-weight: 740; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
-.plan-price small { color: var(--muted); font-size: 13px; font-weight: 560; letter-spacing: 0; }
-.plan-card .glass { margin-top: auto; text-decoration: none; color: #f4f4f4; }
-.plan-card--featured { border-color: rgb(255 255 255 / .22); background: linear-gradient(180deg, rgb(255 255 255 / .08), rgb(255 255 255 / .015)), #070707; }
-.plan-card .plan-limit { color: var(--fg-2); }
-
 @media (max-width: 900px) {
   .auth-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr auto; grid-template-areas: "auth-header" "auth-main" "auth-footer"; }
   .auth-art { display: none; }
