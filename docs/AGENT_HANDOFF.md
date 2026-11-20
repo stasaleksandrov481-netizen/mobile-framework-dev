@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · PR #100: cross-shell app roles and background access
+
+- `CortexAppRoles` (pure, `CortexAppRolesTest`) + `CortexPhoneActions.roleApp`: after exact label/alias lookup, spoken role words (inflected RU/EN) resolve through `makeMainSelectorActivity` categories, `ACTION_DIAL`, `SHOW_ALARMS`, `ACTION_SETTINGS`; default handler first, else a launchable system handler; never the chooser package `android`. Manifest `<queries>` added for these intents. "интернет" deliberately not mapped (conflicts with network panel commands).
+- `CortexBackgroundAccess` (+ test): `background-permission` bridge op opens `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (new normal permission `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; revisit if publishing to Google Play), then the battery list, then a vendor autostart screen resolved on device, then app details. Manifest `<queries><package>` for those vendor packages. UI: one `item()` row "Работа в фоне" in the existing Android access screen, state = `compatibility.batteryUnrestricted` (autostart state is not detectable). Copy in compatibility panel updated. No new styles.
+- `FirstExperienceCalculator.PACKAGES` + OnePlus, Transsion, Meizu.
+- Local: new JVM tests pass, lint 0 errors, JS QA 73/73. UI change not screenshot-verified; vendor components are from public OEM knowledge and must be confirmed per `docs/ANDROID_TEST_MATRIX.md`.
+
 ## 2026-11-20 UTC · PR #100: brightness command on vendor ranges
 
 - `CortexBrightness` assumed `screen_brightness` max 255 and returned `unavailable` for any larger value, so "увеличь/уменьши яркость" could never work on OEM builds storing 0..1023/2047/4095, although `FirstExperienceBrightness` already scaled such ranges. Now `Port.maximum()` (framework `config_screenBrightnessSettingMaximum`, trusted only if >=255 and >= current value) or a range inferred from the current value; readback verification unchanged. Existing test that asserted 1023 = unsupported updated (70_000 stays unsupported); 2 new tests; `CortexBrightnessTest` 8/8 locally.

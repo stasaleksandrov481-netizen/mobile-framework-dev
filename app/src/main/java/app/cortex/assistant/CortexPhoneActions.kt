@@ -326,8 +326,43 @@ internal class CortexPhoneActions(private val context: Context) {
         }
         return when (clean) {
             in CAMERA_NAMES -> cameraApp(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
-            else -> null
+            else -> CortexAppRoles.role(clean)?.let(::roleApp)
         }
+    }
+
+    /** The user's default (or the only/system) launchable app for a standard Android role. */
+    private fun roleApp(role: CortexAppRoles.Role): App? {
+        val intent = when (role) {
+            CortexAppRoles.Role.PHONE -> Intent(Intent.ACTION_DIAL)
+            CortexAppRoles.Role.CLOCK -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
+            CortexAppRoles.Role.SETTINGS -> Intent(Settings.ACTION_SETTINGS)
+            CortexAppRoles.Role.FILES -> if (Build.VERSION.SDK_INT >= 29)
+                Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_FILES) else return null
+            else -> Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, when (role) {
+                CortexAppRoles.Role.GALLERY -> Intent.CATEGORY_APP_GALLERY
+                CortexAppRoles.Role.MESSAGING -> Intent.CATEGORY_APP_MESSAGING
+                CortexAppRoles.Role.CONTACTS -> Intent.CATEGORY_APP_CONTACTS
+                CortexAppRoles.Role.CALENDAR -> Intent.CATEGORY_APP_CALENDAR
+                CortexAppRoles.Role.EMAIL -> Intent.CATEGORY_APP_EMAIL
+                CortexAppRoles.Role.MAPS -> Intent.CATEGORY_APP_MAPS
+                CortexAppRoles.Role.MUSIC -> Intent.CATEGORY_APP_MUSIC
+                CortexAppRoles.Role.BROWSER -> Intent.CATEGORY_APP_BROWSER
+                else -> Intent.CATEGORY_APP_CALCULATOR
+            })
+        }
+        val manager = context.packageManager
+        val launchable = { pkg: String -> pkg != "android" && manager.getLaunchIntentForPackage(pkg) != null }
+        @Suppress("DEPRECATION")
+        val preferred = runCatching { manager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) }.getOrNull()
+            ?.activityInfo?.packageName?.takeIf(launchable)
+        // Several handlers without a chosen default resolve to the system chooser ("android").
+        @Suppress("DEPRECATION")
+        val pkg = preferred ?: runCatching { manager.queryIntentActivities(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY) }
+            .getOrDefault(emptyList()).map { it.activityInfo }
+            .sortedByDescending { it.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0 }
+            .map { it.packageName }.firstOrNull(launchable) ?: return null
+        val label = runCatching { manager.getApplicationLabel(manager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
+        return App(pkg, label)
     }
 
     private fun cameraApp(action: String): App? {

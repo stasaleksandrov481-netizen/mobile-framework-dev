@@ -60,6 +60,7 @@ internal class CortexDeviceBridge(
             "verification-permission" -> open(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             "brightness-permission" -> open(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}")))
             "display-settings" -> open(Intent(Settings.ACTION_DISPLAY_SETTINGS))
+            "background-permission" -> sendAction("background-permission") { CortexBackgroundAccess.open(context, ::open) }
             "notification-permission" -> requestPermission(Manifest.permission.POST_NOTIFICATIONS)
             "notification-listener-permission" -> sendAction("notification-listener") {
                 open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))

@@ -234,6 +234,7 @@ internal class FirstExperienceCalculator(
         val PACKAGES = setOf("com.sec.android.app.popupcalculator", "com.google.android.calculator", "com.android.calculator2",
             "com.miui.calculator", "com.huawei.calculator", "com.hihonor.calculator", "com.coloros.calculator",
             "com.oplus.calculator", "com.asus.calculator", "com.vivo.calculator", "com.vivo.calculator2",
-            "com.bbk.calculator", "com.iqoo.calculator")
+            "com.bbk.calculator", "com.iqoo.calculator", "com.oneplus.calculator", "com.transsion.calculator",
+            "com.meizu.flyme.calculator")
     }
 }

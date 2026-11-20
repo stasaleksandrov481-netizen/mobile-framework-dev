@@ -467,7 +467,7 @@ const CortexUI = (() => {
       <div class="access-list">${support.map(([name, available]) => `<div class="access-row"><div class="tile-copy"><strong>${esc(name)}</strong>
         <small>${available ? "Доступно на устройстве" : "Нет системной поддержки или компонента"}</small></div></div>`).join("")}</div>
       <p class="quiet-copy">Без локального распознавания можно использовать текстовый чат и доступный голосовой ввод в приложении.
-      Некоторые оболочки дополнительно ограничивают фоновые службы. Для них может потребоваться настройка энергосбережения вручную.</p></details>` : "";
+      Некоторые оболочки дополнительно ограничивают фоновые службы: «Работа в фоне» открывает нужный системный экран, если он есть на этом телефоне.</p></details>` : "";
     const item = (glyph, title, desc, enabled, action, required = false) =>
       `<div class="access-row"><span class="access-symbol">${icon(glyph, 21)}</span><div class="tile-copy"><strong>${esc(title)}</strong>
         <small>${esc(desc)}</small><span class="access-state">${enabled ? "Разрешено" : required ? "Требуется разрешение" : "Необязательно"}</span></div>
@@ -479,6 +479,7 @@ const CortexUI = (() => {
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
       ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission")}
+      ${compatibility ? item("refresh", "Работа в фоне", "Чтобы оболочка телефона не закрывала островок, вызов по имени и напоминания.", compatibility.batteryUnrestricted, "background-permission") : ""}
       ${item("sliders", "Изменение яркости", "Для изменения и восстановления яркости в интерактивном знакомстве.", a.brightness, "brightness-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
       </section>

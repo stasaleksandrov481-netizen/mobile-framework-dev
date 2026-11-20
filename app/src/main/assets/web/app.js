@@ -1792,6 +1792,7 @@
     },
     "notification-permission": () => sendDevice("notification-permission"),
     "brightness-permission": () => sendDevice("brightness-permission"),
+    "background-permission": () => { if (!sendDevice("background-permission")) flash("Настройка доступна в приложении Android."); },
     "first-experience": () => {
       if (!window.CortexFirstExperience?.open()) flash("Знакомство доступно в Android-приложении CORTEX.");
     },
