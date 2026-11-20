@@ -3,7 +3,9 @@
 - Ветка `feat/cortex-web-motion-20261120` от `f4b0177`. На главной остались экран с голосовым управлением, три примера команд и информация о скачивании. Фотография и её WebP удалены по запросу владельца.
 - В `cortex-web/components/LandingMotion.tsx` добавлена световая волна на Canvas. Карточки появляются и смещаются при прокрутке на компьютере и телефоне. При уменьшении движения волна статична, карточки не смещаются. Декоративный Canvas останавливается за пределами экрана.
 - Изменены `cortex-web/app/page.tsx`, `cortex-web/app/landing.css`, `cortex-web/components/LandingMotion.tsx`. Вход, переключатель регистрации и закрытое скачивание сохранены.
-- `cortexapp.ru` и `www.cortexapp.ru` используют production `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB`. Для новой ветки готовится Vercel Preview.
+- Прошли 51 тест, TypeScript, production build и `release:verify`. В Chromium на ширинах 320, 390, 768, 1024 и 1440 px проверены анимация волны, движение карточек, одинаковые размеры кнопок, короткая компоновка и отсутствие переполнения. Проверен режим уменьшенного движения.
+- Vercel Preview `dpl_64txiFqCkBgs5WDPYm39Gy2bds1u` READY, `ff65bbf`. Главная, регистрация и API статуса отвечают HTTP 200. На главной подтверждены Canvas и три карточки, ссылки на фото нет. В Preview кэш возвращает `degraded`.
+- `cortexapp.ru` и `www.cortexapp.ru` используют production `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB`. Перед переключением доменов требуется одобрение владельцем предпросмотра.
 
 ## 2026-11-20 UTC · чёрно-белая главная CORTEX
 
