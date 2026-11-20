@@ -12,7 +12,8 @@ export function getRedis(): Redis {
   }
 
   if (!client) {
-    client = new Redis({ url, token });
+    // No long retry chain on a public page: return to Supabase if Redis stalls.
+    client = new Redis({ url, token, signal: () => AbortSignal.timeout(900), retry: false });
   }
 
   return client;

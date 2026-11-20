@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
-import { isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
+import { isEmailDeliveryRateLimited, isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
 import { useCortexAccount } from "@/lib/use-cortex-account";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { completeVerifiedAccount } from "@/lib/verified-account";
@@ -32,6 +32,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
   const [successKind, setSuccessKind] = useState<SuccessKind>("existing");
   const [resendWait, setResendWait] = useState(0);
   const [confirmationRequested, setConfirmationRequested] = useState(false);
+  const [confirmationEmailSent, setConfirmationEmailSent] = useState(false);
   const { checking: accountChecking, email: activeEmail } = useCortexAccount();
   const authSubmission = useRef(false);
   const resendSubmission = useRef(false);
@@ -130,12 +131,13 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       if (sendError) throw sendError;
       setCode("");
       setResendWait(60);
+      if (mode === "verify") setConfirmationEmailSent(true);
     } catch (failure) {
       if (isRateLimited(failure)) {
         setResendWait(300);
-        setError("Слишком много запросов. Попробуйте повторить через несколько минут.");
+        setError(safeAuthErrorMessage(failure));
       } else {
-        setError("Не удалось отправить новый код. Попробуйте позже.");
+        setError(safeAuthErrorMessage(failure));
       }
     }
     finally { resendSubmission.current = false; setBusy(false); }
@@ -203,6 +205,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
           setMode("done");
         } else {
           setResendWait(60);
+          setConfirmationEmailSent(true);
           setMode("verify");
         }
         setPassword("");
@@ -260,6 +263,9 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       if (isRateLimited(failure)) {
         setResendWait(300);
       }
+      if (mode === "signup" && isEmailDeliveryRateLimited(failure)) {
+        setConfirmationEmailSent(false);
+      }
       setError(safeAuthErrorMessage(failure));
     } finally {
       authSubmission.current = false;
@@ -275,6 +281,19 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
     setResendWait(0);
     setConfirmationRequested(false);
     setMode(next);
+  }
+
+  function verifyExistingCode() {
+    const validationError = registrationValidationError({
+      mode: "verify", email, password: "", accepted: false, acceptedTerms: false,
+    });
+    if (validationError) { setError(validationError); return; }
+    setConfirmationEmailSent(false);
+    setCode("");
+    setError("");
+    // A code already received can be checked even if new emails are rate-limited.
+    // Preserve the cooldown so changing screens cannot spam the email provider.
+    setMode("verify");
   }
 
   async function signOut() {
@@ -309,7 +328,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
           <p className="auth-success-kicker">АККАУНТ ПОДТВЕРЖДЁН</p>
           <h1 id="auth-title">{successKind === "signup" ? "Всё готово." : successKind === "signin" ? "С возвращением." : "Вы уже с нами."}</h1>
           <p className="auth-success-description">{successKind === "signup"
-            ? "Почта подтверждена. Аккаунт готов к открытой бете CORTEX 20 ноября."
+            ? "Почта подтверждена. Аккаунт готов к будущему запуску открытой беты CORTEX."
             : "Вы вошли в CORTEX. Повторно регистрироваться не нужно."}</p>
           <div className="auth-success-details">
             <span>ЭЛЕКТРОННАЯ ПОЧТА</span>
@@ -324,15 +343,15 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         <>
           <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" || mode === "signin_code_verify" ? "Проверь почту." : mode === "recovery" ? "Восстановление доступа." : "С возвращением."}</h1>
           <p className="auth-description">{mode === "signup"
-            ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
+            ? "Создай аккаунт до открытого запуска CORTEX и получи 5 000 бонусных ИИ-токенов."
             : mode === "recovery"
               ? "Укажите почту, с которой регистрировались. Если аккаунт существует, отправим ссылку для смены пароля."
             : mode === "verify"
-              ? emailOtpReady
-                ? "Мы отправили шестизначный код. Если адрес уже зарегистрирован и письмо не приходит, попробуйте войти."
-                : "Проверь письмо и перейди по ссылке подтверждения. Если в письме есть код, введи его здесь."
+              ? confirmationEmailSent
+                ? "Проверьте письмо с подтверждением. Если есть код, введите его ниже; если есть ссылка, откройте её."
+                : "Если письмо с кодом уже пришло, введите его ниже. Новый код можно запросить после окончания ограничения на отправку."
             : mode === "signin_code_verify"
-              ? "Мы отправили шестизначный код. Введи его из письма, чтобы продолжить."
+              ? "Мы отправили код подтверждения. Введи его из письма, чтобы продолжить."
               : mode === "signin_code"
                 ? "Войди без пароля. Отправим одноразовый код на твою почту."
               : "Войди в свой аккаунт CORTEX."}</p>
@@ -399,6 +418,11 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
                 : mode === "signin_code_verify" ? <>Другой адрес? <button type="button" onClick={() => switchMode("signin_code")}>Изменить почту</button></>
                   : signupEnabled ? <>Нет аккаунта? <button type="button" onClick={() => switchMode("signup")}>Зарегистрироваться</button></> : <span>Новые регистрации пока недоступны.</span>}
           </div>
+          {mode === "signup" && (
+            <button type="button" className="auth-code-switch" disabled={busy} onClick={verifyExistingCode}>
+              У меня уже есть код подтверждения
+            </button>
+          )}
           {emailOtpReady && (mode === "signin" || mode === "signin_code") && (
             <button type="button" className="auth-code-switch" onClick={() => switchMode(mode === "signin" ? "signin_code" : "signin")}>
               {mode === "signin" ? "Войти по коду из почты" : "Войти с паролем"}
