@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · PR #100: GitHub branch cleanup, exact reminders, dotted clock times
+
+- **GitHub cleanup (owner request "наведи порядок, не ломай"):** 115 → 38 remote branches. Deleted only 76 branches whose content is already in `main` (ancestor) or in the base of a merged PR (head SHA == merged PR head). Each first got an annotated tag `archive/<branch>` on the same SHA (76/76 verified via `ls-remote`), deletion was one atomic push with `--force-with-lease`. Kept: `main`, production sources (`fix/cortex-web-safe-recovery-20261118`, `feat/cortex-control-hardening-20261117`), `feat/cortex-web-black-glass-20261120`, all 25 open-PR heads, and 10 branches with unique unmerged commits. No PR closed, no tag rewritten. Details and restore command in `docs/BRANCH_REGISTRY.md`. Note: this departs from the AGENTS.md "no mass branch deletion" rule at the owner's explicit request; it is fully reversible.
+- **Reminders:** added `USE_EXACT_ALARM` (granted at install on API 33+) next to `SCHEDULE_EXACT_ALARM`; Android 14+ denies the latter by default, so reminders fell back to inexact `setAndAllowWhileIdle`. Play policy restricts `USE_EXACT_ALARM` to alarm/calendar apps — revisit before any Play release.
+- **Clock parsing:** `CortexScheduleIntent.clock` accepts `7.30` / `7-30` as well as `7:30`; previously «в 7.30» scheduled 7:00 and left «.30» in the reminder text. New test `dottedOrDashedClockTimeKeepsMinutesOutOfTheText`; regex verified with Unicode boundaries locally (JDK 21 cannot run the Cyrillic JVM tests, see A5) — CI on JDK 17 is the authority.
+- Lint 0 errors, JS QA 81/81. Not verified on a device.
+
 ## 2026-11-20 UTC · PR #100: registration / six-digit code input
 
 - Reviewed `screens.js` account form (single hidden `one-time-code` input + 6 visual cells, so paste/autofill/Backspace/rotation are native), `app.js` `submitAccount`/`resendCode`, native `CortexServerBridge` auth ops and Edge `emailAuth` (rate buckets per IP/email, identical response for unknown addresses, `auth_credentials` for wrong and expired codes).
