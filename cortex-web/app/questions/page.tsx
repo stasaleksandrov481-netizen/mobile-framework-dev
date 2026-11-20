@@ -13,7 +13,7 @@ export default function QuestionsPage() {
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / ВОПРОСЫ</p>
         <h1>Коротко о главном.</h1>
-        <p className="legal-lead">Отвечаем на вопросы перед открытой бетой 20 ноября.</p>
+        <p className="legal-lead">Отвечаем на вопросы перед запуском открытой беты. Точная дата выхода пока не объявлена.</p>
 
         <h2>Что будет бесплатным?</h2>
         <p>Локальное управление телефоном, сценарии, напоминания и настройка островка. Облачный ИИ тоже доступен бесплатно, но с дневным лимитом токенов.</p>
@@ -28,7 +28,7 @@ export default function QuestionsPage() {
         <p>Да, <a href="https://github.com/stasaleksandrov481-netizen/mobile-framework-dev" target="_blank" rel="noopener noreferrer">репозиторий проекта на GitHub</a> открыт для просмотра. Публикация кода сама по себе не гарантирует отсутствия ошибок или вредоносных компонентов. APK лучше скачивать только из официальных источников и проверять его подпись.</p>
 
         <h2>Когда можно скачать APK?</h2>
-        <p>Открытая бета запланирована на 20 ноября. О дате и доступности сборки сообщим в <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">канале CORTEX</a>.</p>
+        <p>Дата открытой беты пока не определена. О начале скачивания приложения сообщим в <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">канале CORTEX</a>.</p>
 
         <nav className="legal-links" aria-label="Подробнее о CORTEX">
           <Link href="/privacy">Конфиденциальность</Link>
