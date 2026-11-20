@@ -27,7 +27,10 @@ export default function Home() {
             <LandingMotion />
             <div className="landing-shell landing-hero-inner">
               <div className="landing-hero-copy">
-                <h1 id="hero-title">Управляйте Android голосом</h1>
+                <h1 id="hero-title">
+                  <span>Управляйте</span>{" "}
+                  <span>Android голосом</span>
+                </h1>
                 <p className="landing-hero-lead">Открывайте приложения, меняйте настройки и ставьте будильник одной фразой.</p>
                 <div className="landing-hero-actions">
                   <RegistrationCta isOpen={registrationIsOpen()} />

@@ -4,12 +4,12 @@ import { useEffect, useRef } from "react";
 
 function drawWave(context: CanvasRenderingContext2D, width: number, height: number, time: number) {
   context.clearRect(0, 0, width, height);
-  const gradient = context.createLinearGradient(0, 0, width, height * .42);
+  const gradient = context.createLinearGradient(0, 0, width, 0);
   gradient.addColorStop(0, "rgba(255,255,255,0)");
-  gradient.addColorStop(.34, "rgba(196,196,196,.18)");
-  gradient.addColorStop(.58, "rgba(255,255,255,.8)");
-  gradient.addColorStop(.79, "rgba(238,238,238,.5)");
-  gradient.addColorStop(1, "rgba(188,188,188,0)");
+  gradient.addColorStop(.26, "rgba(240,240,240,.65)");
+  gradient.addColorStop(.49, "rgba(215,215,215,.2)");
+  gradient.addColorStop(.72, "rgba(240,240,240,.66)");
+  gradient.addColorStop(1, "rgba(255,255,255,0)");
 
   const drift = Math.sin(time * .67) * .075;
   const curl = Math.sin(time * .53 + 1.4) * .12;
