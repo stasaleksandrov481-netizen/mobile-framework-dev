@@ -76,7 +76,7 @@ const CortexApi = (() => {
     if (message.quota) dispatchEvent(new CustomEvent("cortex-quota", { detail: message.quota }));
     if (message.status === "quota") return;
     if (typeof message.delta === "string") { entry.onDelta?.(message.delta); return; }
-    if (["fallback", "web_ready", "web_search"].includes(message.status)) {
+    if (["fallback", "web_ready", "web_search", "text_ready"].includes(message.status)) {
       entry.onStatus?.(message.status); return;
     }
     entry.cleanup();

@@ -479,6 +479,9 @@ async function* stream(
           current.releaseDeadline();
         }
         if (event.error === "provider_limit_unknown") event.error = "provider_limit";
+        // Text consumers can start playback while the quota ledger settles.
+        // Tool results and [DONE] still wait for the original settlement path.
+        if (event.done === true && !device) yield { status: "text_ready" };
         if (event.done === true || typeof event.error === "string") {
           const quota = await current.finish();
           if (quota) yield { quota, status: "quota" };

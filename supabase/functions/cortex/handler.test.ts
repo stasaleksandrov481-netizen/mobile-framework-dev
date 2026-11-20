@@ -64,11 +64,15 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       if (speechLiteStatus && body.model === "google/gemini-3.8-flash-lite-tts") return new Response(null, { status: speechLiteStatus });
       if (streamedGemini) {
         const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
-        return new Response(new ReadableStream({ pull(controller) {
-          const chunk = chunks.shift();
-          if (chunk) controller.enqueue(chunk);
-          else controller.close();
-        } }), { headers: { "content-type": "application/octet-stream" } });
+        return new Response(new ReadableStream({
+          pull(controller) {
+            const chunk = chunks.shift();
+            if (chunk) controller.enqueue(chunk);
+            else controller.close();
+          },
+          // A slow provider cancel must not hold the client's quota reservation.
+          cancel: () => new Promise<void>(() => {}),
+        }), { headers: { "content-type": "application/octet-stream" } });
       }
       return new Response(speechPcm, { headers: { "content-type": "application/octet-stream" } });
     }
@@ -253,7 +257,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       default: throw new Error("Unexpected endpoint " + url.pathname);
     }
   });
-  function call(path: string, payload?: unknown, headers: Record<string, string> = {}, method?: string) {
+  function call(path: string, payload?: unknown, headers: Record<string, string> = {}, method?: string, signal?: AbortSignal) {
     const clientInstall = headers["x-cortex-install"] || install;
     const clientDevice = Buffer.from(clientInstall).toString("hex").slice(-16).padStart(16, "0");
     return app(new Request("https://examplecortex.supabase.co/functions/v1/cortex/v1/" + path, {
@@ -262,6 +266,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
          "x-cortex-version-code": "100", "x-cortex-version-name": "1.0.0",
         ...(payload === undefined ? {} : { "content-type": "application/json" }), ...headers },
       body: payload === undefined ? undefined : JSON.stringify(payload),
+      signal,
     }));
   }
   return { call, models, requests, reservations, aiRequests, paidHolds, raw: app };
@@ -548,6 +553,16 @@ test("cancelled paid streaming speech settles the reservation once", async () =>
   await reader.cancel();
   assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_reserve").length, 1);
   assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_paid_finish").length, 1);
+});
+
+test("a cancelled speech request releases its hold without starting a provider generation", async () => {
+  const { call, requests } = fixture();
+  const response = await call("speech", { text: "Привет" }, {
+    Authorization: "Bearer " + "T".repeat(43), "X-Cortex-Audio-Stream": "pcm_s16le_24000_mono",
+  }, "POST", AbortSignal.abort());
+  assert.equal(response.status, 502);
+  assert.ok(!requests.includes("POST /api/v1/audio/speech"));
+  assert.equal(requests.filter(path => path === "POST /rest/v1/rpc/cortex_ai_finish").length, 1);
 });
 
 test("paid voice synthesis uses the existing subscription token allowance", async () => {

@@ -1,7 +1,7 @@
 import { Failure, type ModelProfile, type Turn } from "./provider.ts";
 
 type ChatRequest = {
-  messages: Turn[];
+  messages: readonly Turn[];
   limit: number;
   device: boolean;
   repair: boolean;
@@ -107,6 +107,8 @@ class Flight {
           if (typeof event.delta === "string") {
             hasText ||= Boolean(event.delta);
             this.append(JSON.stringify({ delta: event.delta }));
+          } else if (event.status === "text_ready" && hasText) {
+            this.append(JSON.stringify({ status: "text_ready" }));
           } else if (typeof event.error === "string") {
             // Never replay quota objects or any subject-specific metadata.
             this.append(JSON.stringify({ error: "provider" }));
@@ -143,7 +145,7 @@ class Flight {
       cancel: () => { active = false; this.wake(); },
     });
     return new Response(stream, { headers: {
-      "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store",
+      "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform",
       "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Accel-Buffering": "no",
     } });
   }

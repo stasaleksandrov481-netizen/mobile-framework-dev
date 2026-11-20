@@ -304,6 +304,7 @@ class MainActivity : ComponentActivity() {
         CortexRuntime.setAppVisible(false)
         notifyVisibility(false)
         if (!rendererFailed && ::speech.isInitialized) speech.stop()
+        if (!rendererFailed && ::device.isInitialized) device.stopVoiceOutput()
         super.onPause()
     }
     private fun notifyVisibility(visible: Boolean) {

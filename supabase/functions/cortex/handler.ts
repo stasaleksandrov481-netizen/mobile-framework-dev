@@ -703,8 +703,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         return json({ ok: true });
       }
       if (method === "POST" && path === "/v1/speech") {
-        // PCM is kept server-side until the upstream response is validated. Never
-        // proxy the OpenRouter credential or allow arbitrary model selection.
+        // Only stream the fixed provider's validated PCM response.
         const caller = await actor(request);
         if (!caller.account) throw new Failure("sign_in", 401);
         const gate = await control.gate(request, caller.account);
@@ -753,14 +752,16 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         // The Lite provider is cheaper but can be unavailable. Retry once with
         // the more reliable Flash model, never for invalid credentials/billing.
         for (const [index, model] of [speechModel, speechFallbackModel].entries()) {
+          if (request.signal.aborted) throw new Failure("speech_unavailable", 502);
           try {
             upstream = await network("https://openrouter.ai/api/v1/audio/speech", {
-              method: "POST", redirect: "error", signal: AbortSignal.timeout(index ? 12_000 : 15_000),
+              method: "POST", redirect: "error",
+              signal: AbortSignal.any([request.signal, AbortSignal.timeout(index ? 12_000 : 15_000)]),
               headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
               body: JSON.stringify({ model, input: text.trim(), voice: speechVoice, response_format: "pcm" }),
             });
           } catch {
-            if (!index) continue;
+            if (!index && !request.signal.aborted) continue;
             throw new Failure("speech_unavailable", 502);
           }
           if (upstream.ok) { synthesisModel = model; break; }
@@ -776,7 +777,9 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           await upstream.body?.cancel();
           throw new Failure(upstream.status === 429 ? "provider_limit" : "speech_unavailable", 502);
         }
-        if ((upstream.headers.get("content-type") || "").includes("json")) {
+        const format = upstream.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+        if ((format && !["application/octet-stream", "audio/pcm", "audio/x-pcm", "audio/raw"].includes(format)) ||
+            Number(upstream.headers.get("content-length")) > 2_400_000) {
           await upstream.body?.cancel();
           throw new Failure("speech_unavailable", 502);
         }
@@ -784,10 +787,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           const reader = upstream.body?.getReader();
           if (!reader) throw new Failure("speech_unavailable", 502);
           let bytes = 0;
-          let settled = false;
+          let closing: Promise<void> | undefined;
           const settle = async () => {
-            if (settled) return;
-            settled = true;
             const generated = bytes > 0;
             const audioSeconds = bytes / 48_000;
             const cost = Math.ceil(audioSeconds * 25 * (synthesisModel === speechModel ? 6 : 9) + inputUnits * 0.5);
@@ -797,29 +798,36 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 : { p_attempt: hold.attempt, p_input: generated ? inputUnits : null,
                   p_output: generated ? outputUnits : null }).catch(() => {});
           };
+          const close = () => closing ??= (async () => {
+            // Closing the consumer settles its quota even if upstream is slow to acknowledge cancellation.
+            void reader.cancel().catch(() => {});
+            reader.releaseLock();
+            await settle();
+          })();
           const stream = new ReadableStream<Uint8Array>({
             async pull(controller) {
               try {
                 const part = await reader.read();
+                if (closing) return;
                 if (part.done) {
                   if (!bytes || bytes % 2) throw new Error("invalid_pcm");
-                  await settle();
+                  await close();
                   controller.close();
                   return;
                 }
+                if (bytes + part.value.byteLength > 2_400_000) throw new Error("oversized_pcm");
                 bytes += part.value.byteLength;
-                if (bytes > 2_400_000) throw new Error("oversized_pcm");
                 controller.enqueue(part.value);
               } catch (error) {
-                controller.error(error);
-                await reader.cancel().catch(() => {});
-                await settle();
+                if (!closing) controller.error(error);
+                await close();
               }
             },
-            async cancel() { await reader.cancel().catch(() => {}); await settle(); },
+            cancel: close,
           }, { highWaterMark: 0 });
           synthesized = true;
           return new Response(stream, { headers: { ...JSON_HEADERS, "Content-Type": "application/octet-stream",
+            "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no",
             "X-Cortex-Audio-Format": "pcm_s16le_24000_mono", "X-Cortex-Speech-Provider": "openrouter-gemini" } });
         }
         const parts: Uint8Array[] = [];
@@ -1119,6 +1127,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         }
         return new Response(relay(response, getResponse, input.device, input.repair, next > 1, () => upstream.abort(), input.plan), {
           headers: { ...JSON_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no",
+            "Cache-Control": "no-store, no-transform",
             "X-Cortex-Quota": JSON.stringify(quota || {}) },
         });
         };

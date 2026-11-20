@@ -38,6 +38,19 @@ const Cortex = (() => {
     const flat = String(text ?? "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ");
     return LEAK_MARKERS.some(marker => flat.includes(marker.replace(/ё/g, "е"))) ? LEAK_REPLY : String(text ?? "");
   }
+  function voiceLead(text) {
+    const opening = text.trimStart().slice(0, 225);
+    // Wait for a word after the sentence so a token ending in a dot (a
+    // decimal, abbreviation or URL) doesn't decide the speech boundary.
+    for (const match of opening.matchAll(/[.!?…]+[»”"')\]]*(?=\s+\p{L})/gu)) {
+      const end = match.index + match[0].length;
+      if (end < 34) continue;
+      const lead = opening.slice(0, end);
+      if (/[`\[\]<>*_#\n]|https?:\/\/|(?:^|\s)[\p{L}\d]{1,3}\.$/u.test(lead)) return "";
+      return guardReply(text) === text ? lead : "";
+    }
+    return "";
+  }
   const styles = { brief: "Кратко", balanced: "Сбалансированно", deep: "Подробно" };
   const languages = { auto: "Авто", "ru-RU": "Русский", "en-US": "Английский" };
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
@@ -374,7 +387,7 @@ const Cortex = (() => {
 
   if (old && Object.keys(old).length) save();
   return {
-    state, defaults, motion, languages, styles, models, aiModels, profile, memory, chat, account, guardReply,
+    state, defaults, motion, languages, styles, models, aiModels, profile, memory, chat, account, guardReply, voiceLead,
     createChat, touch, turns, canSharePublicQuestion, save, useAccount, clearLocalData, memoryCommand, learnFromUser, id: uid
   };
 })();

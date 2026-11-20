@@ -119,20 +119,21 @@ class CortexWakeService : Service() {
     }
 
     private fun updateAudio() {
-        if (CortexRuntime.recording || CortexRuntime.firstExperienceActive || !canListenInMode()) {
+        if (CortexRuntime.recording || CortexRuntime.voicePlaying || CortexRuntime.firstExperienceActive || !canListenInMode()) {
             ui.removeCallbacks(rearm)
             ui.removeCallbacks(expire)
             turn.reset()
             closeFeed()
             destroyRecognizer()
             CortexRuntime.reportWake(if (CortexRuntime.firstExperienceActive) "Пауза на время знакомства с CORTEX."
-                else if (CortexRuntime.recording) "Пауза на время голосового ввода в приложении."
+                else if (CortexRuntime.recording || CortexRuntime.voicePlaying) "Пауза на время разговора с CORTEX."
                 else "Микрофон в паузе по настройкам энергопотребления.")
         } else schedule(110)
     }
 
     private fun listen() {
-        if (!enabled || CortexRuntime.recording || CortexRuntime.firstExperienceActive || running || checkingLanguage || Build.VERSION.SDK_INT < 31) return
+        if (!enabled || CortexRuntime.recording || CortexRuntime.voicePlaying || CortexRuntime.firstExperienceActive ||
+            running || checkingLanguage || Build.VERSION.SDK_INT < 31) return
         if (!canListenInMode()) {
             CortexRuntime.reportWake("Микрофон в паузе по настройкам энергопотребления.")
             return
@@ -229,7 +230,8 @@ class CortexWakeService : Service() {
     }
 
     private fun listener(ticket: Int, useStream: Boolean) = object : RecognitionListener {
-        private fun current() = enabled && running && ticket == generation && !CortexRuntime.recording && !CortexRuntime.firstExperienceActive
+        private fun current() = enabled && running && ticket == generation && !CortexRuntime.recording &&
+            !CortexRuntime.voicePlaying && !CortexRuntime.firstExperienceActive
 
         override fun onReadyForSpeech(params: Bundle?) {
             if (current()) CortexRuntime.reportWake("Слушаю слово «Кортекс».")
@@ -338,7 +340,9 @@ class CortexWakeService : Service() {
 
     private fun schedule(delay: Long) {
         ui.removeCallbacks(rearm)
-        if (enabled && !CortexRuntime.recording && !CortexRuntime.firstExperienceActive) ui.postDelayed(rearm, delay)
+        if (enabled && !CortexRuntime.recording && !CortexRuntime.voicePlaying && !CortexRuntime.firstExperienceActive) {
+            ui.postDelayed(rearm, delay)
+        }
     }
 
     private fun canListenInMode() = when (energy.getString("energy", "balanced")) {

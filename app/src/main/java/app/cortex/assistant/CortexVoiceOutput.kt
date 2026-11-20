@@ -7,9 +7,11 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
@@ -41,27 +43,33 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
 
     init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
 
-    @Synchronized fun speak(text: String, done: (Boolean) -> Unit) {
+    @Synchronized fun speak(text: String, started: () -> Unit = {}, done: (Boolean) -> Unit) {
         stop()
         if (!options.getBoolean("voiceReplies", true)) { handler.post { done(false) }; return }
         val turn = generation
         val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
         if (normalized.isBlank()) { handler.post { done(false) }; return }
         // Speaking without focus is still better than staying silent, so the result is ignored.
+        CortexRuntime.setVoicePlaying(this, true)
         runCatching { audio?.requestAudioFocus(focus) }
         val complete: (Boolean) -> Unit = { ok ->
-            // A newer turn owns the same focus request; only the current turn releases it.
-            if (synchronized(this) { turn == generation }) releaseFocus()
-            done(ok)
+            if (synchronized(this) { turn == generation }) {
+                releaseFocus()
+                done(ok)
+            }
+        }
+        val notifyStarted = {
+            handler.post { if (synchronized(this) { turn == generation }) started() }
+            Unit
         }
         if (BuildConfig.DEBUG) {
-            useAndroidVoice(turn, normalized, complete)
+            useAndroidVoice(turn, normalized, notifyStarted, complete)
             return
         }
         streamedFrames = 0
         streamStarted = false
         request = bridge.speechPcmStream(normalized, { bytes, count ->
-            writeStreamChunk(turn, bytes, count)
+            if (writeStreamChunk(turn, bytes, count)) notifyStarted()
         }) { ok ->
             synchronized(this) {
                 if (turn != generation || request == null) return@speechPcmStream
@@ -71,7 +79,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
             if (ok && started) waitForPlayback(turn, complete)
             else if (!started) {
                 releaseStreamPlayer(turn)
-                useAndroidVoice(turn, normalized, complete)
+                useAndroidVoice(turn, normalized, notifyStarted, complete)
             } else {
                 // A partial cloud sentence already played. Do not repeat it via local TTS.
                 releaseStreamPlayer(turn)
@@ -85,46 +93,57 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
             }
             if (stale != null) {
                 bridge.cancel(stale)
-                useAndroidVoice(turn, normalized, complete)
+                releaseStreamPlayer(turn)
+                useAndroidVoice(turn, normalized, notifyStarted, complete)
             }
         }, 10_000L)
     }
 
-    private fun writeStreamChunk(turn: Int, pcm: ByteArray, count: Int) {
-        try {
-            val player = synchronized(this) {
-                if (turn != generation) return
-                track ?: AudioTrack.Builder()
-                    .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(24_000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setBufferSizeInBytes(maxOf(8192, AudioTrack.getMinBufferSize(24_000,
-                        AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2))
-                    .setTransferMode(AudioTrack.MODE_STREAM).build().also {
-                        track = it
-                        it.play()
-                        streamStarted = true
+    private fun writeStreamChunk(turn: Int, pcm: ByteArray, count: Int): Boolean {
+        val player = synchronized(this) {
+            if (turn != generation || request == null) return false
+            track ?: AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(24_000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(maxOf(8192, AudioTrack.getMinBufferSize(24_000,
+                    AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2))
+                .setTransferMode(AudioTrack.MODE_STREAM).build().also {
+                    track = it
+                    if (Build.VERSION.SDK_INT >= 31) runCatching {
+                        it.setStartThresholdInFrames(minOf(it.bufferSizeInFrames, 1_920))
                     }
-            }
-            var written = 0
-            while (written < count) {
-                synchronized(this) { if (turn != generation || track !== player) return }
-                val next = player.write(pcm, written, count - written)
-                if (next <= 0) throw IllegalStateException("AudioTrack stream rejected samples")
-                written += next
-            }
-            synchronized(this) { if (turn == generation) streamedFrames += written / 2 }
-        } finally {
-            pcm.fill(0.toByte())
+                    it.play()
+                }
         }
+        var written = 0
+        var first = false
+        while (written < count) {
+            synchronized(this) { if (turn != generation || track !== player) return false }
+            val next = player.write(pcm, written, count - written)
+            if (next <= 0) throw IllegalStateException("AudioTrack stream rejected samples")
+            written += next
+            synchronized(this) {
+                if (turn != generation || track !== player) return false
+                streamedFrames += next / 2
+                if (!streamStarted) {
+                    streamStarted = true
+                    first = true
+                }
+            }
+        }
+        return first
     }
 
     private fun waitForPlayback(turn: Int, complete: (Boolean) -> Unit) {
         val player = synchronized(this) { if (turn == generation) track else null }
         if (player == null) { complete(false); return }
         val frameCount = synchronized(this) { streamedFrames }
-        val deadline = System.currentTimeMillis() + frameCount * 1000L / 24_000L + 2500L
+        if (Build.VERSION.SDK_INT >= 31 && frameCount in 1 until 1_920) runCatching {
+            player.setStartThresholdInFrames(minOf(frameCount, player.bufferSizeInFrames))
+        }
+        val deadline = SystemClock.elapsedRealtime() + frameCount * 1000L / 24_000L + 2500L
         fun poll() {
             synchronized(this) { if (turn != generation) return }
             if (player.playbackHeadPosition >= frameCount) {
@@ -132,7 +151,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                 runCatching { player.stop() }
                 runCatching { player.release() }
                 complete(true)
-            } else if (System.currentTimeMillis() >= deadline) {
+            } else if (SystemClock.elapsedRealtime() >= deadline) {
                 // Part of the sentence has played; do not repeat it via Android TTS.
                 releaseStreamPlayer(turn)
                 complete(false)
@@ -153,7 +172,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         runCatching { old?.release() }
     }
 
-    private fun useAndroidVoice(turn: Int, text: String, complete: (Boolean) -> Unit) {
+    private fun useAndroidVoice(turn: Int, text: String, started: () -> Unit, complete: (Boolean) -> Unit) {
         handler.post {
             synchronized(this) {
                 if (turn != generation || localTurn == turn) return@post
@@ -192,7 +211,9 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                             .setUsage(AudioAttributes.USAGE_ASSISTANT)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                         voice.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                            override fun onStart(utteranceId: String) = Unit
+                            override fun onStart(utteranceId: String) {
+                                if (utteranceId == "cortex-$turn") started()
+                            }
                             override fun onDone(utteranceId: String) {
                                 if (utteranceId == "cortex-$turn") finishAndroidVoice(turn, true, complete)
                             }
@@ -201,8 +222,8 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                             }
                             override fun onError(utteranceId: String, errorCode: Int) = onError(utteranceId)
                         })
-                        val started = voice.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "cortex-$turn")
-                        if (started == TextToSpeech.ERROR) finishAndroidVoice(turn, false, complete)
+                        val queued = voice.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), "cortex-$turn")
+                        if (queued == TextToSpeech.ERROR) finishAndroidVoice(turn, false, complete)
                     }
                 }
                 synchronized(this) {
@@ -229,7 +250,10 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         }
     }
 
-    private fun releaseFocus() { runCatching { audio?.abandonAudioFocusRequest(focus) } }
+    private fun releaseFocus() {
+        CortexRuntime.setVoicePlaying(this, false)
+        runCatching { audio?.abandonAudioFocusRequest(focus) }
+    }
 
     @Synchronized fun stop() {
         ++generation
