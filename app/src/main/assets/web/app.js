@@ -981,7 +981,7 @@
     const scroll = screen.querySelector(".conversation");
     const stick = pinned(scroll);
     node.closest(".message").classList.add("has-reply");
-    node.innerHTML = Markdown.renderStream(job.text);
+    node.innerHTML = Markdown.renderStream(M.guardReply(job.text));
     if (!job.streamPainted && !reduced()) Motion.reply(node);
     job.streamPainted = true;
     if (stick) scroll.scrollTop = scroll.scrollHeight;
@@ -1108,6 +1108,7 @@
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
+      if (!outcome.local) outcome.text = M.guardReply(outcome.text);
       chat.messages.push({ role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
         ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
       job.completed = true;
@@ -1143,7 +1144,7 @@
     const chat = M.chat(job.chatId);
     if (!chat || !keep) return;
     if (job.text.trim()) {
-      chat.messages.push({ role: "assistant", text: job.text.trim() });
+      chat.messages.push({ role: "assistant", text: M.guardReply(job.text.trim()) });
       M.touch(chat);
       if (chat.saved) saved();
     } else errors.set(chat.id, Object.assign(new Error("Действие остановлено."), { explain: job.explain }));

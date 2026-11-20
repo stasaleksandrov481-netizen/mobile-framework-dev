@@ -1,3 +1,9 @@
+## 2026-11-20 UTC · PR #100: prompt-leak guard + Android exposure review
+
+- Client: `SECRECY` line in the client context; `Cortex.guardReply()` canary (13 phrases unique to client/server instructions, case/ё/whitespace-normalised) replaces leaked replies with a refusal at stream paint, final save and stop. Test `qa/prompt-secrecy.test.mjs`.
+- Server: stronger non-disclosure sentence in `CORTEX_IDENTITY` (`supabase/functions/cortex/provider.ts`). **Not deployed** — Edge `cortex` must be redeployed only after the usual 11-file/migration check and owner approval. Deno tests not run locally (no deno); CI is the check.
+- Reviewed, no change needed: `allowBackup=false`, cleartext off, default system-only CA trust (targetSdk 35), WebView file/content access off, mixed content never, debugging only in DEBUG, no sensitive Log calls, OAuth return carries no data, schedule extra only opens a task by UUID, Assist activity acts only for the role holder. Remaining hardening ideas (not done): certificate pinning (operational risk), encrypting WebView localStorage chats at rest.
+
 ## 2026-11-20 UTC · PR #100: model page, usage ring sheet, favicon leak removed
 
 - Composer: model picker removed; footer = usage ring + short hint. Home: model chip (→ new route `ai-models`, parent `home`), time-based greeting, four starters (`starter` action only fills the input, never sends). `ai-models` page: free models, then paid grouped by brand, radio rows; selecting navigates back.
