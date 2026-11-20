@@ -25,9 +25,11 @@ function matches(actual, expected) {
 
 function jsonObject(req) {
   try {
-    if (Number(req.headers["content-length"] || 0) > 8192) throw new Error();
+    const length = req.headers["content-length"];
+    if (length !== undefined && (typeof length !== "string" || !/^\d+$/.test(length) || Number(length) > 8192)) throw new Error();
+    if (typeof req.body === "string" && Buffer.byteLength(req.body) > 8192) throw new Error();
     const input = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    if (!input || typeof input !== "object" || Array.isArray(input) || JSON.stringify(input).length > 8192) throw new Error();
+    if (!input || typeof input !== "object" || Array.isArray(input) || Buffer.byteLength(JSON.stringify(input)) > 8192) throw new Error();
     return input;
   } catch {
     throw new BillingError(400, "invalid");
@@ -37,7 +39,7 @@ function jsonObject(req) {
 function httpsUrl(value, checkHost = false) {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || (checkHost && !/^(?:[a-z0-9-]+\.)*platega\.io$/.test(url.hostname))) return null;
+    if (url.protocol !== "https:" || url.username || url.password || (checkHost && (url.port || !/^(?:[a-z0-9-]+\.)*platega\.io$/.test(url.hostname)))) return null;
     return url.href;
   } catch {
     return null;
@@ -126,8 +128,8 @@ export function createBillingHandler(env = process.env, network = fetch) {
         transaction.paymentDetails?.currency !== "RUB" || kopecks(transaction.paymentDetails?.amount) !== original.amount) {
       throw new BillingError(409, "payment_mismatch");
     }
+    if (typeof transaction.status !== "string" || !Object.hasOwn(paymentStates, transaction.status)) return original;
     const state = paymentStates[transaction.status];
-    if (!state) return original;
     const saved = await record(original, providerId, state);
     if (!saved) throw new BillingError(409, "payment_mismatch");
     return saved;
@@ -195,6 +197,7 @@ export function createBillingHandler(env = process.env, network = fetch) {
         if (typeof auth !== "string" || !/^Bearer [A-Za-z0-9._-]{40,4096}$/.test(auth)) {
           throw new BillingError(401, "forbidden");
         }
+        if (typeof input.id !== "string" || !uuid.test(input.id)) throw new BillingError(400, "invalid");
         await database("rpc/cortex_admin_billing", { p_action: "authorize_refund", p_data: { id: input.id } }, auth.slice(7));
         const order = await lookup(input.id, "live");
         if (!order || !order.provider_id) throw new BillingError(404, "payment_not_found");
