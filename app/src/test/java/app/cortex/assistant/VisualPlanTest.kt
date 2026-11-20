@@ -95,6 +95,18 @@ class VisualPlanTest {
         assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой раздел", VisualStep(VisualAction.TAP),
             "", "com.example:id/btnOpen", "Button"))
     }
+
+    @Test fun callsConsentAndAccountExitAlwaysNeedConfirmation() {
+        for ((label, resource) in listOf("Позвонить" to "button", "" to "com.example:id/btnCall",
+                "Принять" to "button", "Я согласен" to "terms", "Agree" to "button", "Выйти" to "profile_row",
+                "Log out" to "settings", "Отписаться" to "button", "Форматировать" to "sd_card")) {
+            assertEquals(label + resource, VisualRisk.CONFIRM, VisualSafety.risk("Открой настройки",
+                VisualStep(VisualAction.TAP), label, resource, "Button"))
+        }
+        // Ordinary navigation still runs without interrupting the user.
+        assertEquals(VisualRisk.NORMAL, VisualSafety.risk("Открой настройки", VisualStep(VisualAction.TAP),
+            "Звонки", "settings_calls", "TextView"))
+    }
     @Test fun colloquialMessageRetainsRecipientAndTextAcrossMessengerClarification() {
         val pending = requireNotNull(ConversationRequest.parse("напиши рыбке как дела", installed))
         assertEquals("рыбке", pending.recipient)

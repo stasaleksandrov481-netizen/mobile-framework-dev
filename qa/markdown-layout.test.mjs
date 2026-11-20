@@ -119,3 +119,11 @@ test("Markdown adds same-origin site icon to safe citation links only", () => {
   assert.doesNotMatch(result, /\/favicons\/javascript/);
   assert.doesNotMatch(result, /href="javascript:/);
 });
+
+test("assistant links are clickable only when Android can open them (HTTPS)", () => {
+  const render = markdown();
+  const result = render("[safe](https://cortexapp.ru/help) [plain](http://example.com/) http://example.org/x");
+  assert.match(result, /href="https:\/\/cortexapp\.ru\/help"/);
+  assert.doesNotMatch(result, /href="http:\/\//);
+  assert.match(result, /example\.com/);
+});

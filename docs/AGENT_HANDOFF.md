@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · Follow-up on PR #100: off-main-thread file work, risk gate, HTTPS links
+
+- Same branch. `CortexDeviceBridge.handleActivityResult`: image decode/JPEG compression (501), chat export (502), scenario import (503) and export (504) now run on a short background thread (`background {}`); `emit` is safe off-thread because `MainActivity.deviceEvent` uses `runOnUiThread`. Chat export previously reported `ok:true` when `openOutputStream` returned null; now requires a stream.
+- `VisualSafety.irreversible` adds call/dial, accept/agree/consent, sign-out/выйти, unsubscribe, format. Deliberately NOT added: clear/очистить (calculator and search fields would prompt constantly). New `VisualPlanTest.callsConsentAndAccountExitAlwaysNeedConfirmation`.
+- `markdown.js` `webUrl` is HTTPS-only to match native `CortexSafeUrl`; `qa/markdown-layout.test.mjs` new case. `CortexServerBridge.speechBytes` now gates `X-Cortex-Device` on `approvedApkSignature` like `call()`/`streamSpeechBytes()`.
+- Local: JS QA 66/66; JVM new tests pass; `VisualPlanTest` 2 failures identical to baseline on JDK 21 (``), see entry below. Not verified on device.
+
 ## 2026-11-20 UTC · WebView OTA bundle pinned to its native APK build
 
 - Branch `fix/cortex-webview-ota-native-pin-20261120` from `main` `d47d212325e14cb15a7603fd44eb425c27b6e481` (beta.10, versionCode 127). Android native + JVM test + docs only. No version bump, APK publication, Supabase/Edge/DB, Vercel/site, payments, signing keys or OTA keys touched.

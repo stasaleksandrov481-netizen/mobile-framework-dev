@@ -244,6 +244,10 @@ internal class CortexDeviceBridge(
 
     private fun scenarioList() = emit(JSONObject().put("type", "scenario-list").put("items", CortexScenarios.list(context)))
 
+    // Document providers may be remote or slow, and photo decoding is CPU-heavy: keep both off the UI thread.
+    // emit() is thread-safe because MainActivity delivers events with runOnUiThread.
+    private fun background(work: () -> Unit) = Thread(work, "CortexDeviceFile").start()
+
     private fun scenarioStatus(text: String, ok: Boolean, operation: String) = emit(JSONObject()
         .put("type", "scenario-result").put("text", text).put("ok", ok).put("operation", operation))
 
@@ -314,7 +318,7 @@ internal class CortexDeviceBridge(
         if (requestCode == 501 && pendingImage) {
             pendingImage = false
             val e = JSONObject().put("type", "image")
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null) background {
                 val value = runCatching {
                     val uri = requireNotNull(data.data)
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -339,21 +343,21 @@ internal class CortexDeviceBridge(
                 }.getOrNull()
                 e.put("ok", !value.isNullOrBlank())
                 if (!value.isNullOrBlank()) e.put("data", value)
-            } else e.put("cancelled", true)
-            emit(e)
+                emit(e)
+            } else emit(e.put("cancelled", true))
         }
         if (requestCode == 502) {
             val e = JSONObject().put("type", "export")
             val text = pendingExport
             pendingExport = null
-            if (resultCode == Activity.RESULT_OK && data?.data != null && text != null) {
-                e.put("ok", runCatching {
-                    context.contentResolver.openOutputStream(data.data!!)?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-                }.isSuccess)
-            } else e.put("cancelled", true)
-            emit(e)
+            if (resultCode == Activity.RESULT_OK && data?.data != null && text != null) background {
+                // A provider that returns no stream has not saved anything.
+                emit(e.put("ok", runCatching {
+                    requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                }.isSuccess))
+            } else emit(e.put("cancelled", true))
         }
-        if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) {
+        if (requestCode == 503 && resultCode == Activity.RESULT_OK && data?.data != null) background {
             val item = runCatching {
                 val input = requireNotNull(context.contentResolver.openInputStream(data.data!!))
                 val bytes = input.use { stream ->
@@ -375,7 +379,7 @@ internal class CortexDeviceBridge(
         if (requestCode == 504) {
             val value = scenarioExport
             scenarioExport = null
-            if (resultCode == Activity.RESULT_OK && data?.data != null && value != null) {
+            if (resultCode == Activity.RESULT_OK && data?.data != null && value != null) background {
                 val ok = runCatching {
                     requireNotNull(context.contentResolver.openOutputStream(data.data!!)).use {
                         it.write(value.toByteArray(Charsets.UTF_8))

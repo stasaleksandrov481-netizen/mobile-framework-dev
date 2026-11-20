@@ -8,7 +8,8 @@ const CortexMarkdown = (() => {
     if (typeof value !== "string" || value.length > 2048) return "";
     try {
       const url = new URL(value);
-      return ["https:", "http:"].includes(url.protocol) && url.hostname &&
+      // Android opens only HTTPS links (CortexSafeUrl); an http link would render but always fail.
+      return url.protocol === "https:" && url.hostname &&
         !url.username && !url.password ? url.href : "";
     } catch { return ""; }
   }
