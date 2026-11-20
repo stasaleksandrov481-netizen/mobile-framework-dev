@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   metadataBase: new URL("https://cortexapp.ru"),
   title: "CORTEX — управление телефоном силой голоса",
-  description: "CORTEX — интеллектуальный Android-ассистент, который понимает команды, помогает управлять телефоном и автоматизирует повседневные задачи. Бета — 20 ноября.",
+  description: "CORTEX — интеллектуальный Android-ассистент, который понимает команды, помогает управлять телефоном и автоматизирует повседневные задачи. Дата открытого запуска будет объявлена отдельно.",
   applicationName: "CORTEX",
   other: {
     "mailru-domain": "pLBDNiO0JIkaM12k",
