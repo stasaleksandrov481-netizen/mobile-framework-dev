@@ -35,26 +35,6 @@ export function starsInvoiceUrl(value: unknown): string | null {
   } catch { return null; }
 }
 
-export async function boundedJson(request: Request, maxBytes: number): Promise<unknown> {
-  if (Number(request.headers.get("content-length") || "0") > maxBytes || !request.body) {
-    throw new Error("invalid_body");
-  }
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > maxBytes) throw new Error("invalid_body");
-      chunks.push(value);
-    }
-  } finally { await reader.cancel().catch(() => {}); }
-  const raw = Buffer.concat(chunks.map(chunk => Buffer.from(chunk)));
-  return JSON.parse(raw.toString("utf8"));
-}
-
 export async function telegramBotApi<T>(
   token: string | undefined, method: string, data: Record<string, unknown>,
   network: typeof fetch = fetch,

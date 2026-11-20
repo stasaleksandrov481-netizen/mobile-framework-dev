@@ -14,12 +14,18 @@ export const cortexAuth = createClient(cortexSupabaseUrl, cortexPublishableKey, 
 });
 
 export const EARLY_ACCESS_BONUS = 5_000;
-const REGISTRATION_LEGAL_VERSION = "2026-11-16.2";
+export const REGISTRATION_LEGAL_VERSION = "2026-11-16.2";
 
-export async function savePreregistration(notifyOptIn: boolean, expectedUserId?: string) {
+export function registrationAcceptanceVersion(metadata?: Record<string, unknown>) {
+  const version = metadata?.cortex_privacy_acknowledged_version;
+  if (version !== REGISTRATION_LEGAL_VERSION && version !== "2026-11-16") return null;
+  return metadata?.cortex_terms_accepted_version === version ? version : null;
+}
+
+export async function savePreregistration(notifyOptIn: boolean, expectedUserId: string) {
   const { data: { user }, error: authError } = await cortexAuth.auth.getUser();
   if (authError || !user?.id || !user.email || !user.email_confirmed_at ||
-      (expectedUserId && user.id !== expectedUserId)) {
+      user.id !== expectedUserId) {
     throw new Error("Сначала подтвердите адрес электронной почты.");
   }
   // A confirmation link may be opened more than once or in another tab.
@@ -34,19 +40,10 @@ export async function savePreregistration(notifyOptIn: boolean, expectedUserId?:
   );
   // Immutable server timestamps and document versions are recorded by an
   // authenticated RPC. Browser-supplied timestamps are not legal audit evidence.
-  if (user.user_metadata?.cortex_privacy_acknowledged_version === REGISTRATION_LEGAL_VERSION &&
-      user.user_metadata?.cortex_terms_accepted_version === REGISTRATION_LEGAL_VERSION) {
+  if (registrationAcceptanceVersion(user.user_metadata)) {
     const { error: auditError } = await cortexAuth.rpc("cortex_record_registration_acceptance");
     if (auditError) {
       throw new Error("Не удалось сохранить подтверждение условий. Попробуйте позже.");
     }
   }
-}
-
-/** Recover a verified signup that succeeded in Auth before its database write. */
-export async function ensurePreregistration(userId: string, notifyOptIn: boolean) {
-  const { data, error } = await cortexAuth.from("cortex_preregistrations")
-    .select("user_id").eq("user_id", userId).maybeSingle();
-  if (error) throw new Error("Не удалось проверить регистрацию. Попробуйте позже.");
-  if (!data) await savePreregistration(notifyOptIn, userId);
 }

@@ -9,7 +9,7 @@ export default function SiteFooter() {
           <img src="/cortex-mark.svg" alt="" width="26" height="26" />
           <span>CORTEX</span>
         </Link>
-        <p>Голосовой ассистент для Android. Меньше нажатий — больше свободы.</p>
+        <p>Голосовой ассистент для Android.</p>
       </div>
       <div className="site-footer-grid">
         <nav aria-label="Продукт">
@@ -33,7 +33,7 @@ export default function SiteFooter() {
           <a href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer"><UiIcon name="telegram" size={14} />Telegram</a>
         </nav>
       </div>
-      <div className="site-footer-bottom"><span>© 2026 CORTEX</span><span>Сделано для Android</span></div>
+      <div className="site-footer-bottom"><span>© 2026 CORTEX</span></div>
     </footer>
   );
 }

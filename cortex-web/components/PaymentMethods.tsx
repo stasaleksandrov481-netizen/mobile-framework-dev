@@ -4,6 +4,7 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { cortexAuth } from "@/lib/cortex-auth";
+import { settleWithTimeout } from "@/lib/settle-with-timeout";
 
 type Plan = "start" | "pro" | "ultra";
 type Price = { code: Plan; price_kopecks: number };
@@ -21,7 +22,7 @@ function safeInvoice(value: unknown): string | null {
   if (typeof value !== "string") return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "t.me" && !url.username && !url.password &&
+    return url.origin === "https://t.me" && !url.username && !url.password &&
       !url.search && !url.hash && url.pathname.length > 1 ? url.href : null;
   } catch { return null; }
 }
@@ -53,7 +54,13 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
   const starsPrice = starsPrices.find(item => item.plan === plan);
   const starsAvailable = starsConfigured && starsPrice?.enabled === true;
 
-  const selectPlan = (value: Plan) => { setPlan(value); setInvoice(null); setPaymentStatus("pending"); setError(""); };
+  function selectPlan(value: Plan) {
+    if (processing || checking || value === plan) return;
+    setPlan(value);
+    setInvoice(null);
+    setPaymentStatus("pending");
+    setError("");
+  }
 
   async function checkStarsPayment() {
     if (!invoice || checking) return;
@@ -61,13 +68,13 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
     setError("");
     try {
       // RLS is closed; this RPC verifies auth.uid and live auth.sessions again.
-      const { data, error: statusError } = await cortexAuth.rpc("cortex_stars_my_status", { p_id: invoice.id });
+      const { data, error: statusError } = await settleWithTimeout(cortexAuth.rpc("cortex_stars_my_status", { p_id: invoice.id }), 8_000);
       if (statusError || !data || data.id !== invoice.id || data.stars !== invoice.stars) throw new Error();
       let state = data.status;
       if (state === "prechecked") {
         // The original webhook may have been delayed. This self-scoped,
         // rate-limited server check verifies Telegram's independent ledger.
-        const { data: { session } } = await cortexAuth.auth.getSession();
+        const { data: { session } } = await settleWithTimeout(cortexAuth.auth.getSession(), 8_000);
         if (!session?.access_token) throw new Error();
         const check = await fetch("/api/telegram/stars/reconcile", {
           method: "POST", cache: "no-store", credentials: "same-origin",
@@ -91,9 +98,9 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
     setError("");
     setInvoice(null);
     try {
-      const { data: { session }, error: sessionError } = await cortexAuth.auth.getSession();
+      const { data: { session }, error: sessionError } = await settleWithTimeout(cortexAuth.auth.getSession(), 8_000);
       if (sessionError || !session?.access_token) { setError(paymentError("login_required")); return; }
-      const { data: { user }, error: accountError } = await cortexAuth.auth.getUser();
+      const { data: { user }, error: accountError } = await settleWithTimeout(cortexAuth.auth.getUser(), 8_000);
       if (accountError || !user?.email_confirmed_at) { setError(paymentError("login_required")); return; }
       const response = await fetch("/api/telegram/stars/checkout", {
         method: "POST", cache: "no-store", credentials: "same-origin",
@@ -122,27 +129,26 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
         <Link href="/pricing" className="payment-back">Вернуться к тарифам</Link>
       </header>
       <div className="payment-heading">
-        <span className="payment-eyebrow">ПОДПИСКА CORTEX</span>
-        <h1>Выбери оплату.</h1>
+        <h1>Оплата подписки</h1>
         <p>Один месяц доступа. Без автоматических списаний.</p>
       </div>
 
       <div className="payment-layout">
         <section className="payment-panel" aria-labelledby="payment-plan-title">
-          <div className="payment-section-title"><span>01</span><h2 id="payment-plan-title">Тариф</h2></div>
+          <div className="payment-section-title"><h2 id="payment-plan-title">Тариф</h2></div>
           <div className="payment-options">
             {plans.map(item => <button key={item.code} type="button" className={`payment-option ${plan === item.code ? "is-active" : ""}`}
-              onClick={() => selectPlan(item.code)} aria-pressed={plan === item.code} disabled={processing}>
+              onClick={() => selectPlan(item.code)} aria-pressed={plan === item.code} disabled={processing || checking}>
               <span className="payment-radio" aria-hidden="true" />
               <span className="payment-option-body"><strong>{item.name}</strong><small>{item.detail}</small></span>
               <span className="payment-plan-price">{prices.length ? money.format((prices.find(p => p.code === item.code)?.price_kopecks || 0) / 100) : "—"}</span>
             </button>)}
           </div>
-          <p className="payment-hint">{price ? "Цена в рублях указана для оплаты через Robokassa после её подключения. При оплате Telegram Stars применяется отдельная цена в XTR." : "Точные цены временно не загрузились."}</p>
+          <p className="payment-hint">{price ? "Цена в рублях относится к оплате картой. Стоимость в Stars указана ниже." : "Точные цены временно не загрузились."}</p>
         </section>
 
         <section className="payment-panel" aria-labelledby="payment-method-title">
-          <div className="payment-section-title"><span>02</span><h2 id="payment-method-title">Способ оплаты</h2></div>
+          <div className="payment-section-title"><h2 id="payment-method-title">Способ оплаты</h2></div>
           <div className="payment-options">
             <div className="payment-option payment-option--unavailable" aria-label="Robokassa пока не подключена">
               <span className="payment-radio" aria-hidden="true" />
@@ -171,7 +177,7 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
                 {processing ? "Создаём счёт…" : starsAvailable ? `Оплатить ${starsPrice?.stars} Stars` : "Оплата временно недоступна"}
                 {!processing && <span aria-hidden="true">↗</span>}
               </button>}
-            {!starsAvailable && <p className="payment-notice" role="status">Telegram Stars ещё не активированы на сервере. Счёт создать нельзя, пока подключение не завершено.</p>}
+            {!starsAvailable && <p className="payment-notice" role="status">Оплата звёздами сейчас недоступна.</p>}
             {starsPrice && <p className="payment-disclaimer">Стоимость покупки звёзд в Telegram зависит от региона и способа пополнения.</p>}
             <p className="payment-disclaimer">Подписка активируется только после подтверждения платежа. <Link href="/offer">Условия и возвраты</Link>.</p>
           </div>

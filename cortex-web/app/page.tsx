@@ -10,23 +10,23 @@ import { registrationIsOpen } from "@/lib/registration-gate";
 export const revalidate = 60;
 
 const features = [
-  { icon: "mic", title: "Понимает речь", text: "Говорите как обычно, без заученных фраз. CORTEX разбирает команду и уточняет, если что-то неясно.", wide: true },
-  { icon: "phone", title: "Управляет телефоном", text: "Открывает приложения, меняет яркость, ставит будильники и находит нужные настройки.", wide: false },
-  { icon: "layers", title: "Сценарии", text: "Несколько действий одной фразой: «режим дороги», «утро», «тишина на встрече».", wide: false },
-  { icon: "bell", title: "Напоминания", text: "Скажите, о чём и когда напомнить, — остальное CORTEX возьмёт на себя.", wide: false },
-  { icon: "lock", title: "Под вашим контролем", text: "Локальные команды выполняются на телефоне. Звонки, отправку и другие важные действия CORTEX сначала подтверждает.", wide: true },
+  { icon: "mic", title: "Понимает речь", text: "Говорите своими словами. Если команда неясна, CORTEX уточнит.", wide: true },
+  { icon: "phone", title: "Управляет телефоном", text: "Открывает приложения, меняет яркость и ставит будильники.", wide: false },
+  { icon: "layers", title: "Запускает сценарии", text: "Объедините несколько действий в одну голосовую команду.", wide: false },
+  { icon: "bell", title: "Напоминает о важном", text: "Скажите, о чём и когда напомнить.", wide: false },
+  { icon: "lock", title: "Спрашивает подтверждение", text: "Перед отправкой сообщения или звонком CORTEX попросит подтверждение.", wide: true },
 ] as const;
 
 const steps = [
-  { title: "Скажите", text: "Нажмите на островок или кнопку и произнесите задачу своими словами." },
-  { title: "CORTEX поймёт", text: "Простые команды разбираются на телефоне, сложные запросы — облачным ИИ." },
-  { title: "Готово", text: "Действие выполнено, результат виден сразу — без лишних экранов." },
+  { title: "Дайте команду", text: "Нажмите на островок и скажите, что сделать." },
+  { title: "Уточните задачу", text: "CORTEX задаст вопрос, если ему не хватает деталей." },
+  { title: "Проверьте результат", text: "CORTEX сообщит, что выполнено, и объяснит, если шаг не удался." },
 ];
 
 const questions = [
-  { q: "Что будет бесплатным?", a: "Локальное управление телефоном, сценарии, напоминания и островок. Облачный ИИ тоже доступен бесплатно, но с дневным лимитом." },
-  { q: "Когда можно скачать приложение?", a: "Скачивание сейчас закрыто. Дату открытия объявим в Telegram-канале CORTEX и письмом тем, кто согласился получать уведомления." },
-  { q: "Куда уходят мои данные?", a: "Локальные действия не покидают телефон. Запросы к облачному ИИ проходят через сервер CORTEX, а текст с экрана передаётся только с отдельного согласия." },
+  { q: "Что доступно бесплатно?", a: "Команды телефона, сценарии, напоминания и островок. Для облачного ИИ действует дневной лимит." },
+  { q: "Когда можно скачать приложение?", a: "Дату открытия объявим в Telegram и пришлём письмом тем, кто подписался на уведомления." },
+  { q: "Какие данные уходят с телефона?", a: "Локальные команды обрабатываются на устройстве. Облачные запросы проходят через сервер CORTEX. Передача текста с экрана требует отдельного согласия." },
 ];
 
 export default function Home() {
@@ -40,8 +40,7 @@ export default function Home() {
 
           <section className="section" id="features" aria-labelledby="features-title">
             <div className="section-head">
-              <p className="eyebrow">Возможности</p>
-              <h2 id="features-title">Всё, что вы делаете пальцами, — голосом.</h2>
+              <h2 id="features-title">Что умеет CORTEX</h2>
             </div>
             <div className="bento">
               {features.map(item => (
@@ -56,13 +55,12 @@ export default function Home() {
 
           <section className="section" aria-labelledby="steps-title">
             <div className="section-head">
-              <p className="eyebrow">Как это работает</p>
-              <h2 id="steps-title">Три шага — и задача решена.</h2>
+              <h2 id="steps-title">Как это работает</h2>
             </div>
             <ol className="steps">
               {steps.map((step, index) => (
                 <li key={step.title} className="card step">
-                  <span className="step-index">0{index + 1}</span>
+                  <span className="step-index" aria-hidden="true">{index + 1}</span>
                   <h3>{step.title}</h3>
                   <p>{step.text}</p>
                 </li>
@@ -72,23 +70,20 @@ export default function Home() {
 
           <section className="section split" aria-label="Тарифы и приватность">
             <div className="card split-card">
-              <p className="eyebrow">Тарифы</p>
-              <h2>Основное — бесплатно.</h2>
-              <p>Подписка увеличивает дневной лимит облачного ИИ и открывает более мощные модели. Без автоматических списаний.</p>
+              <h2>Бесплатные команды</h2>
+              <p>Подписка даёт больше запросов к облачному ИИ и доступ к продвинутым моделям.</p>
               <a className="glass glass--md" href="/pricing"><span>Смотреть тарифы</span><UiIcon name="arrow-right" size={16} /></a>
             </div>
             <div className="card split-card">
-              <p className="eyebrow">Приватность</p>
-              <h2>Ваш телефон — ваши правила.</h2>
-              <p>Каждое разрешение объясняется заранее и отключается в любой момент. Подробно — в разделе о разрешениях.</p>
+              <h2>Разрешения Android</h2>
+              <p>Проверьте, зачем CORTEX нужен доступ и как его отключить.</p>
               <a className="glass glass--md" href="/permissions"><span>О разрешениях</span><UiIcon name="arrow-right" size={16} /></a>
             </div>
           </section>
 
           <section className="section" aria-labelledby="faq-title">
             <div className="section-head">
-              <p className="eyebrow">Вопросы</p>
-              <h2 id="faq-title">Коротко о главном.</h2>
+              <h2 id="faq-title">Частые вопросы</h2>
             </div>
             <div className="faq">
               {questions.map(item => (
@@ -104,8 +99,8 @@ export default function Home() {
           <section className="section" aria-labelledby="cta-title">
             <div className="card cta-card">
               <span className="card-icon"><UiIcon name="spark" size={20} /></span>
-              <h2 id="cta-title">Следите за запуском.</h2>
-              <p>Новости, обновления и дата открытия скачивания первыми в канале CORTEX. Ранним участникам после запуска начислим +5 000 ИИ-токенов.</p>
+              <h2 id="cta-title">Новости запуска</h2>
+              <p>Дату открытия опубликуем в Telegram. Ранним участникам после запуска начислим 5 000 ИИ-токенов.</p>
               <a className="glass glass--lg glass--light" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">
                 <UiIcon name="telegram" size={17} /><span>Канал в Telegram</span>
               </a>

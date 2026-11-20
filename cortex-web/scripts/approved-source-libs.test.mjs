@@ -39,10 +39,12 @@ test("payment checkout redirect stays on the exact approved HTTPS host", () => {
     null,
     42,
     "https://app.platega.io.evil.example/pay",
+    "https://app.platega.io:8443/pay",
     "https://fake-app.platega.io/pay",
     "http://app.platega.io/pay",
     "https://user:pass@app.platega.io/pay",
     "https://app.platega.io@evil.example/pay",
+    "https://app.platega.io:8443/pay",
     "javascript:alert(1)",
     "https://app.platega.io/" + "x".repeat(2100),
   ]) {

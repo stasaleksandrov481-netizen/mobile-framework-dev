@@ -5,10 +5,7 @@ import UiIcon from "@/components/UiIcon";
 import { useCortexAccount } from "@/lib/use-cortex-account";
 
 export default function RegistrationCta({ isOpen }: { isOpen: boolean }) {
-  const { checking, email } = useCortexAccount();
-  if (checking) {
-    return <span className="glass glass--lg glass--light is-pending" role="status" aria-label="Проверяем вход">Проверяем аккаунт…</span>;
-  }
+  const { email } = useCortexAccount();
   if (email) {
     return <Link className="glass glass--lg glass--light" href="/account" aria-label="Открыть личный кабинет CORTEX">
       <UiIcon name="user" size={17} /><span>Личный кабинет</span><UiIcon name="arrow-up-right" size={17} />

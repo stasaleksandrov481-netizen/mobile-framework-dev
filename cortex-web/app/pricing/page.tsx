@@ -31,25 +31,23 @@ const rubles = new Intl.NumberFormat("ru-RU", {
 });
 
 export default async function PricingPage() {
-  const plans = (await loadPublicPlans())?.filter(plan => plan.code !== "guest");
+  const plans = (await loadPublicPlans())?.filter((plan): plan is typeof plan & { code: keyof typeof planInfo } => plan.code !== "guest");
   return (
     <div className="page">
       <DocGlow />
       <SiteHeader />
       <main className="simple-page legal-page pricing-page">
         <Link className="legal-back" href="/">← На главную</Link>
-        <p className="legal-eyebrow">Тарифы</p>
-        <h1>Платите только за облачный ИИ</h1>
-        <p className="legal-lead">Локальные команды бесплатны всегда. Подписка увеличивает дневной лимит облачного ИИ.</p>
+        <h1>Тарифы CORTEX</h1>
+        <p className="legal-lead">Команды телефона бесплатны. С подпиской выше дневной лимит облачного ИИ.</p>
         <PricingPanels plans={plans ? (
           <div className="plan-grid">
             {plans.map(plan => {
-              const code = plan.code as keyof typeof planInfo;
               return (
                 <section className={`plan-card${plan.code === "pro" ? " plan-card--featured" : ""}`} key={plan.code} aria-labelledby={`plan-${plan.code}`}>
                   <header className="plan-head">
-                    <h2 id={`plan-${plan.code}`}>{planInfo[code][0]}</h2>
-                    <p className="plan-desc">{planInfo[code][1]}</p>
+                    <h2 id={`plan-${plan.code}`}>{planInfo[plan.code][0]}</h2>
+                    <p className="plan-desc">{planInfo[plan.code][1]}</p>
                   </header>
                   <p className="plan-price">
                     <strong>{plan.price_kopecks ? rubles.format(plan.price_kopecks / 100) : "0 ₽"}</strong>
@@ -68,7 +66,7 @@ export default async function PricingPage() {
             })}
           </div>
         ) : <p role="status">Цены и лимиты временно не загрузились. Обновите страницу через несколько минут.</p>} />
-        <p className="plan-note">Лимиты обновляются в 03:00 по Москве. Без автосписаний: продление оформляется отдельным платежом. Оплата через Telegram Stars, картой через Robokassa после подключения.</p>
+        <p className="plan-note">Лимиты обновляются в 03:00 МСК. Оплата в Telegram Stars. Подписка продлевается вручную.</p>
         <nav className="legal-links" aria-label="Документы CORTEX">
           <Link href="/questions">Частые вопросы</Link>
           <Link href="/terms">Пользовательское соглашение</Link>
@@ -77,7 +75,7 @@ export default async function PricingPage() {
           <Link href="/support">Поддержка</Link>
         </nav>
       </main>
-    <SiteFooter />
+      <SiteFooter />
     </div>
   );
 }

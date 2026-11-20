@@ -23,8 +23,9 @@ export async function POST(request: Request) {
   if (!origin || origin !== new URL(request.url).origin) return reply("forbidden", 403);
   const authorization = request.headers.get("authorization") || "";
   if (!/^Bearer [A-Za-z0-9._-]{40,4096}$/.test(authorization)) return reply("sign_in", 401);
-  const contentLength = request.headers.get("content-length");
-  if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > 1024)) return reply("invalid", 400);
+  if (request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    return reply("invalid_content_type", 415);
+  }
   let input: unknown;
   try { input = await readBoundedJson(request, 1024); } catch { return reply("invalid", 400); }
   if (!input || typeof input !== "object" || Array.isArray(input) ||
@@ -32,14 +33,17 @@ export async function POST(request: Request) {
     return reply("invalid_plan", 400);
   }
 
-  const userClient = createClient(cortexSupabaseUrl, cortexPublishableKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data, error } = await userClient.auth.getUser(authorization.slice(7));
-  const user = data.user;
-  if (error || !user?.id || !user.email || !user.email_confirmed_at) return reply("sign_in", 401);
-
   try {
+    const userClient = createClient(cortexSupabaseUrl, cortexPublishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { fetch: (url, init) => fetch(url, {
+        ...init, redirect: "error", signal: AbortSignal.timeout(3500),
+      }) },
+    });
+    const { data, error } = await userClient.auth.getUser(authorization.slice(7));
+    const user = data.user;
+    if (error || !user?.id || !user.email || !user.email_confirmed_at) return reply("sign_in", 401);
+
     // Fail closed if Redis is unavailable. A payment endpoint must not lose its abuse limiter.
     const bucket = createHash("sha256").update(user.id).digest("hex").slice(0, 24);
     const claim = await getRedis().set(`cortex:web:checkout:${bucket}`, "1", { nx: true, ex: 30 });

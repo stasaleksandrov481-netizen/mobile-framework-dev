@@ -1,5 +1,6 @@
 import Link from "next/link";
 import HeaderAccount from "@/components/HeaderAccount";
+import SiteMenu from "@/components/SiteMenu";
 
 const links = [
   { href: "/#features", label: "Возможности" },
@@ -21,14 +22,7 @@ export default function SiteHeader() {
         </nav>
         <div className="site-header-end">
           <HeaderAccount />
-          {/* Phones: the same links in a disclosure menu (no JavaScript needed). */}
-          <details className="site-menu">
-            <summary aria-label="Меню"><span className="site-menu-icon" aria-hidden="true" /></summary>
-            <nav className="site-menu-panel" aria-label="Меню сайта">
-              {links.map(link => <Link key={link.href} href={link.href}>{link.label}</Link>)}
-              <Link href="/privacy">Документы</Link>
-            </nav>
-          </details>
+          <SiteMenu links={[...links, { href: "/privacy", label: "Документы" }]} />
         </div>
       </div>
     </header>

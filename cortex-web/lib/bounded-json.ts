@@ -1,7 +1,16 @@
 /** Read a tiny JSON request without buffering an unbounded chunked body. */
 export async function readBoundedJson(request: Request, maxBytes: number): Promise<unknown> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || !request.body) throw new Error("invalid_body");
+  const length = request.headers.get("content-length");
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBytes)) {
+    throw new Error("invalid_body");
+  }
   const reader = request.body.getReader();
+  let expired = false;
+  const timeout = setTimeout(() => {
+    expired = true;
+    void reader.cancel("body_timeout").catch(() => {});
+  }, 5000);
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -17,9 +26,11 @@ export async function readBoundedJson(request: Request, maxBytes: number): Promi
       chunks.push(value);
     }
   } finally {
+    clearTimeout(timeout);
     reader.releaseLock();
   }
 
+  if (expired) throw new Error("body_timeout");
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
+import { cortexAuth, REGISTRATION_LEGAL_VERSION, savePreregistration } from "@/lib/cortex-auth";
 import UiIcon from "@/components/UiIcon";
 import OtpCodeInput from "@/components/OtpCodeInput";
 import { isEmailDeliveryRateLimited, isRateLimited, safeAuthErrorMessage } from "@/lib/auth-error";
@@ -45,6 +45,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         user.email?.toLowerCase() !== address.trim().toLowerCase()) {
       throw new Error("Не удалось подтвердить вход. Повторите попытку с правильными данными.");
     }
+    return user;
   }
 
   useEffect(() => {
@@ -97,7 +98,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
       try {
         const { data: { user } } = await settleWithTimeout(cortexAuth.auth.getUser(), 12_000);
         if (active && user?.email?.toLowerCase() === email.trim().toLowerCase() && user.email_confirmed_at) {
-          await settleWithTimeout(savePreregistration(user.user_metadata?.cortex_notify_opt_in === true), 12_000);
+          await settleWithTimeout(savePreregistration(user.user_metadata?.cortex_notify_opt_in === true, user.id), 12_000);
           if (!active) return;
           setError("");
           setSuccessKind("signup");
@@ -190,8 +191,8 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             data: {
               cortex_preregistration: true,
               cortex_notify_opt_in: notify,
-              cortex_privacy_acknowledged_version: "2026-11-16.2",
-              cortex_terms_accepted_version: "2026-11-16.2",
+              cortex_privacy_acknowledged_version: REGISTRATION_LEGAL_VERSION,
+              cortex_terms_accepted_version: REGISTRATION_LEGAL_VERSION,
               cortex_privacy_acknowledged_at: new Date().toISOString(),
               cortex_launch_notify_opt_in_at: notify ? new Date().toISOString() : null,
             },
@@ -199,8 +200,8 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         }), 15_000);
         if (signupError) throw signupError;
         if (data.session) {
-          await requireVerifiedSession(email);
-          await settleWithTimeout(savePreregistration(notify), 12_000);
+          const user = await requireVerifiedSession(email);
+          await settleWithTimeout(savePreregistration(notify, user.id), 12_000);
           setSuccessKind("signup");
           setMode("done");
         } else {
@@ -217,8 +218,8 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
           }), 15_000);
           if (verifyError) throw verifyError;
         }
-        await requireVerifiedSession(email);
-        await settleWithTimeout(savePreregistration(notify), 12_000);
+        const user = await requireVerifiedSession(email);
+        await settleWithTimeout(savePreregistration(user.user_metadata?.cortex_notify_opt_in === true, user.id), 12_000);
         setSuccessKind("signup");
         setMode("done");
       } else if (mode === "signin_code") {

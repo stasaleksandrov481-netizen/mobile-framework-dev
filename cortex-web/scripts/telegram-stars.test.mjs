@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { boundedJson, findTelegramStarsPurchase, plainBotCommand, starsInvoiceUrl, starsPayloadId, starsPlan, telegramConfigurationValid,
+import { readBoundedJson } from "../lib/bounded-json.ts";
+import { findTelegramStarsPurchase, plainBotCommand, starsInvoiceUrl, starsPayloadId, starsPlan, telegramConfigurationValid,
   telegramBotApi, verifyTelegramStarsReceipt, webhookSecretValid } from "../lib/telegram-stars.ts";
 
 const order = "7f93fef4-b7a1-462a-8f66-15e9da0f9ce1";
@@ -41,10 +42,10 @@ test("Oversize checkout and webhook bodies are rejected regardless of Content-Le
   const make = (body, headers = {}) => new Request("https://example.test", {
     method: "POST", headers, body,
   });
-  assert.deepEqual(await boundedJson(make('{"plan":"pro"}'), 1024), { plan: "pro" });
-  await assert.rejects(boundedJson(make("x".repeat(2048)), 1024), /invalid_body/);
-  await assert.rejects(boundedJson(make("{}", { "content-length": "4000" }), 1024), /invalid_body/);
-  await assert.rejects(boundedJson(make("not json"), 1024), SyntaxError);
+  assert.deepEqual(await readBoundedJson(make('{"plan":"pro"}'), 1024), { plan: "pro" });
+  await assert.rejects(readBoundedJson(make("x".repeat(2048)), 1024), /body_limit_exceeded/);
+  await assert.rejects(readBoundedJson(make("{}", { "content-length": "4000" }), 1024), /invalid_body/);
+  await assert.rejects(readBoundedJson(make("not json"), 1024), SyntaxError);
 });
 
 test("Bot calls validate tokens, never follow redirects, and reject provider failures", async () => {
@@ -211,7 +212,7 @@ test("Payment selection is a separate page and never passes client-selected amou
   assert.match(methods, /Банковская карта|банковской картой/);
   assert.doesNotMatch(methods, /selectMethod\("card"\)|Оплата Stars скоро/);
   assert.match(methods, /!starsAvailable \|\| processing/);
-  assert.match(methods, /Telegram Stars ещё не активированы на сервере/);
+  assert.match(methods, /Оплата звёздами сейчас недоступна/);
   assert.match(methods, /Telegram Stars/);
   assert.match(methods, /JSON\.stringify\(\{ plan \}\)/);
   assert.doesNotMatch(methods, /JSON\.stringify\(\{.*(?:subject|amount|stars).*\}\)/);

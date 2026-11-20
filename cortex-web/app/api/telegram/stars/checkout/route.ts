@@ -1,7 +1,8 @@
+import { readBoundedJson } from "@/lib/bounded-json";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { cortexPublishableKey, cortexSupabaseUrl } from "@/lib/cortex-public-config";
-import { boundedJson, starsInvoiceUrl, starsPlan, telegramBotApi, telegramConfigurationValid } from "@/lib/telegram-stars";
+import { starsInvoiceUrl, starsPlan, telegramBotApi, telegramConfigurationValid } from "@/lib/telegram-stars";
 
 export const runtime = "nodejs";
 
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
   }
   let plan: unknown;
   try {
-    const input = await boundedJson(request, 1024);
+    const input = await readBoundedJson(request, 1024);
     if (!input || typeof input !== "object" || Array.isArray(input) ||
         Object.keys(input).some(key => key !== "plan")) throw new Error();
     plan = (input as { plan?: unknown }).plan;

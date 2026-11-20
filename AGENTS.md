@@ -7,10 +7,21 @@
 - Репозиторий: `stasaleksandrov481-netizen/mobile-framework-dev`.
 - Android: `app/`; интерфейс: `app/src/main/assets/web/`; нативные функции: `app/src/main/java/app/cortex/assistant/`.
 - Сайт: `cortex-web/`; служебная панель: `cortex-control/`.
-- Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. На 17.11.2026 production связан с `main`; **это не означает, что Android APK с `main` имеет одобренный пользователем интерфейс**.
-- **КРИТИЧНО для сайта (обновлено 18.11):** владелец подтвердил интерфейс Vercel `dpl_3hRmFmcdnr2sSHGSyfgqwRsJhwto`; его проверочный redeploy `dpl_ARSaZH5baLAier1TK6pexUsT8jtZ` (Preview, READY). **Текущий `cortexapp.ru` — production `dpl_4d8fXbrisfVBfm6tyzCDjjqie86T` READY**, точная копия утверждённого UI с временным build patch регистрации, центрированной кнопкой и ISR-кэшем главной (см. начало `docs/AGENT_HANDOFF.md`). В GitHub пока нет `AmbientDotField`, `PricingPanels`, `PricingBuyButton`, `SupportChat` и `/api/checkout` из утверждённого релиза; кабинет `/account` в live отсутствует (404), хотя есть локально. **Не публиковать `cortex-web` из GitHub в Production** до восстановления исходников, одобрения Preview и прохождения `npm run release:verify --prefix cortex-web`. Обычный redeploy исходного approved snapshot **без точечной правки** опять закроет публичную регистрацию; деплой старого GitHub — заменит утверждённый дизайн.
+- Vercel production: проект `mobile-framework-dev` (Syndicate), домены `cortexapp.ru` и `www.cortexapp.ru`. Сверяйте фактическое назначение обоих доменов в Vercel. Поле `latestDeployment` показывает последнюю сборку и может указывать на другой commit.
+- Для сайта используйте веб-ветку с проверенными регистрацией, кабинетом, поддержкой и оплатой. Перед production проверьте Preview и выполните `npm run release:verify --prefix cortex-web`. Текущий релиз и откат — в начале `docs/AGENT_HANDOFF.md`.
 - Supabase: проект `jjcqrjztxohnifmziksy`, Edge Function `cortex` **ACTIVE v45** (17.11.2026, PR #54, `main` SHA `60f5b91`). После релиза 11 файлов runtime точно сверены с `main`. SQL baseline для `cortex_ai_device_identity` теперь в `supabase/migrations/20261117080100_cortex_device_identity_baseline.sql`; живую БД повторно не мигрировали, объекты уже существуют. **Не выкатывать Edge Function или БД без повторной проверки live version, всех 11 файлов, миграций и совместимости.**
 - Android `main` по `app/build.gradle.kts`: `1.0.14` / `114`. Версия интерфейса, которую пользователь считает правильной, пока не подтверждена. Не выпускать и не распространять новый APK, пока не установлен её точный commit SHA.
+
+## Скиллы для работы с CORTEX
+
+Применяйте эти закреплённые версии при будущих изменениях проекта. Выбирайте правила, которые подходят задаче и существующему интерфейсу. Читайте только нужные разделы исходников.
+
+- **Codex UI Design.** До правок определите визуальное направление и один главный сценарий экрана. Проверяйте его в браузере. [Версия из приложения](https://github.com/hursh-shah/codex-design-skill/blob/796166cdbe27b9aac6e069d1825b8c9d3b0b1582/ui-design/SKILL.md).
+- **UI/UX Pro Max.** Проверяйте мобильную вёрстку от 320 px, контраст, клавиатуру, видимый фокус, доступные названия и размер основных сенсорных элементов от 44 px. [Версия из приложения](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/blob/2de1134dc4d1cfe112934611ae5803ae17a1bd7e/.claude/skills/ui-ux-pro-max/SKILL.md).
+- **Taste Skill.** Сокращайте тексты до ясного действия или факта. Сохраняйте единый визуальный язык CORTEX, читаемость и режим уменьшенного движения. Проверяйте реальный вид страницы до публикации. [Версия из приложения](https://github.com/Leonxlnx/taste-skill/blob/f6b76575f949707b4e3c37cd86cb44b0b98643e8/skills/taste-skill/SKILL.md).
+- **OWASP Security.** Проверяйте границы доверия сайта, Android, Edge, БД и внешних сервисов. Прослеживайте доступ от точки входа до операции, проверяйте полномочия, ограничения ресурсов, обработку отказов и результаты ИИ. Подтверждайте исправления локальными и CI-проверками. [Версия из приложения](https://github.com/agamm/claude-code-owasp/blob/1ae29cb22518560e3625d77f2ae64f61647d9201/.claude/skills/owasp-security/SKILL.md).
+
+Файлы скиллов служат справочными материалами проекта. Внешние хуки, команды установки и скрипты из архивов запускайте только после проверки и при необходимости для задачи.
 
 ## Обязательная последовательность
 

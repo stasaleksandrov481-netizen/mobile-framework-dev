@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import { cortexAuth, ensurePreregistration } from "@/lib/cortex-auth";
+import { cortexAuth, registrationAcceptanceVersion, savePreregistration } from "@/lib/cortex-auth";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { createLatestRequest } from "@/lib/latest-request";
 import { validQuota, validReservation, resetLabel } from "@/lib/account-data";
@@ -70,29 +70,32 @@ export function AccountDashboard() {
     const notificationRevision = notificationEdits.current;
     setLoadingData(true);
     setDataError("");
+    const isPreregistered = account.user_metadata?.cortex_preregistration === true;
+    const legalVersion = isPreregistered ? registrationAcceptanceVersion(account.user_metadata) : null;
+    const loadReservation = () => settleWithTimeout(cortexAuth.from("cortex_preregistrations")
+      .select("bonus_tokens,bonus_spent,bonus_granted_at,registered_at,notify_opt_in")
+      .eq("user_id", account.id).maybeSingle(), 8_000);
     try {
       // These requests are independent. A timeout in one must not hide valid
       // account data returned by the other (Promise.all would discard both).
-      const [reservationSettled, quotaSettled] = await Promise.allSettled([
-        settleWithTimeout(cortexAuth.from("cortex_preregistrations")
-          .select("bonus_tokens,bonus_spent,bonus_granted_at,registered_at,notify_opt_in")
-          .eq("user_id", account.id).maybeSingle(), 8_000),
+      const [reservationSettled, quotaSettled, acceptanceSettled] = await Promise.allSettled([
+        loadReservation(),
         settleWithTimeout(cortexAuth.rpc("cortex_web_account_usage"), 8_000),
+        legalVersion ? settleWithTimeout(cortexAuth.from("cortex_registration_legal_acceptances")
+          .select("document_version").eq("user_id", account.id).eq("document_version", legalVersion).maybeSingle(), 8_000) : null,
       ]);
       let reservationResponse = reservationSettled.status === "fulfilled"
         ? reservationSettled.value : { data: null, error: new Error("reservation unavailable") };
       const quotaResponse = quotaSettled.status === "fulfilled"
         ? quotaSettled.value : { data: null, error: new Error("usage unavailable") };
-      let recoveryFailed = false;
-      if (!reservationResponse.error && !reservationResponse.data && account.user_metadata?.cortex_preregistration === true) {
+      const acceptance = acceptanceSettled.status === "fulfilled" ? acceptanceSettled.value : null;
+      let recoveryFailed = Boolean(legalVersion && (!acceptance || acceptance.error));
+      const missingReservation = !reservationResponse.error && !reservationResponse.data;
+      const missingAcceptance = Boolean(acceptance && !acceptance.error && !acceptance.data);
+      if (isPreregistered && (missingReservation || missingAcceptance)) {
         try {
-          // Auth may have succeeded while the next DB request failed or the
-          // user closed the confirmation tab. Recover once, without changing
-          // any existing notification preference or reserved token amount.
-          await settleWithTimeout(ensurePreregistration(account.id, account.user_metadata?.cortex_notify_opt_in === true), 10_000);
-          reservationResponse = await settleWithTimeout(cortexAuth.from("cortex_preregistrations")
-            .select("bonus_tokens,bonus_spent,bonus_granted_at,registered_at,notify_opt_in")
-            .eq("user_id", account.id).maybeSingle(), 10_000);
+          await settleWithTimeout(savePreregistration(account.user_metadata?.cortex_notify_opt_in === true, account.id), 12_000);
+          if (missingReservation) reservationResponse = await loadReservation();
           recoveryFailed = !reservationResponse.data || Boolean(reservationResponse.error);
         } catch { recoveryFailed = true; }
       }

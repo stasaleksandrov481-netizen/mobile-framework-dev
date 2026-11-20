@@ -1,7 +1,8 @@
+import { readBoundedJson } from "@/lib/bounded-json";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { cortexSupabaseUrl } from "@/lib/cortex-public-config";
-import { boundedJson, telegramBotApi, telegramConfigurationValid,
+import { telegramBotApi, telegramConfigurationValid,
   verifyTelegramStarsReceipt, webhookSecretValid } from "@/lib/telegram-stars";
 import { processTelegramStarsUpdate, type TelegramStarsUpdate } from "@/lib/telegram-stars-webhook";
 
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
 
   let update: TelegramStarsUpdate;
   try {
-    const decoded = await boundedJson(request, 16_384);
+    const decoded = await readBoundedJson(request, 16_384);
     if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return respond(400);
     update = decoded as TelegramStarsUpdate;
   } catch { return respond(400); }

@@ -1,7 +1,8 @@
+import { readBoundedJson } from "@/lib/bounded-json";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { cortexPublishableKey, cortexSupabaseUrl } from "@/lib/cortex-public-config";
-import { boundedJson, findTelegramStarsPurchase, telegramConfigurationValid } from "@/lib/telegram-stars";
+import { findTelegramStarsPurchase, telegramConfigurationValid } from "@/lib/telegram-stars";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
   }
   let id: string;
   try {
-    const body = await boundedJson(request, 1024);
+    const body = await readBoundedJson(request, 1024);
     if (!body || typeof body !== "object" || Array.isArray(body) ||
         Object.keys(body).length !== 1 || typeof (body as { id?: unknown }).id !== "string" ||
         !uuid.test((body as { id: string }).id)) throw new Error();

@@ -25,7 +25,7 @@ export default function AuthCallback() {
         const tokenHash = url.searchParams.get("token_hash");
         recoveryFlow.current = url.searchParams.get("flow") === "recovery";
         // One-time credentials must not remain in history, screenshots or copied URLs.
-        if (url.search) window.history.replaceState(window.history.state, "", url.pathname);
+        if (url.search || url.hash) window.history.replaceState(window.history.state, "", url.pathname);
         if (error) throw new Error("Подтверждение не удалось.");
         if (recoveryFlow.current && !code && !tokenHash) throw new Error("Нет кода восстановления.");
         if (code) {
@@ -43,8 +43,8 @@ export default function AuthCallback() {
         // Existing Android accounts may authenticate through this callback
         // without the website preregistration marker. Never create a new
         // bonus reservation or reject their valid verified session.
-        await completeVerifiedAccount(user, () => settleWithTimeout(
-          savePreregistration(user?.user_metadata?.cortex_notify_opt_in === true), 12_000));
+        await completeVerifiedAccount(user, userId => settleWithTimeout(
+          savePreregistration(user?.user_metadata?.cortex_notify_opt_in === true, userId), 12_000));
       })();
     }
     void confirmation.current.then(() => {
