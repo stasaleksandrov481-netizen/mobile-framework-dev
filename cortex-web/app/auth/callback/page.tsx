@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cortexAuth, savePreregistration } from "@/lib/cortex-auth";
+import { cortexAuth, savePreregistration, verifyCortexUser } from "@/lib/cortex-auth";
+import { markRecoverySession } from "@/lib/recovery-session";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { completeVerifiedAccount } from "@/lib/verified-account";
 
@@ -28,23 +29,31 @@ export default function AuthCallback() {
         if (url.search || url.hash) window.history.replaceState(window.history.state, "", url.pathname);
         if (error) throw new Error("Подтверждение не удалось.");
         if (recoveryFlow.current && !code && !tokenHash) throw new Error("Нет кода восстановления.");
+        let token: string | undefined;
         if (code) {
-          const { error: exchangeError } = await settleWithTimeout(cortexAuth.auth.exchangeCodeForSession(code), 15_000);
+          const { data, error: exchangeError } = await settleWithTimeout(cortexAuth.auth.exchangeCodeForSession(code), 15_000);
           if (exchangeError) throw exchangeError;
+          token = data.session?.access_token;
         } else if (tokenHash) {
-          const { error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({ token_hash: tokenHash, type: recoveryFlow.current ? "recovery" : "email" }), 15_000);
+          const { data, error: verifyError } = await settleWithTimeout(cortexAuth.auth.verifyOtp({ token_hash: tokenHash, type: recoveryFlow.current ? "recovery" : "email" }), 15_000);
           if (verifyError) throw verifyError;
+          token = data.session?.access_token;
+        } else {
+          const { data } = await settleWithTimeout(cortexAuth.auth.getSession(), 12_000);
+          token = data.session?.access_token;
         }
-        const { data: { user } } = await settleWithTimeout(cortexAuth.auth.getUser(), 12_000);
+        if (!token) throw new Error("Нет подтверждённой сессии.");
+        const user = await verifyCortexUser(token);
         if (recoveryFlow.current) {
           if (!user?.id || !user.email_confirmed_at) throw new Error("Сессия восстановления недействительна.");
+          markRecoverySession(user.id, token);
           return;
         }
         // Existing Android accounts may authenticate through this callback
         // without the website preregistration marker. Never create a new
         // bonus reservation or reject their valid verified session.
         await completeVerifiedAccount(user, userId => settleWithTimeout(
-          savePreregistration(user?.user_metadata?.cortex_notify_opt_in === true, userId), 12_000));
+          savePreregistration(user?.user_metadata?.cortex_notify_opt_in === true, userId, token), 12_000));
       })();
     }
     void confirmation.current.then(() => {

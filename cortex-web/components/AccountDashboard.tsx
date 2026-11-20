@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
-import { cortexAuth, registrationAcceptanceVersion, savePreregistration } from "@/lib/cortex-auth";
+import { cortexAuth, registrationAcceptanceVersion, savePreregistration, updateCortexUser } from "@/lib/cortex-auth";
+import { useVerifiedCortexSession } from "@/lib/use-verified-cortex-session";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { createLatestRequest } from "@/lib/latest-request";
 import { validQuota, validReservation, resetLabel } from "@/lib/account-data";
@@ -39,17 +40,37 @@ function Avatar({ name, tone, size = "medium" }: { name: string; tone: Tone; siz
 
 export function AccountDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
-  const [checking, setChecking] = useState(true);
-  const [authCheckError, setAuthCheckError] = useState("");
-  const [authRetry, setAuthRetry] = useState(0);
+  const { session, checking, failed, retry } = useVerifiedCortexSession();
+  useEffect(() => {
+    if (!checking && !session && !failed) router.replace("/register?mode=signin");
+  }, [router, checking, session, failed]);
+
+  if (checking || (!session && !failed)) return <div className="account-gate" role="status" aria-label="Загружаем личный кабинет">
+    <img src="/cortex-mark.svg" width="53" height="53" alt="CORTEX" />
+  </div>;
+
+  if (!session) return <main className="account-unavailable">
+    <img src="/cortex-mark.svg" width="47" height="47" alt="CORTEX" />
+    <h1>Не удалось загрузить кабинет.</h1>
+    <p role="alert">Не удалось проверить аккаунт. Проверь соединение и попробуй ещё раз.</p>
+    <button type="button" onClick={retry}>Повторить</button>
+    <Link href="/register?mode=signin">Вернуться ко входу</Link>
+  </main>;
+
+  return <AccountWorkspace key={session.key} session={session} />;
+}
+
+function AccountWorkspace({ session }: { session: NonNullable<ReturnType<typeof useVerifiedCortexSession>["session"]> }) {
+  const router = useRouter();
+  const { client, getToken, isCurrent, user: initialUser } = session;
+  const [user, setUser] = useState(initialUser);
   const [panel, setPanel] = useState<Panel>("overview");
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [loadingData, setLoadingData] = useState(true);
   const [dataError, setDataError] = useState("");
-  const [name, setName] = useState("");
-  const [tone, setTone] = useState<Tone>("graphite");
+  const [name, setName] = useState(() => accountName(initialUser));
+  const [tone, setTone] = useState<Tone>(() => avatarTone(initialUser.user_metadata?.cortex_avatar_tone));
   const [saving, setSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [endingAllSessions, setEndingAllSessions] = useState(false);
@@ -72,7 +93,7 @@ export function AccountDashboard() {
     setDataError("");
     const isPreregistered = account.user_metadata?.cortex_preregistration === true;
     const legalVersion = isPreregistered ? registrationAcceptanceVersion(account.user_metadata) : null;
-    const loadReservation = () => settleWithTimeout(cortexAuth.from("cortex_preregistrations")
+    const loadReservation = () => settleWithTimeout(client.from("cortex_preregistrations")
       .select("bonus_tokens,bonus_spent,bonus_granted_at,registered_at,notify_opt_in")
       .eq("user_id", account.id).maybeSingle(), 8_000);
     try {
@@ -80,8 +101,8 @@ export function AccountDashboard() {
       // account data returned by the other (Promise.all would discard both).
       const [reservationSettled, quotaSettled, acceptanceSettled] = await Promise.allSettled([
         loadReservation(),
-        settleWithTimeout(cortexAuth.rpc("cortex_web_account_usage"), 8_000),
-        legalVersion ? settleWithTimeout(cortexAuth.from("cortex_registration_legal_acceptances")
+        settleWithTimeout(client.rpc("cortex_web_account_usage"), 8_000),
+        legalVersion ? settleWithTimeout(client.from("cortex_registration_legal_acceptances")
           .select("document_version").eq("user_id", account.id).eq("document_version", legalVersion).maybeSingle(), 8_000) : null,
       ]);
       let reservationResponse = reservationSettled.status === "fulfilled"
@@ -92,14 +113,15 @@ export function AccountDashboard() {
       let recoveryFailed = Boolean(legalVersion && (!acceptance || acceptance.error));
       const missingReservation = !reservationResponse.error && !reservationResponse.data;
       const missingAcceptance = Boolean(acceptance && !acceptance.error && !acceptance.data);
+      if (!isCurrent() || !dataRequests.current.isCurrent(requestId)) return;
       if (isPreregistered && (missingReservation || missingAcceptance)) {
         try {
-          await settleWithTimeout(savePreregistration(account.user_metadata?.cortex_notify_opt_in === true, account.id), 12_000);
+          await settleWithTimeout(savePreregistration(account.user_metadata?.cortex_notify_opt_in === true, account.id, await getToken()), 12_000);
           if (missingReservation) reservationResponse = await loadReservation();
           recoveryFailed = !reservationResponse.data || Boolean(reservationResponse.error);
         } catch { recoveryFailed = true; }
       }
-      if (!dataRequests.current.isCurrent(requestId)) return;
+      if (!isCurrent() || !dataRequests.current.isCurrent(requestId)) return;
       // A failed API query is not the same as a zero balance.
       const reservationValid = reservationResponse.data === null || validReservation(reservationResponse.data);
       const quotaValid = validQuota(quotaResponse.data);
@@ -123,53 +145,19 @@ export function AccountDashboard() {
         setDataError("Часть данных или подтверждение регистрации пока недоступны. Попробуйте обновить.");
       }
     } catch {
-      if (!dataRequests.current.isCurrent(requestId)) return;
+      if (!isCurrent() || !dataRequests.current.isCurrent(requestId)) return;
       // Retain the last verified values rather than making a temporary
       // outage look like the user lost their balance or preregistration.
       setDataError("Сервер временно недоступен. Последние загруженные данные могут устареть. Попробуйте обновить.");
     } finally {
-      if (dataRequests.current.isCurrent(requestId)) setLoadingData(false);
+      if (isCurrent() && dataRequests.current.isCurrent(requestId)) setLoadingData(false);
     }
-  }, []);
+  }, [client, getToken, isCurrent]);
 
   useEffect(() => {
-    let active = true;
-    const boot = async () => {
-      try {
-        const { data: { user: current }, error } = await settleWithTimeout(cortexAuth.auth.getUser(), 9_000);
-        if (!active) return;
-        if (error) {
-          if (error.name !== "AuthSessionMissingError") {
-            setAuthCheckError("Не удалось проверить аккаунт. Проверь соединение и попробуй ещё раз.");
-            setChecking(false);
-            return;
-          }
-        }
-        if (!current?.id || !current.email || !current.email_confirmed_at) {
-          router.replace("/register?mode=signin");
-          return;
-        }
-        setUser(current);
-        setName(accountName(current));
-        setTone(avatarTone(current.user_metadata?.cortex_avatar_tone));
-        setChecking(false);
-        void refreshData(current);
-      } catch {
-        if (active) {
-          setAuthCheckError("Сервер долго не отвечает. Попробуй обновить проверку аккаунта.");
-          setChecking(false);
-        }
-      }
-    };
-    void boot();
-    const { data: { subscription } } = cortexAuth.auth.onAuthStateChange(event => {
-      if (event === "SIGNED_OUT") {
-        dataRequests.current.invalidate();
-        router.replace("/register?mode=signin");
-      }
-    });
-    return () => { active = false; dataRequests.current.invalidate(); subscription.unsubscribe(); };
-  }, [router, refreshData, authRetry]);
+    void refreshData(initialUser);
+    return () => dataRequests.current.invalidate();
+  }, [initialUser, refreshData]);
 
   const displayName = useMemo(() => user ? accountName(user) : "", [user]);
   const currentTone = avatarTone(user?.user_metadata?.cortex_avatar_tone);
@@ -189,12 +177,13 @@ export function AccountDashboard() {
     setProfileError("");
     setProfileSaved(false);
     try {
-      const { data, error } = await settleWithTimeout(cortexAuth.auth.updateUser({
-        // Android currently reads user_metadata.name for its account label.
+      const updated = await updateCortexUser(await getToken(), {
+        // Android reads user_metadata.name for its account label.
         data: { name: cleanName, cortex_display_name: cleanName, cortex_avatar_tone: tone },
-      }), 12_000);
-      if (error || !data.user) throw new Error();
-      setUser(data.user);
+      });
+      if (!isCurrent()) return;
+      if (updated.id !== user.id) throw new Error("account_changed");
+      setUser(updated);
       setName(cleanName);
       setProfileSaved(true);
     } catch {
@@ -209,6 +198,9 @@ export function AccountDashboard() {
     setSigningOut(true);
     setProfileError("");
     try {
+      const token = await getToken();
+      const { data: { session: current } } = await settleWithTimeout(cortexAuth.auth.getSession(), 8_000);
+      if (!isCurrent() || current?.access_token !== token) throw new Error("session_changed");
       const { error } = await settleWithTimeout(cortexAuth.auth.signOut({ scope: "local" }), 12_000);
       if (error) throw error;
       router.replace("/");
@@ -223,9 +215,16 @@ export function AccountDashboard() {
     setEndingAllSessions(true);
     setSecurityError("");
     try {
-      const { error } = await settleWithTimeout(cortexAuth.auth.signOut({ scope: "global" }), 12_000);
+      const token = await getToken();
+      const { error } = await settleWithTimeout(cortexAuth.auth.admin.signOut(token, "global"), 12_000);
       if (error) throw error;
-      router.replace("/register?mode=signin");
+      if (isCurrent()) {
+        const { data: { session: current } } = await cortexAuth.auth.getSession();
+        if (isCurrent() && current?.access_token === token) {
+          const { error: localError } = await settleWithTimeout(cortexAuth.auth.signOut({ scope: "local" }), 12_000);
+          if (localError) throw localError;
+        }
+      }
     } catch {
       setSecurityError("Не удалось завершить все сеансы. Повторите попытку.");
       setEndingAllSessions(false);
@@ -239,9 +238,10 @@ export function AccountDashboard() {
     setNotificationsMessage("");
     setNotificationsError(false);
     try {
-      const { data, error } = await settleWithTimeout(cortexAuth.from("cortex_preregistrations")
+      const { data, error } = await settleWithTimeout(client.from("cortex_preregistrations")
         .update({ notify_opt_in: notificationsEnabled })
         .eq("user_id", user.id).select("notify_opt_in").single(), 12_000);
+      if (!isCurrent()) return;
       if (error || !data || data.notify_opt_in !== notificationsEnabled) throw new Error();
       notificationEdits.current++;
       notificationDraftDirty.current = false;
@@ -252,18 +252,6 @@ export function AccountDashboard() {
       setNotificationsMessage("Не удалось сохранить настройку. Повторите попытку.");
     } finally { setSavingNotifications(false); }
   }
-
-  if (checking) return <div className="account-gate" role="status" aria-label="Загружаем личный кабинет">
-    <img src="/cortex-mark.svg" width="53" height="53" alt="CORTEX" />
-  </div>;
-
-  if (authCheckError) return <main className="account-unavailable">
-    <img src="/cortex-mark.svg" width="47" height="47" alt="CORTEX" />
-    <h1>Не удалось загрузить кабинет.</h1>
-    <p role="alert">{authCheckError}</p>
-    <button type="button" onClick={() => { setAuthCheckError(""); setChecking(true); setAuthRetry(n => n + 1); }}>Повторить</button>
-    <Link href="/register?mode=signin">Вернуться ко входу</Link>
-  </main>;
 
   return (
     <div className="account-shell">

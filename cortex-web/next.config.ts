@@ -16,7 +16,7 @@ const contentSecurityPolicy = [
   "form-action 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src 'self' data: blob: ${supabaseOrigin}`,
   "font-src 'self' data:",
   `connect-src 'self' ${supabaseOrigin} ${supabaseOrigin.replace(/^https:/, "wss:")}`,
   "worker-src 'self' blob:",
@@ -52,6 +52,10 @@ const nextConfig: NextConfig = {
         { key: "X-Robots-Tag", value: "noindex, nofollow" },
       ] },
       { source: "/account", headers: [
+        { key: "Cache-Control", value: "private, no-store" },
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ] },
+      { source: "/reset-password", headers: [
         { key: "Cache-Control", value: "private, no-store" },
         { key: "X-Robots-Tag", value: "noindex, nofollow" },
       ] },
