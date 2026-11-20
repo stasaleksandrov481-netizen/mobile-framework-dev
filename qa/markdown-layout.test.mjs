@@ -128,7 +128,7 @@ test("assistant links are clickable only when Android can open them (HTTPS)", ()
   const result = render("[safe](https://cortexapp.ru/help) [plain](http://example.com/) http://example.org/x");
   const links = Array.from(result.matchAll(/href="([^"]*)"/g), match => match[1]);
   assert.deepEqual(links, ["https://cortexapp.ru/help"]);
-  assert.match(result, /example\.com/);
+  assert.ok(result.includes(" [plain]("));
 });
 
 function markdownStream() {
