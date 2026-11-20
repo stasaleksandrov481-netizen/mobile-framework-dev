@@ -1,5 +1,10 @@
 # Инвентаризация релизов CORTEX
 
+## 20.11.2026 · обновление Supabase Edge
+
+- Edge `cortex` v50 ACTIVE. Перед выкладкой все 11 файлов v49 сверены с репозиторием. В выкладку вошли только изменения `handler.ts` и `provider.ts` из 6a6a9dc. После выкладки вновь проверены 11 файлов и публичный статус. 82 проверки Edge, оплаты и защиты служебных инструкций прошли. Миграций нет.
+- Предыдущий комплект Edge v49 для отката соответствует `8e56d8a`. После отката повторить сверку файлов и запрос статуса.
+
 ## 20.11.2026 — Supabase Edge `cortex`: сверка live v49 перед деплоем PR #100
 
 - Live: `cortex` **ACTIVE v49**, `verify_jwt=false`, entrypoint `index.ts`. Все 11 файлов live (`index, handler, provider, device, tool_targets, control, redis, visual, settings, audio, singleflight`) **побайтно совпадают с `origin/main`** (сверка через `get_edge_function`, нормализация CRLF).

@@ -5,6 +5,12 @@
 - Wake word: `CortexHotword` matches on a lower-cased copy (ICU `IGNORE_CASE` Cyrillic folding is not guaranteed; final results are often capitalised), adds common misrecognitions and fillers. Test `CortexHotwordTest` (incl. negatives «Кортеж», «кортексный», mid-sentence mention). Wake remains API 31+ on-device only by design; the error message now states the Android 12 requirement or how to install offline Russian recognition.
 - Not changed: fallback timing (10 s without first cloud chunk → Android voice).
 
+## 2026-11-20 UTC · выкладка Control и Edge, кандидат Android beta.11
+
+- Production CORTEX Control: коммит `c1b4941`, Vercel `dpl_AqfS2QJUFV4gdCWZiKzmRUcnjjmo`, READY, домены назначены. Проверены экран входа и новые стили панели. Предыдущий production `dpl_54SwDppQ5MhE1XFZzUMRKt9NXhHQ`.
+- Edge `cortex` v50 ACTIVE из `6a6a9dc`; 11 исходников совпадают с кандидатом, статус отвечает. Откат — исходники v49 из `8e56d8a`.
+- Ветка `release/cortex-20261120` от `6a6a9dc`: Android beta.11 (128), панель уточнения для приостановленных задач, отдельное состояние островка, отмена и срок ответа. Проверки Android WebView прошли локально. Подписанную сборку выпускает основной GitHub Actions после проверок PR. Физическое устройство ещё не проверено.
+
 ## 2026-11-20 UTC · PR #100: prompt-leak guard + Android exposure review
 
 - Client: `SECRECY` line in the client context; `Cortex.guardReply()` canary (13 phrases unique to client/server instructions, case/ё/whitespace-normalised) replaces leaked replies with a refusal at stream paint, final save and stop. Test `qa/prompt-secrecy.test.mjs`.

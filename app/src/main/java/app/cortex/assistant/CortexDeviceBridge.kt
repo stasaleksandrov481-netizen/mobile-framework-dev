@@ -135,19 +135,23 @@ internal class CortexDeviceBridge(
                 CortexSchedule.clearDraft(source)
                 CortexActionEngine.clearPaused(source)
             }
+            "action-clarification-dismiss" -> CortexActionEngine.dismissClarification(
+                body.optString("source").take(100), body.optString("clarificationId").take(36))
             "action-start" -> {
                 val id = body.optString("id")
                 fun event(phase: String, text: String = "", ok: Boolean = false, resumable: Boolean = false,
-                          ephemeral: Boolean = false) =
+                          ephemeral: Boolean = false, clarificationId: String? = null) =
                     emit(JSONObject().put("type", "action").put("id", id).put("phase", phase).put("text", text)
                         .put("ok", ok).put("resumable", resumable).put("ephemeral", ephemeral)
+                        .put("clarificationId", clarificationId)
                         .put("external", !CortexRuntime.appVisible))
                 val handled = engine.start(body.optString("text"), body.optString("profile"),
                     force = body.optBoolean("force"), allowPhone = body.optBoolean("allowPhone", true),
                     source = body.optString("source", "chat").take(100),
+                    clarificationId = body.optString("clarificationId").take(36).ifBlank { null },
                     beforeScreen = { activity.moveTaskToBack(true) },
                     progress = { event("progress", it) }) { result ->
-                    event("result", result.text, result.ok, result.resumable, result.ephemeral)
+                    event("result", result.text, result.ok, result.resumable, result.ephemeral, result.clarificationId)
                 }
                 if (!handled) event("pass")
             }

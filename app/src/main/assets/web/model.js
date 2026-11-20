@@ -143,11 +143,16 @@ const Cortex = (() => {
   let guestImported = persisted.guestImported === true || Boolean(owner);
   const accountData = Object.assign(Object.create(null), object(persisted.accountData));
 
+  function savedMessages(messages) {
+    return array(messages).filter(message => !message.ephemeral)
+      .map(({ clarification, ...message }) => message);
+  }
+
   function localData(value, savedOnly = false) {
     return {
       edits: { cortex: object(value.edits?.cortex) },
       chats: array(value.chats).filter(item => item && (!savedOnly || item.saved))
-        .map(item => ({ ...item, messages: array(item.messages).filter(message => !message.ephemeral) })),
+        .map(item => ({ ...item, messages: savedMessages(item.messages) })),
       memories: object(value.memories),
       instructions: { ...object(value.instructions), cortex: object(value.instructions?.cortex) }
     };
@@ -177,7 +182,7 @@ const Cortex = (() => {
     try {
       localStorage.setItem(key, JSON.stringify({
         ...state, chats: state.chats.filter(chat => chat.saved)
-          .map(chat => ({ ...chat, messages: chat.messages.filter(message => !message.ephemeral) })),
+          .map(chat => ({ ...chat, messages: savedMessages(chat.messages) })),
         ...(legacyNotes.length ? { notes: legacyNotes } : {}), accountData, guestImported
       }));
       return true;

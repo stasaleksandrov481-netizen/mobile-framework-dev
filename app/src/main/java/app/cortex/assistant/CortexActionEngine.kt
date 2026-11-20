@@ -40,7 +40,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         turnContext.observeAnswer(answer, CortexScenarios.currentOwner(context).ifBlank { "guest" }, SystemClock.uptimeMillis())
     }
 
-    data class Result(val text: String, val ok: Boolean, val resumable: Boolean = false, val ephemeral: Boolean = false)
+    data class Result(
+        val text: String, val ok: Boolean, val resumable: Boolean = false,
+        val ephemeral: Boolean = false, val clarificationId: String? = null
+    )
 
     fun start(
         raw: String,
@@ -53,14 +56,24 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         scheduled: Boolean = false,
         explicitConversation: ConversationRequest? = null,
         explicitScenario: CortexScenarios.Scenario? = null,
+        clarificationId: String? = null,
         finished: (Result) -> Unit
     ): Boolean {
         val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
         val now = SystemClock.uptimeMillis()
-        val text = turnContext.resolve(raw.trim().take(2400), owner, now)
+        val clarification = clarificationId?.let { id ->
+            saved?.takeIf { it.clarificationId == id && it.owner == owner && it.source == source &&
+                now - it.pausedAt < CLARIFICATION_TIMEOUT_MS }
+        }
+        if (clarificationId != null && clarification == null) {
+            finished(Result("Уточнение уже закрыто. Повторите исходный запрос.", false))
+            return true
+        }
+        val input = raw.trim().take(2400)
+        val text = if (clarification != null) input else turnContext.resolve(input, owner, now)
         turnContext.observeUser(text, owner, now)
         CortexActionState.gateMessage()?.let { finished(Result(it, false)); return true }
-        if (!scheduled && !force && explicitScenario == null) {
+        if (clarification == null && !scheduled && !force && explicitScenario == null) {
             CortexNotificationJournal(context).answer(text)?.let {
                 finished(Result(it.text, true, ephemeral = it.ephemeral))
                 return true
@@ -70,14 +83,14 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 return true
             }
         }
-        if (!scheduled && !force && explicitScenario == null) {
+        if (clarification == null && !scheduled && !force && explicitScenario == null) {
             val screen = CortexScreenService.connected
             CortexDeviceContext.capabilities(text, allowPhone, screen != null && !screen.locked())?.let {
                 finished(Result(it, true))
                 return true
             }
         }
-        if (!scheduled) {
+        if (clarification == null && !scheduled) {
             CortexIslandService.handleControl(context, text)?.let {
                 finished(Result(it, true))
                 return true
@@ -87,7 +100,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 return true
             }
         }
-        val resumeText = VisualRequest.isResume(text)
+        val resumeText = clarification == null && VisualRequest.isResume(text)
         val network = NetworkRequest.parse(text)
         val command = VisualRequest.goal(text)
         val resolver = phone.commandAppResolver()
@@ -100,7 +113,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             (VisualRequest.isAction(text) || SCHOOL_ACTION.containsMatchIn(command))
         val action = conversation != null || search != null || schoolSite ||
             ConversationRequest.wantsMessage(command) || VisualRequest.isAction(text)
-        val scenario = explicitScenario ?: CortexScenarios.find(context, text)
+        val scenario = explicitScenario ?: if (clarification == null) CortexScenarios.find(context, text) else null
         val direct = when {
             schoolSite && SCHOOL_OPEN.containsMatchIn(command) && !SCHOOL_TASK.containsMatchIn(command) ->
                 listOf(schoolUrl(command))
@@ -108,13 +121,13 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             !resumeText -> parseSystem(command)
             else -> null
         }
-        val reply = saved?.takeIf { !resumeText && it.source == source && it.question.isNotBlank() &&
-            SystemClock.uptimeMillis() - it.pausedAt < 180_000L && text.length <= 2_000 &&
+        val reply = clarification ?: saved?.takeIf { !resumeText && it.owner == owner && it.source == source && it.question.isNotBlank() &&
+            now - it.pausedAt < CLARIFICATION_TIMEOUT_MS && text.length <= 2_000 &&
             (it.schoolSite && schoolBrowser(text).isNotBlank() || text.startsWith('«') || text.startsWith('"') ||
                 (!action && network == null && !text.endsWith('?')) ||
                 it.conversation?.let { pending -> pending.app.isBlank() && pending.withAnswer(text).app.isNotBlank() } == true) }
         if (!force && !resumeText && reply == null && scenario == null && network == null && direct == null && !action) return false
-        if (!allowPhone && (direct != null || network != null || scenario != null ||
+        if (!allowPhone && (clarification != null || direct != null || network != null || scenario != null ||
                 !preferences.getBoolean("visualAutomation", false))) {
             finished(Result("Команды телефона выключены в разделе «Вызов».", false))
             return true
@@ -128,10 +141,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val service = CortexScreenService.connected
         val visualAllowed = preferences.getBoolean("visualAutomation", false)
         val state = if (resumeText || reply != null) saved?.takeIf { paused ->
-            paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null
+            paused.owner == owner && (paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null)
         } else null
         val task = state?.copy(plans = 0, failures = linkedSetOf(), progress = CortexPlanTracker())
-            ?: Task(command, profile, source, conversation = conversation, search = search, schoolSite = schoolSite, scheduled = scheduled)
+            ?: Task(command, profile, source, owner, conversation = conversation, search = search, schoolSite = schoolSite, scheduled = scheduled)
         if (reply != null) {
             task.conversation = task.conversation?.withAnswer(text)
             if (task.conversation == null) {
@@ -139,6 +152,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 task.lastIssue = "Пользователь ответил на уточняющий вопрос: ${reply.question.take(180)}"
             }
             task.question = ""
+            task.clarificationId = null
             task.queue.clear()
             task.boundScreen = null
         }
@@ -221,7 +235,12 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     task.inFlight = null
                     task.pausedAt = SystemClock.uptimeMillis()
                     if (task.local && task.queue.isEmpty() && task.deferred.isEmpty()) preserve = false
-                    if (preserve && !preferences.getBoolean(CortexIslandService.WAKE_PAUSED, false)) saved = task
+                    if (preserve && !preferences.getBoolean(CortexIslandService.WAKE_PAUSED, false)) {
+                        task.clarificationId = task.question.takeIf { it.isNotBlank() && it == result.text && !scheduled }
+                            ?.let { java.util.UUID.randomUUID().toString() }
+                        saved = task
+                        result = result.copy(clarificationId = task.clarificationId)
+                    }
                 }
                 job = null
                 val phase = when {
@@ -1068,6 +1087,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var request: String,
         val profile: String,
         val source: String,
+        val owner: String,
         val queue: ArrayDeque<VisualStep> = ArrayDeque(),
         val failures: MutableSet<Attempt> = linkedSetOf(),
         val verified: ArrayDeque<String> = ArrayDeque(),
@@ -1081,6 +1101,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         var plans: Int = 0,
         var lastIssue: String = "",
         var question: String = "",
+        var clarificationId: String? = null,
         var modelUsed: Boolean = false,
         var progress: CortexPlanTracker = CortexPlanTracker(),
         var deferred: List<VisualStep> = emptyList(),
@@ -1099,11 +1120,15 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             "repeat" to "повторение", "run" to "вложенный сценарий", "variable" to "переменная")
         fun clearPaused() { saved = null }
         fun clearPaused(source: String) { if (saved?.source == source) saved = null }
+        fun dismissClarification(source: String, id: String) {
+            if (saved?.let { it.source == source && it.clarificationId == id } == true) saved = null
+        }
         fun canResume(source: String) = saved?.source == source
         private val RETRYABLE_PLAN_ERRORS = setOf("offline", "timeout", "server", "server_busy")
         private const val MAX_PLANS = 24
         private const val MAX_SCREEN_STEPS = 120
         private const val TASK_TIMEOUT_MS = 1_800_000L
+        internal const val CLARIFICATION_TIMEOUT_MS = 180_000L
         private val READ_ONLY = setOf("read_device")
         private val SCENARIO_SCREEN_STEPS = setOf("if", "tap", "swipe", "type", "wait", "point")
         private const val VISUAL_DISABLED = "Для этого действия нужны нажатия или чтение экрана. Их можно разрешить в «Вызов → Визуальное управление»."

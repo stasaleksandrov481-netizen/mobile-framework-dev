@@ -283,3 +283,24 @@
 #app .usage-rows dd { margin: 0; font-weight: 600; text-align: end; }
 #app .usage-note { margin: 0; color: var(--ui-text-3); font-size: 12.5px; }
 #app .usage-sheet .action { width: 100%; }
+.clarification-panel {
+  align-self: stretch;
+  padding: 16px;
+  border: 1px solid var(--line, #363636);
+  border-radius: 16px;
+  background: var(--surface, #171717);
+}
+.clarification-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.clarification-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}

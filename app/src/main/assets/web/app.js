@@ -1016,12 +1016,13 @@
           if (activeChat(job) && appVisible()) render({ bottom: true });
         } else if (value.phase === "result") {
           done({ text: value.text, local: true, external: value.external === true || !appVisible(),
-            resumable: value.resumable === true, ephemeral: value.ephemeral === true });
+            resumable: value.resumable === true, ephemeral: value.ephemeral === true,
+            clarificationId: typeof value.clarificationId === "string" ? value.clarificationId : "" });
         } else done(null);
       });
       job.controller.signal.addEventListener("abort", cancel, { once: true });
       if (!sendDevice("action-start", { id, text, profile: S.preferences.model, force: job.force,
-        allowPhone: S.preferences.phoneActions, source: job.chatId })) done(null);
+        allowPhone: S.preferences.phoneActions, source: job.chatId, clarificationId: job.clarificationId })) done(null);
     });
   }
 
@@ -1086,31 +1087,43 @@
   async function answer(chat, text, { retry = false, from, voiceTurn, explain = false, includeScreen = true, force = false } = {}) {
     if (!chat || !text || pending) return;
     if (voiceTurn && voice === voiceTurn) voiceStatus("thinking", "Думаю…");
+    const question = chat.messages.at(-1)?.clarification;
     if (!retry) {
       if (!chat.messages.length) chat.title = text.replace(/\s+/g, " ").slice(0, 72);
       chat.messages.push({ role: "user", text });
       drafts.delete(chat.id);
     }
-    const attachment = includeScreen && screenContext?.attached ? { app: screenContext.app, text: screenContext.text } : null;
+    const attachment = includeScreen && !question && screenContext?.attached ? { app: screenContext.app, text: screenContext.text } : null;
     if (attachment) { screenContext = null; refreshScreen(); }
     errors.delete(chat.id);
     M.touch(chat);
     if (chat.saved) saved();
-    const job = { chatId: chat.id, text: "", completed: false, renderTimer: 0, controller: new AbortController(), voice: voiceTurn, explain, force, screen: attachment };
+    const clarificationId = !retry && !explain ? question?.id : undefined;
+    const job = { chatId: chat.id, text: "", completed: false, renderTimer: 0, controller: new AbortController(),
+      voice: voiceTurn, explain, force, screen: attachment, clarificationId };
     pending = job;
     if (from) navigate("chat", { id: chat.id, origin: from, messageEnter: true });
     else if (activeChat(job)) render({ bottom: true, messageEnter: !retry });
     historyItems();
     try {
-      const localReply = retry ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
+      const localReply = retry || clarificationId ? null : wakeCommand(text) ?? islandCommand(text) ?? M.memoryCommand(text);
       const outcome = localReply === null ? await respond(chat, job) : { text: localReply, local: true };
       if (pending !== job) return;
       if (!outcome.text?.trim()) throw Api.failure("empty");
       if (outcome.local) chat.messages.at(-1).local = true;
       if (outcome.ephemeral) chat.messages.at(-1).ephemeral = true;
       if (!outcome.local) outcome.text = M.guardReply(outcome.text);
-      chat.messages.push({ role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
-        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && { resumable: true }) });
+      const message = { role: "assistant", text: outcome.text, ...(job.webSearching && { webSearch: true }), ...(outcome.local && { local: true }),
+        ...(outcome.ephemeral && { ephemeral: true }), ...(outcome.resumable && !outcome.clarificationId && { resumable: true }) };
+      if (outcome.clarificationId) {
+        message.clarification = { id: outcome.clarificationId };
+        setTimeout(() => {
+          if (message.clarification?.id !== outcome.clarificationId) return;
+          delete message.clarification;
+          if (activeChat(job)) render();
+        }, 180000);
+      }
+      chat.messages.push(message);
       job.completed = true;
       M.touch(chat);
       const memorized = localReply === null && !outcome.local && M.learnFromUser(text);
@@ -1738,6 +1751,14 @@
     regenerate,
     "feedback-up": index => rateAnswer(index, "up"),
     "feedback-down": index => rateAnswer(index, "down"),
+    "clarification-focus"() { input.focus(); },
+    "clarification-dismiss"() {
+      const chat = current(), message = chat?.messages.at(-1);
+      if (!message?.clarification || pending) return;
+      sendDevice("action-clarification-dismiss", { source: chat.id, clarificationId: message.clarification.id });
+      delete message.clarification;
+      render();
+    },
     "refine-answer": index => {
       const message = current()?.messages[Number(index)];
       if (!message || message.role !== "assistant") return;

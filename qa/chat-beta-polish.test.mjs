@@ -70,6 +70,21 @@ test("call and scenarios are primary tabs and the empty chat keeps its mark", ()
   assert.doesNotMatch(markup, /На связи|chat-empty-signal/);
 });
 
+test("a clarification offers reply and dismiss only while it is the latest turn", () => {
+  const { ui, model, saved } = fixture();
+  const chat = model.createChat(true);
+  chat.messages.push({ role: "assistant", text: "В каком браузере открыть сайт?",
+    local: true, clarification: { id: "local-task-id" } });
+  const markup = () => ui.page("chat", { chat, pending: null, error: null });
+  assert.match(markup(), /class="clarification-panel"/);
+  assert.match(markup(), /data-action="clarification-focus"/);
+  assert.match(markup(), /data-action="clarification-dismiss"/);
+  model.save();
+  assert.doesNotMatch(saved.get("cortex.interface.v2"), /local-task-id/);
+  chat.messages.push({ role: "user", text: "В Chrome." });
+  assert.doesNotMatch(markup(), /class="clarification-panel"/);
+});
+
 test("call settings keep normal commands independent from beta screen control", () => {
   const { ui, model } = fixture();
   assert.equal(model.state.preferences.phoneActions, true);

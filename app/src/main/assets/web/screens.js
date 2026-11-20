@@ -167,6 +167,15 @@ const CortexUI = (() => {
     const item = ctx.chat;
     const messages = (item?.messages || []).map((message, index) => message.role === "user"
       ? `<article class="message user${ctx.messageEnter && index === item.messages.length - 1 ? " new-turn" : ""}" aria-label="Вы">${esc(message.text)}</article>`
+      : message.clarification && !ctx.pending && index === item.messages.length - 1
+      ? `<section class="clarification-panel" aria-label="Уточнение CORTEX">
+        <h2>${icon("message", 16)} Уточнение</h2>
+        <div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
+        <div class="clarification-actions">
+          ${button("Ответить", "", "clarification-focus", "", "primary")}
+          ${button("Отменить уточнение", "", "clarification-dismiss", "", "outline")}
+        </div>
+      </section>`
       : `<article class="message assistant${ctx.messageEnter && index === item.messages.length - 1 ? " new-response" : ""}" aria-label="Ответ CORTEX">
         ${replyMark}${webSourceBadges(message.text, message.webSearch)}<div class="message-body markdown">${CortexMarkdown.render(message.text)}</div>
         ${message.resumable && index === item.messages.length - 1 ? button("Продолжить", "", "resume-visual", "", "outline") : ""}
