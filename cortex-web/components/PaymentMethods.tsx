@@ -138,15 +138,15 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
               <span className="payment-plan-price">{prices.length ? money.format((prices.find(p => p.code === item.code)?.price_kopecks || 0) / 100) : "—"}</span>
             </button>)}
           </div>
-          <p className="payment-hint">{price ? "Цена в рублях указана для оплаты через Platega после её подключения. При оплате Telegram Stars применяется отдельная цена в XTR." : "Точные цены временно не загрузились."}</p>
+          <p className="payment-hint">{price ? "Цена в рублях указана для оплаты через Robokassa после её подключения. При оплате Telegram Stars применяется отдельная цена в XTR." : "Точные цены временно не загрузились."}</p>
         </section>
 
         <section className="payment-panel" aria-labelledby="payment-method-title">
           <div className="payment-section-title"><span>02</span><h2 id="payment-method-title">Способ оплаты</h2></div>
           <div className="payment-options">
-            <div className="payment-option payment-option--unavailable" aria-label="Platega пока не подключена">
+            <div className="payment-option payment-option--unavailable" aria-label="Robokassa пока не подключена">
               <span className="payment-radio" aria-hidden="true" />
-              <span className="payment-option-body"><strong>Platega</strong><small>Оплата банковской картой</small></span>
+              <span className="payment-option-body"><strong>Robokassa</strong><small>Оплата банковской картой</small></span>
               <span className="payment-method-tag">Не подключена</span>
             </div>
             <div className={`payment-option ${starsAvailable ? "is-active" : "payment-option--unavailable"}`}
