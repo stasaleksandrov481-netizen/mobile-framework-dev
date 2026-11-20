@@ -1,3 +1,9 @@
+## 2026-11-20 UTC · CORTEX Control v2 interface (local, not pushed)
+
+- Branch `feat/cortex-control-hardening-20261117` (Vercel production source for `cortex-control`). Owner asked for a full admin redesign. Changes are UI-only: sidebar with brand/icons/operator card (role, copyable public ID, MFA session, sign-out), mobile top bar unchanged, one-line page header with section icon, overview with four headline KPIs (online with pulse, 24h devices, AI requests + model success rate, open tickets with jump link) plus a compact stat table and people lists, styled error state, support desk surfaces, site page without duplicate intro. No RPC, auth, MFA, RLS or data-flow changes.
+- QA: `node --test tests/*.test.js` 24/24; design stand `tests/preview/` (mock Supabase via esbuild alias, demo data only, output `preview-dist/` git-ignored, never part of `build.mjs`). Screens reviewed at 1440×900 and 393×852.
+- **Not pushed**: pushing this branch deploys admin production. Push only after owner approval.
+
 # Журнал изменений и передачи между ИИ-агентами
 
 Каждый агент **обновляет этот файл в том же PR**, где меняет код/документацию, либо отдельным PR, если действие выполнено вне GitHub. Всегда отмечать, **что реально попало в production**, а что осталось в PR.

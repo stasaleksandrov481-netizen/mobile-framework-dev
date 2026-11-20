@@ -29,6 +29,26 @@ const pageDescriptions = {
   audit: "История административных изменений."
 };
 const roles = { owner: "Владелец", admin: "Администратор", support: "Поддержка" };
+const iconPaths = {
+  overview: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  site: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>',
+  support: '<path d="M4 5h16v11H8l-4 4V5Z"/><path d="M8 9.5h8M8 12.5h5"/>',
+  updates: '<path d="M12 3v12m-4.5-4.5L12 15l4.5-4.5"/><path d="M4 17v3h16v-3"/>',
+  maintenance: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3l3.2 3.2 5.8-5.8a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6Z"/>',
+  beta: '<path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/>',
+  roles: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.4 3.3-5.3 6.5-5.3s5.7 1.9 6.5 5.3"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c2 .7 3.2 2.4 3.6 5.2"/>',
+  quota: '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 12 18.5 5.5M15 3.5A9 9 0 0 1 20.5 9"/>',
+  billing: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h4"/>',
+  audit: '<path d="M12 3 4.5 6v5.5c0 4.6 3 7.9 7.5 9.5 4.5-1.6 7.5-4.9 7.5-9.5V6L12 3Z"/><path d="m9.3 12 1.9 1.9 3.6-3.7"/>',
+  online: '<circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7"/>',
+  devices: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/>',
+  spark: '<path d="M12 3c.6 4.6 1.9 5.9 6.5 6.5-4.6.6-5.9 1.9-6.5 6.5-.6-4.6-1.9-5.9-6.5-6.5C10.1 8.9 11.4 7.6 12 3Z"/>',
+  logout: '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 17l-5-5 5-5M5 12h11"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8m0-5v5h5M4 13a8 8 0 0 0 14.3 4.9L20 16m0 5v-5h-5"/>'
+};
+const icon = (name, size = 18) => '<svg class="icon" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" ' +
+  'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  (iconPaths[name] || "") + '</svg>';
 const categories = { contact: "Вопрос", bug: "Ошибка", idea: "Идея", complaint: "Жалоба" };
 let user, role, factor, enrollment, ticket, tab = "overview";
 let renderVersion = 0, feedbackTimer;
@@ -184,15 +204,20 @@ function drawShell() {
       key === "updates" ? '<span class="nav-group">Управление сервисом</span>' :
       key === "audit" ? '<span class="nav-group">Безопасность</span>' : "";
     return group + '<button type="button" data-action="tab" data-value="' + key + '"' +
-      (key === tab ? ' aria-current="page"' : '') + '>' + labels[key] + '</button>';
+      (key === tab ? ' aria-current="page"' : '') + '>' + icon(key) + '<span>' + labels[key] + '</span></button>';
   }).join("");
   app.innerHTML = '<header class="top"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span>CORTEX <strong>CONTROL</strong></span></div>' +
     '<div class="top-status"><span class="status-dot"></span>Рабочая среда</div><span class="role">' +
     escape(roles[role]) + '</span>' + (ownId ? button("Мой ID · " + ownId, "copy-my-id") : "") +
     '<button type="button" class="menu-button" data-action="menu" aria-controls="mobile-nav" aria-expanded="false">Меню</button></header>' +
-    '<div class="layout"><aside><nav aria-label="Разделы">' + navigation + '</nav>' +
-    '<div class="sidebar-footer"><div class="sidebar-session"><span class="status-dot"></span>Защищённая сессия<div class="subtle">Автовыход через 30 минут бездействия</div></div>' +
-    button("Завершить сеанс", "logout") + '</div></aside>' +
+    '<div class="layout"><aside><div class="side-brand"><span class="brand-mark" aria-hidden="true">C</span>' +
+    '<span>CORTEX <strong>CONTROL</strong></span></div><nav aria-label="Разделы">' + navigation + '</nav>' +
+    '<div class="sidebar-footer"><div class="side-user"><span class="side-avatar" aria-hidden="true">' +
+    escape((user?.email || "C").slice(0, 1).toUpperCase()) + '</span><div><strong>' + escape(roles[role]) + '</strong>' +
+    (ownId ? '<button type="button" class="side-id" data-action="copy-my-id" data-value="" title="Скопировать ID">' + escape(ownId) + '</button>' :
+      '<span class="subtle">' + escape(user?.email || "") + '</span>') + '</div></div>' +
+    '<div class="sidebar-session"><span class="status-dot"></span>Защищённая сессия · MFA<div class="subtle">Автовыход через 30 минут бездействия</div></div>' +
+    '<button type="button" class="side-logout" data-action="logout" data-value="">' + icon("logout", 16) + '<span>Завершить сеанс</span></button></div></aside>' +
     '<main id="dashboard"><div class="page-loading" role="status">Загружаем раздел…</div></main></div>' +
     '<dialog id="mobile-nav" aria-label="Меню"><div class="dialog-head"><strong>CORTEX Control</strong>' +
     button("Закрыть", "close-menu") + '</div><nav aria-label="Разделы">' + navigation + '</nav>' + button("Выйти", "logout") + '</dialog>';
@@ -207,15 +232,19 @@ async function loadTab() {
   const page = tab, version = ++renderVersion;
   try {
     const html = await views[page]();
-    if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div><span class="overline">CORTEX CONTROL / ' +
-      escape(page.toUpperCase()) + '</span><h1>' + labels[page] + '</h1><p class="page-description">' +
-      escape(pageDescriptions[page] || "") + '</p></div>' +
+    if (version === renderVersion && main.isConnected) main.innerHTML = '<div class="page-heading"><div class="page-title">' +
+      '<span class="page-icon" aria-hidden="true">' + icon(page, 20) + '</span><div><h1>' + labels[page] + '</h1><p class="page-description">' +
+      escape(pageDescriptions[page] || "") + '</p></div></div>' +
       '<div class="heading-tools"><span class="muted">' + (page === "overview" ? "Автообновление раз в минуту" : "Обновлено " +
         new Date().toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow", hour: "2-digit", minute: "2-digit" }) + " МСК") +
-      '</span>' + button("Обновить", "refresh") + '</div></div>' + html;
+      '</span><button type="button" class="tool-button" data-action="refresh" data-value="">' + icon("refresh", 16) +
+      '<span>Обновить</span></button></div></div>' + html;
   } catch (error) {
     if (version === renderVersion && main.isConnected) {
-      main.innerHTML = '<h1>' + labels[page] + '</h1><p>' + safeError(error) + '</p>' + button("Повторить", "refresh");
+      main.innerHTML = '<div class="page-heading"><div class="page-title"><span class="page-icon" aria-hidden="true">' + icon(page, 20) +
+        '</span><div><h1>' + labels[page] + '</h1><p class="page-description">' + escape(pageDescriptions[page] || "") + '</p></div></div></div>' +
+        '<section class="card state-card" role="alert"><span class="state-icon" aria-hidden="true">!</span><div><h2>Раздел не загрузился</h2>' +
+        '<p>' + safeError(error) + '</p></div>' + button("Повторить", "refresh") + '</section>';
     }
   }
 }
@@ -230,24 +259,39 @@ async function overview() {
     opened_today: "Устройств открыли сегодня", accounts_today: "Аккаунтов открыли сегодня", launches_total: "Всего запусков",
     ai_requests_today: "Запросов к ИИ сегодня (новый учёт)", ai_requests_total: "Запросов к ИИ с 16 ноября",
     ai_attempts_today: "Обращений к моделям сегодня", ai_success_today: "Успешных ответов моделей сегодня" };
-  const cards = Object.entries(labels).map(([key, label]) =>
-    '<section class="metric-card"><span class="metric-label">' + escape(label) + '</span><strong class="count">' +
-    dateNumber(activity[key]) + '</strong></section>').join("");
-  const seen = (activity.online || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
-    escape(row.signed_in ? "Аккаунт" : "Гость") + ' · ' + date(row.last_seen_at) + ' МСК · ' + escape(row.version) + '</span></li>').join("");
-  const opened = (daily.data?.today || []).map(row => '<li><strong>' + escape(row.public_id) + '</strong><span>' +
-    date(row.opened_at) + ' МСК · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
+  const percent = (part, whole) => Number(whole) > 0 ? Math.round(Number(part) / Number(whole) * 1000) / 10 : null;
+  const success = percent(activity.ai_success_today, activity.ai_attempts_today);
+  const kpi = (name, label, value, note, tone = "") => '<section class="kpi ' + tone + '"><div class="kpi-head"><span class="kpi-icon">' +
+    icon(name, 18) + '</span><span class="metric-label">' + escape(label) + '</span></div><strong class="count">' + value +
+    '</strong><span class="kpi-note">' + note + '</span></section>';
+  const headline = kpi("online", "Сейчас в CORTEX", dateNumber(activity.online_devices),
+      '<span class="pulse" aria-hidden="true"></span>активны за 2 минуты', "is-live") +
+    kpi("devices", "Устройств за 24 часа", dateNumber(activity.opened_24h),
+      dateNumber(activity.new_today) + " впервые сегодня") +
+    kpi("spark", "Запросов к ИИ сегодня", dateNumber(activity.ai_requests_today),
+      success === null ? "Нет обращений к моделям" : String(success).replace(".", ",") + "% успешных ответов моделей") +
+    kpi("support", "Открытые обращения", dateNumber(activity.support_open),
+      '<button type="button" class="link-button" data-action="tab" data-value="support">Открыть обращения →</button>',
+      Number(activity.support_open) > 0 ? "is-attention" : "");
+  const secondary = Object.entries(labels).filter(([key]) => !["online_devices", "opened_24h", "ai_requests_today"].includes(key))
+    .map(([key, label]) => '<div><dt>' + escape(label) + '</dt><dd>' + dateNumber(activity[key]) + '</dd></div>').join("");
+  const person = row => '<span class="person"><span class="person-avatar" aria-hidden="true">' +
+    escape(String(row.public_id || "?").replace("@id", "").slice(-2)) + '</span><strong>' + escape(row.public_id) + '</strong></span>';
+  const seen = (activity.online || []).map(row => '<li>' + person(row) + '<span class="chip ' + (row.signed_in ? "chip-on" : "") + '">' +
+    escape(row.signed_in ? "Аккаунт" : "Гость") + '</span><span class="muted">' + shortDate(row.last_seen_at) + ' · ' +
+    escape(row.version) + '</span></li>').join("");
+  const opened = (daily.data?.today || []).map(row => '<li>' + person(row) + '<span class="muted">' + shortDate(row.opened_at) +
+    ' · ' + dateNumber(row.devices) + ' устр.</span></li>').join("");
   const dailyList = daily.error ? '<p>Не удалось загрузить список.</p>' : opened ?
-    '<ul class="record-list">' + opened + '</ul>' : '<p>Сегодня пока нет открытий с аккаунтом.</p>';
-  return '<div class="dashboard-intro"><div><span class="overline">ОБЩАЯ КАРТИНА</span><h2>Состояние CORTEX</h2>' +
-    '<p>Актуальные показатели, активность и обращения пользователей.</p></div><span class="live-badge"><span class="status-dot"></span>Live</span></div>' +
-    '<div class="metrics-grid">' + cards + '<section class="metric-card"><span class="metric-label">Открытые обращения</span><strong class="count">' + dateNumber(activity.support_open) + '</strong></section>' +
-    '</div><p class="data-note">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
-    'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
-    'старые записи не выдаются за достоверную статистику.</p>' +
-    '<div class="settings-grid">' +
-    card("Кто сейчас в CORTEX", seen ? '<ul class="record-list">' + seen + '</ul>' : '<p>Активных устройств сейчас нет.</p>') +
-    card("Кто открыл CORTEX сегодня", dailyList) + '</div>';
+    '<ul class="record-list people">' + opened + '</ul>' : '<p class="muted">Сегодня пока нет открытий с аккаунтом.</p>';
+  return '<div class="metrics-grid kpi-grid">' + headline + '</div>' +
+    '<div class="settings-grid overview-grid">' +
+    card("Кто сейчас в CORTEX", seen ? '<ul class="record-list people">' + seen + '</ul>' : '<p class="muted">Активных устройств сейчас нет.</p>') +
+    card("Кто открыл CORTEX сегодня", dailyList) + '</div>' +
+    card("Все показатели", '<dl class="stat-table">' + secondary + '</dl>' +
+      '<p class="data-note">Устройства считаются один раз. Активность: сигнал за последние 120 секунд. Время суток по Москве. ' +
+      'Обращение к модели и запрос пользователя считаются отдельно. Точный подсчёт запросов ведётся с 16 ноября 2026 года, ' +
+      'старые записи не выдаются за достоверную статистику.</p>');
 }
 
 async function site() {
@@ -273,9 +317,7 @@ async function site() {
   }).join("");
   const links = '<div class="actions site-actions"><a href="https://cortexapp.ru/" target="_blank" rel="noopener noreferrer">Открыть сайт</a>' +
     '<a href="https://cortexapp.ru/api/status" target="_blank" rel="noopener noreferrer">Проверить статус сайта</a></div>';
-  return '<div class="dashboard-intro"><div><span class="overline">CORTEX / WEB</span>' +
-    '<h2>Сайт cortexapp.ru</h2><p>Подтверждённые регистрации, аналитика и состояние сайта.</p></div></div>' +
-    '<div class="metrics-grid">' + summary + '</div>' +
+  return '<div class="metrics-grid">' + summary + '</div>' +
     '<div class="settings-grid">' + card("Регистрации за последние 7 дней", trend ? '<ul class="site-trend">' + trend + '</ul>' :
       '<p>Пока нет данных за период.</p>') +
     card("Посещения сайта", '<p>Счётчик уникальных посетителей пока не подключён. Здесь показаны только подтверждённые ' +
