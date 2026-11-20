@@ -126,8 +126,8 @@ test("Markdown adds same-origin site icon to safe citation links only", () => {
 test("assistant links are clickable only when Android can open them (HTTPS)", () => {
   const render = markdown();
   const result = render("[safe](https://cortexapp.ru/help) [plain](http://example.com/) http://example.org/x");
-  assert.match(result, /href="https:\/\/cortexapp\.ru\/help"/);
-  assert.doesNotMatch(result, /href="http:\/\//);
+  const links = Array.from(result.matchAll(/href="([^"]*)"/g), match => match[1]);
+  assert.deepEqual(links, ["https://cortexapp.ru/help"]);
   assert.match(result, /example\.com/);
 });
 
@@ -188,7 +188,7 @@ test("hero, chart, flow and details render only validated data", () => {
     labels: ["Пн", "\"><script>"], series: [{ name: "A", values: [3, 7] }] }) + "\n```");
   assert.match(chart, /<svg viewBox="0 0 320 150" class="md-plot"/);
   assert.equal((chart.match(/<rect /g) || []).length, 2);
-  assert.doesNotMatch(chart, /<script>/);
+  assert.doesNotMatch(chart, /<script\b/i);
   assert.match(chart, /&quot;&gt;&lt;script&gt;/);
   const donut = render("```cortex-chart\n" + JSON.stringify({ type: "donut", labels: ["A", "B"], series: [{ values: [1, 3] }] }) + "\n```");
   assert.match(donut, /class="md-donut"/);
