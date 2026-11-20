@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · Silk design rebased onto the live release and deployed
+
+- Branch `release/cortex-web-silk-20261120` = `origin/release/cortex-web-20261120` (live `62b3dd6`, support chat, checkout, Stars availability, token tab) + silk hero, glow controls, lit-rim cards, document contents, compact phone layouts.
+- Pricing: Guest removed from the site (filtered on the page, removed from terms); short copy, number-first cards, no "recommended" label; the `PricingPanels` token tab and `PricingBuyButton` are kept.
+- Checks: `tsc`, 51/51 site tests, `next build`, `release:verify` OK; production build checked at 1280x800. API and lib are byte-identical to the live release.
+- Owner asked for this deploy in chat. Rollback candidate: `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB` (previous production).
+
 ## 2026-11-20 UTC · Site: silk hero, glow controls, documents, compact phone layouts
 
 Branch `feat/cortex-web-black-glass-20261120`, local commit only. Nothing deployed to Vercel.
