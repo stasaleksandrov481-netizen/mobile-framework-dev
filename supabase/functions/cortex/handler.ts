@@ -787,7 +787,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
           const reader = upstream.body?.getReader();
           if (!reader) throw new Failure("speech_unavailable", 502);
           let bytes = 0;
-          let closed = false;
+          let closing: Promise<void> | undefined;
           const settle = async () => {
             const generated = bytes > 0;
             const audioSeconds = bytes / 48_000;
@@ -798,18 +798,17 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 : { p_attempt: hold.attempt, p_input: generated ? inputUnits : null,
                   p_output: generated ? outputUnits : null }).catch(() => {});
           };
-          const close = async () => {
-            if (closed) return;
-            closed = true;
-            await reader.cancel().catch(() => {});
+          const close = () => closing ??= (async () => {
+            // Closing the consumer settles its quota even if upstream is slow to acknowledge cancellation.
+            void reader.cancel().catch(() => {});
             reader.releaseLock();
             await settle();
-          };
+          })();
           const stream = new ReadableStream<Uint8Array>({
             async pull(controller) {
               try {
                 const part = await reader.read();
-                if (closed) return;
+                if (closing) return;
                 if (part.done) {
                   if (!bytes || bytes % 2) throw new Error("invalid_pcm");
                   await close();
@@ -820,7 +819,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
                 bytes += part.value.byteLength;
                 controller.enqueue(part.value);
               } catch (error) {
-                if (!closed) controller.error(error);
+                if (!closing) controller.error(error);
                 await close();
               }
             },

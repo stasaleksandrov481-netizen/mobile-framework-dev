@@ -1,5 +1,11 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-20 UTC · Кандидат потоковой озвучки Android
+
+- В [PR #108](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/108) вошли Android и Edge. База `f4e0e3c` побайтно совпала с 11 файлами действующего `cortex` ACTIVE v50, `verify_jwt=false`. Этот комплект сохраняет состояние для отката.
+- В кандидате Edge изменены `handler.ts`, `provider.ts` и `singleflight.ts`. Остальные 8 файлов совпадают с v50. Миграций БД нет. `text_ready` совместим с beta.11, которая игнорирует незнакомый статус.
+- Публичный APK `v1.0.18-beta.11`, versionCode 128. Обновления Android и Edge подготовлены в PR. Фактическая задержка синтеза и точность распознавания зависят от речевого движка, телефона и сети.
+
 ## 2026-11-20 UTC · Итоги проверки сайта и Android
 
 - Веб-релиз `fe6630a` опубликован из `fix/cortex-web-quality-20261120`: Vercel `dpl_4KtfshurZ7wriji7neTZ8VFSkRNZ`, алиасы `cortexapp.ru` и `www.cortexapp.ru`. Откат: `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB` (`62b3dd6`).

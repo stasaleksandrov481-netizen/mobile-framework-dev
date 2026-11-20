@@ -181,6 +181,7 @@ internal class CortexDeviceBridge(
             "voice-cancel" -> speech.cancel(body.optString("id"))
             "voice-speak" -> {
                 val id = body.optString("id").take(90)
+                if (!CortexRuntime.appVisible) return
                 activeVoice = id
                 voiceOutput.speak(body.optString("text"), started = {
                     if (activeVoice == id) emit(JSONObject().put("type", "voice-output-start").put("id", id))

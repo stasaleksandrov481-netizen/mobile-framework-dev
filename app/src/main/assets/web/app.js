@@ -1507,6 +1507,7 @@
   }
 
   function voiceReplyReady(job, answer) {
+    if (!appVisible()) { closeVoice(); return; }
     if (!S.preferences.voiceReplies) { voiceSpoken(job, false); return; }
     const text = answer.trim().slice(0, 550);
     if (job.lead) {
@@ -2145,7 +2146,8 @@
     splashPrevious = null;
     const hidden = document.hidden || window.cortexAppVisible === false;
     document.documentElement.classList.toggle("app-background", hidden);
-    if (!hidden) {
+    if (hidden) closeVoice();
+    else {
       // Pick up voice-only island changes made while the WebView was backgrounded.
       syncIslandOptions();
       if (["profile", "models", "account"].includes(route)) refreshConnection();

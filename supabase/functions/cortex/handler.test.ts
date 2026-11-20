@@ -64,11 +64,15 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       if (speechLiteStatus && body.model === "google/gemini-3.8-flash-lite-tts") return new Response(null, { status: speechLiteStatus });
       if (streamedGemini) {
         const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
-        return new Response(new ReadableStream({ pull(controller) {
-          const chunk = chunks.shift();
-          if (chunk) controller.enqueue(chunk);
-          else controller.close();
-        } }), { headers: { "content-type": "application/octet-stream" } });
+        return new Response(new ReadableStream({
+          pull(controller) {
+            const chunk = chunks.shift();
+            if (chunk) controller.enqueue(chunk);
+            else controller.close();
+          },
+          // A slow provider cancel must not hold the client's quota reservation.
+          cancel: () => new Promise<void>(() => {}),
+        }), { headers: { "content-type": "application/octet-stream" } });
       }
       return new Response(speechPcm, { headers: { "content-type": "application/octet-stream" } });
     }

@@ -48,7 +48,7 @@ test("island editor and background voice share native settings", () => {
   assert.match(source("app.js"), /islandCommand\(text\)/);
   assert.doesNotMatch(source("app.js"), /memoryReply/);
   assert.match(source("app.js"), /sendDevice\("island-style-ack"\)/);
-  assert.match(source("app.js"), /if \(!hidden\) \{\s*\/\/ Pick up voice-only island changes/);
+  assert.match(source("app.js"), /if \(hidden\) closeVoice\(\);\s*else \{\s*\/\/ Pick up voice-only island changes/);
   assert.match(kotlin("IslandAssistant.kt"), /IslandAppearanceCommands\.apply\(context, text\)/);
   assert.match(kotlin("CortexIslandBridge.kt"), /island-style-sync/);
   assert.match(kotlin("CortexIslandBridge.kt"), /"island-style-ack" -> prefs\.edit\(\)/);
