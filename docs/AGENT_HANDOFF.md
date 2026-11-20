@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · Устойчивость команд Android
+
+- База Android: опубликованная beta.11, `44501c5`; ветка `fix/cortex-android-reliability-20261120`.
+- Сбой уведомлений или слушателя статуса не останавливает команду. Ошибки снятия подсветки, локального журнала и закрытия диалога больше не прерывают обработку результата.
+- Границы слов в командах мессенджеров заданы явно для кириллицы. При поиске системного приложения учитываются обработчики роли без CATEGORY_DEFAULT. Вопросительные знаки и многоточия не мешают распознаванию роли.
+- В AGENTS.md закреплены четыре предоставленных скилла. Изменения проверяются отдельно от веб-релиза, выпуск подписанного APK требует проверки Android CI и устройства. Публичная версия приложения по этому изменению не повышалась.
+
 ## 2026-11-20 UTC · PR #100: one male voice, reliable wake word
 
 - Server (`handler.ts`): `/v1/speech` always uses Gemini voice `Charon` (male); no longer reads `cortex_voice_preferences` (default was female `Kore`, legacy rows differed per account). Edge tests updated, local `node --experimental-transform-types --test` 78/78. **Not deployed** — redeploy Edge `cortex` only after the standard checks and owner approval. The table/migration are left untouched (no DB change).

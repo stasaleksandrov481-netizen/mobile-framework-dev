@@ -82,21 +82,29 @@ internal object CortexActionState {
         if (!active) cancel = null
         val next = Status(phase, message.take(180), if (showResult) message.take(4_000) else "")
         status = next
-        listener?.invoke(next)
-        val manager = context.getSystemService(NotificationManager::class.java)
-        if (!active) {
-            manager.cancel(NOTIFICATION)
-        } else if (manager.areNotificationsEnabled()) {
-            manager.createNotificationChannel(NotificationChannel("cortex-actions", "Задачи CORTEX", NotificationManager.IMPORTANCE_LOW))
-            val stop = PendingIntent.getBroadcast(context, 15, Intent(context, CortexStopReceiver::class.java),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val open = PendingIntent.getActivity(context, 16, Intent(context, MainActivity::class.java),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            val notification = Notification.Builder(context, "cortex-actions").setSmallIcon(R.drawable.ic_cortex)
-                .setContentTitle("CORTEX выполняет задачу").setContentText(message).setContentIntent(open)
-                .setOnlyAlertOnce(true).setOngoing(true).setVisibility(Notification.VISIBILITY_PRIVATE)
-                .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()
-            runCatching { manager.notify(NOTIFICATION, notification) }
+        runCatching { listener?.invoke(next) }.onFailure {
+            android.util.Log.w("CortexActions", "Status listener failed: ${it.javaClass.simpleName}")
+        }
+        // Notifications are optional feedback. An OEM service or a permission
+        // change must not interrupt the phone task or hide its final result.
+        runCatching {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return@runCatching
+            if (!active) {
+                manager.cancel(NOTIFICATION)
+            } else if (manager.areNotificationsEnabled()) {
+                manager.createNotificationChannel(NotificationChannel("cortex-actions", "Задачи CORTEX", NotificationManager.IMPORTANCE_LOW))
+                val stop = PendingIntent.getBroadcast(context, 15, Intent(context, CortexStopReceiver::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                val open = PendingIntent.getActivity(context, 16, Intent(context, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                val notification = Notification.Builder(context, "cortex-actions").setSmallIcon(R.drawable.ic_cortex)
+                    .setContentTitle("CORTEX выполняет задачу").setContentText(message).setContentIntent(open)
+                    .setOnlyAlertOnce(true).setOngoing(true).setVisibility(Notification.VISIBILITY_PRIVATE)
+                    .addAction(Notification.Action.Builder(null, "Остановить", stop).build()).build()
+                manager.notify(NOTIFICATION, notification)
+            }
+        }.onFailure {
+            android.util.Log.w("CortexActions", "Task notification failed: ${it.javaClass.simpleName}")
         }
     }
 
@@ -139,8 +147,9 @@ internal object CortexConfirmation {
     fun respond(id: String, accepted: Boolean) {
         val current = prompt?.takeIf { it.id == id } ?: return
         prompt = null
-        dismiss?.invoke()
+        val close = dismiss
         dismiss = null
+        runCatching { close?.invoke() }
         current.done(accepted)
     }
 

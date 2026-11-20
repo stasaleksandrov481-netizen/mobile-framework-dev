@@ -222,7 +222,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 preserve = task.completed > 0 || task.queue.isNotEmpty() || task.plans > 0
                 result = Result("Не удалось получить подтверждение Android. Можно продолжить с текущего экрана.", false, preserve)
             } finally {
-                if (!result.ok) service?.stopTouch()
+                if (!result.ok) runCatching { service?.stopTouch() }
                 task.recognized = null
                 if (preserve) {
                     task.inFlight?.let { interrupted ->
@@ -250,8 +250,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     else -> "error"
                 }
                 val status = result.text
-                CortexActionState.log(context, if (result.ok) "Команда выполнена · шагов экрана: ${task.completed}"
-                    else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
+                runCatching {
+                    CortexActionState.log(context, if (result.ok) "Команда выполнена · шагов экрана: ${task.completed}"
+                        else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
+                }
                 CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible)
                 turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
                 finished(result)

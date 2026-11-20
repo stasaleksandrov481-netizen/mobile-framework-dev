@@ -13,7 +13,7 @@ class CortexAppRolesTest {
             "почту" to Role.EMAIL, "карты" to Role.MAPS, "музыку" to Role.MUSIC, "браузер" to Role.BROWSER,
             "проводник" to Role.FILES, "Мои файлы" to Role.FILES, "файловый  менеджер" to Role.FILES,
             "калькулятор" to Role.CALCULATOR, "настройки телефона" to Role.SETTINGS, "«Настройки»" to Role.SETTINGS,
-            "приложение галерея" to Role.GALLERY
+            "приложение галерея" to Role.GALLERY, "Проводник?" to Role.FILES, "календарь…" to Role.CALENDAR
         ).forEach { (spoken, role) -> assertEquals(spoken, role, CortexAppRoles.role(spoken)) }
     }
 

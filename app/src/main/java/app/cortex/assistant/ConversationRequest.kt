@@ -25,14 +25,17 @@ internal data class ConversationRequest(
     }
 
     companion object {
-        private val appName = Regex("""(?:^|[\s,])(?:открой|запусти|open)\s+(?:приложение\s+)?(.+?)(?=\s*(?:[,;]|\s+(?:и\s+)?(?:зайди|перейди|найди|открой\s+(?:чат|переписку)|напиши|отправь)\b)|$)""", RegexOption.IGNORE_CASE)
+        // JVM and Android regex engines differ on Cyrillic word boundaries.
+        private const val WORD_START = """(?<![\p{L}\p{M}\p{N}_])"""
+        private const val WORD_END = """(?![\p{L}\p{M}\p{N}_])"""
+        private val appName = Regex("""(?:^|[\s,])(?:открой|запусти|open)\s+(?:приложение\s+)?(.+?)(?=\s*(?:[,;]|\s+(?:и\s+)?(?:зайди|перейди|найди|открой\s+(?:чат|переписку)|напиши|отправь)${WORD_END})|$)""", RegexOption.IGNORE_CASE)
         private val quoted = Regex("""«([^»]+)»|„([^“]+)“|"([^"]+)"""")
-        private val appIn = Regex("""\b(?:в|in)\s+([\p{L}\p{N}._ -]+?)(?=\s*[,;:]|\s+(?:и\s+)?(?:найди|зайди|напиши|отправь|контакту|пользователю)\b|$)""", RegexOption.IGNORE_CASE)
-        private val chatName = Regex("""(?:чат|переписк\p{L}*|диалог|личку|chat)\s+(?:с\s+|with\s+)?(.+?)(?=\s*(?:[,;:]|\s+(?:и\s+)?(?:напиши|отправь|введи|набери|подготовь)\b)|$)""", RegexOption.IGNORE_CASE)
-        private val explanatory = Regex("""^(?:как|почему|объясни|подскажи как|how|why|explain)\b""")
-        private val to = Regex("""\b(?:напиши|отправь)\s+(?:(?:сообщение|текст)\s+)?(?:контакту\s+|пользователю\s+)?(.+?)(?=\s*(?:\b(?:в|in)\s+|[:«"]))""", RegexOption.IGNORE_CASE)
+        private val appIn = Regex("""${WORD_START}(?:в|in)\s+([\p{L}\p{N}._ -]+?)(?=\s*[,;:]|\s+(?:и\s+)?(?:найди|зайди|напиши|отправь|контакту|пользователю)${WORD_END}|$)""", RegexOption.IGNORE_CASE)
+        private val chatName = Regex("""(?:чат|переписк\p{L}*|диалог|личку|chat)\s+(?:с\s+|with\s+)?(.+?)(?=\s*(?:[,;:]|\s+(?:и\s+)?(?:напиши|отправь|введи|набери|подготовь)${WORD_END})|$)""", RegexOption.IGNORE_CASE)
+        private val explanatory = Regex("""^(?:как|почему|объясни|подскажи как|how|why|explain)${WORD_END}""")
+        private val to = Regex("""${WORD_START}(?:напиши|отправь)\s+(?:(?:сообщение|текст)\s+)?(?:контакту\s+|пользователю\s+)?(.+?)(?=\s*(?:${WORD_START}(?:в|in)\s+|[:«"]))""", RegexOption.IGNORE_CASE)
         private val composing = Regex("""(?<![\p{L}\p{N}_])(?:напиши|отправь|скинь|передай|набери|подготовь|введи|send|write)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
-        private val messageMarker = Regex("""\b(?:напиши|отправь|набери|подготовь|введи|send|write)\s*(?:сообщение|текст)?\s*[:—]?\s*(.*)""", RegexOption.IGNORE_CASE)
+        private val messageMarker = Regex("""${WORD_START}(?:напиши|отправь|набери|подготовь|введи|send|write)\s*(?:сообщение|текст)?\s*[:—]?\s*(.*)""", RegexOption.IGNORE_CASE)
         private val draft = Regex("""(?<![\p{L}\p{N}_])(?:черновик|не\s+отправляй|без\s+отправки|draft)(?![\p{L}\p{N}_])""", RegexOption.IGNORE_CASE)
         private val genericRecipient = Regex("""^(?:друг\p{L}*|подруг\p{L}*|контакт\p{L}*|человек\p{L}*|собеседник\p{L}*|кому нибудь|с кем нибудь|friend|contact)$""")
 
@@ -41,7 +44,7 @@ internal data class ConversationRequest(
         private val address = Regex("""^(@[a-zA-Z0-9_.]{3,64})\s*(?:[:—,]\s*|\s+)(.+)$""")
         private val named = Regex("""^(.{1,90}?)\s*[:—]\s*(.+)$""")
         private val greeting = Regex("""(?iu)^(привет|спасибо|поздравления)\s+(@?[\p{L}\p{N}._-]+(?:\s+[\p{L}\p{N}._-]+)?)\s*[.!]?$""")
-        private val messageIntent = Regex("""(?iu)^(?:(?:можешь|пожалуйста|давай)[,\s]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение\b|контакту\b|пользователю\b|@[a-zA-Z0-9_]|.+\s+(?:в|через)\s+(?:телеграм\p{L}*|тг|whatsapp|ватсап\p{L}*|мессенджер\p{L}*))""")
+        private val messageIntent = Regex("""(?iu)^(?:(?:можешь|пожалуйста|давай)[,\s]+)*(?:напиши|отправь|скинь|передай)\s+(?:сообщение${WORD_END}|контакту${WORD_END}|пользователю${WORD_END}|@[a-zA-Z0-9_]|.+\s+(?:в|через)\s+(?:телеграм\p{L}*|тг|whatsapp|ватсап\p{L}*|мессенджер\p{L}*))""")
 
         fun wantsMessage(raw: String): Boolean {
             val text = CortexHotword.command(raw) ?: raw.trim()

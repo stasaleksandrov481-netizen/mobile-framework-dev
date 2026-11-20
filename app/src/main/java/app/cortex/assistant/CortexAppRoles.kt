@@ -28,7 +28,7 @@ internal object CortexAppRoles {
     )
 
     fun role(target: String): Role? {
-        val clean = target.lowercase(Locale.ROOT).replace('ё', 'е').trim().trim('«', '»', '"', '.', '!')
+        val clean = target.lowercase(Locale.ROOT).replace('ё', 'е').trim().trim('«', '»', '"', '.', '!', '?', '…')
             .replace(Regex("""\s+"""), " ").removePrefix("приложение ").removePrefix("app ")
         return names.entries.firstOrNull { clean in it.value }?.key
     }
