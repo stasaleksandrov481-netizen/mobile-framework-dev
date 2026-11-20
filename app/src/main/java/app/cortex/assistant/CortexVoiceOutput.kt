@@ -179,6 +179,15 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                                 return@post
                             }
                         }
+                        // Stay close to the cloud voice (male): pick a male Russian system voice when the engine names one.
+                        runCatching {
+                            val voices = voice.voices.orEmpty()
+                            val online = applicationContext.getSystemService(android.net.ConnectivityManager::class.java)?.activeNetwork != null
+                            CortexVoicePick.choose(voices.map {
+                                CortexVoicePick.Candidate(it.name, it.locale,
+                                    TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features, it.isNetworkConnectionRequired)
+                            }, online)?.let { chosen -> voices.firstOrNull { it.name == chosen.name }?.let { voice.voice = it } }
+                        }
                         voice.setAudioAttributes(AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_ASSISTANT)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())

@@ -21,7 +21,9 @@ const FREE_MODEL = /^[a-z0-9._-]+\/[a-z0-9._-]+:free$/;
 const JSON_HEADERS = {
   "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
 };
-const GEMINI_VOICES = new Set(["Kore", "Puck", "Charon"]);
+// Owner decision 2026-11-20: CORTEX always speaks with one male voice, regardless
+// of older per-account rows in cortex_voice_preferences (default was female "Kore").
+const CORTEX_VOICE = "Charon";
 
 type Env = Record<string, string | undefined>;
 type Limit = { bucket: string; seconds: number; maximum: number };
@@ -718,17 +720,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
             Math.floor(Number(env.CORTEX_SPEECH_GLOBAL_DAILY_LIMIT) || 500))) },
         );
         const wantsStream = request.headers.get("x-cortex-audio-stream") === "pcm_s16le_24000_mono";
-        const [key, voiceSettings, identity, access] = await Promise.all([
+        const [key, identity, access] = await Promise.all([
           paidKey ? Promise.resolve(paidKey) : providerKey().catch(() => ""),
-          wantsStream ? database<Array<{ voice_id: string }>>(
-            "cortex_voice_preferences?select=voice_id&user_id=eq." + caller.account.id + "&limit=1")
-            .catch(() => []) : Promise.resolve([]),
           aiIdentity(request, caller.account),
           usage(request, caller.account),
         ]);
         if (!key) throw new Failure("unconfigured", 503);
-        const requestedVoice = voiceSettings[0]?.voice_id;
-        const speechVoice = requestedVoice && GEMINI_VOICES.has(requestedVoice) ? requestedVoice : "Kore";
+        const speechVoice = CORTEX_VOICE;
         // Charge TTS against the same daily token ledger as chat. TTS providers
         // do not expose text-model token counts, so this is a deterministic
         // service-token equivalent based on UTF-8 input length. Never accept

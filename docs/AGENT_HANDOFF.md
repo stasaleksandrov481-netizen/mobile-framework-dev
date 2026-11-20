@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · PR #100: one male voice, reliable wake word
+
+- Server (`handler.ts`): `/v1/speech` always uses Gemini voice `Charon` (male); no longer reads `cortex_voice_preferences` (default was female `Kore`, legacy rows differed per account). Edge tests updated, local `node --experimental-transform-types --test` 78/78. **Not deployed** — redeploy Edge `cortex` only after the standard checks and owner approval. The table/migration are left untouched (no DB change).
+- Android TTS fallback: `CortexVoicePick` chooses an installed male `ru` voice when the engine names gender (Google `#male_N`, RHVoice male speakers), else engine default. Test `CortexVoicePickTest`. Gender detection is heuristic; not verified on devices.
+- Wake word: `CortexHotword` matches on a lower-cased copy (ICU `IGNORE_CASE` Cyrillic folding is not guaranteed; final results are often capitalised), adds common misrecognitions and fillers. Test `CortexHotwordTest` (incl. negatives «Кортеж», «кортексный», mid-sentence mention). Wake remains API 31+ on-device only by design; the error message now states the Android 12 requirement or how to install offline Russian recognition.
+- Not changed: fallback timing (10 s without first cloud chunk → Android voice).
+
 ## 2026-11-20 UTC · PR #100: prompt-leak guard + Android exposure review
 
 - Client: `SECRECY` line in the client context; `Cortex.guardReply()` canary (13 phrases unique to client/server instructions, case/ё/whitespace-normalised) replaces leaked replies with a refusal at stream paint, final save and stop. Test `qa/prompt-secrecy.test.mjs`.

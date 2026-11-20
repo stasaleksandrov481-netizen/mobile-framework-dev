@@ -60,7 +60,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       assert.equal(new Headers(init?.headers).get("Authorization"), paid ? "Bearer test-paid-key" : "Bearer test-key");
       assert.ok(["google/gemini-3.8-flash-lite-tts", "google/gemini-3.8-flash-tts"].includes(body.model));
       assert.deepEqual({ ...body, model: undefined }, { model: undefined, input: "Привет",
-        voice: streamedGemini ? "Puck" : "Kore", response_format: "pcm" });
+        voice: "Charon", response_format: "pcm" });
       if (speechLiteStatus && body.model === "google/gemini-3.8-flash-lite-tts") return new Response(null, { status: speechLiteStatus });
       if (streamedGemini) {
         const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
@@ -518,7 +518,7 @@ test("speech is server-authenticated, throttled and returns only validated PCM",
     limit.seconds === 86_400 && limit.maximum === 500)));
 });
 
-test("Gemini streams PCM through OpenRouter and applies account voice settings", async () => {
+test("Gemini streams PCM through OpenRouter with the single fixed male voice", async () => {
   const { call, requests } = fixture(false, undefined, 15000, 50, true, false, 0, "", false, false,
     new Uint8Array([1, 2, 3, 4]), true);
   const headers = { Authorization: "Bearer " + "T".repeat(43),
@@ -532,7 +532,7 @@ test("Gemini streams PCM through OpenRouter and applies account voice settings",
   assert.ok(!requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
   assert.deepEqual((await reader.read()).value, new Uint8Array([3, 4]));
   assert.equal((await reader.read()).done, true);
-  assert.ok(requests.includes("GET /rest/v1/cortex_voice_preferences"));
+  assert.ok(!requests.includes("GET /rest/v1/cortex_voice_preferences"));
   assert.ok(requests.includes("POST /rest/v1/rpc/cortex_ai_finish"));
 });
 

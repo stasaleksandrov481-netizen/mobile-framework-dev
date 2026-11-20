@@ -117,7 +117,8 @@ class CortexIslandBridge(private val activity: Activity, private val web: WebVie
             prefs.getString("mode", "off") == "off" -> "Включите режим островка."
             activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> "Разрешите доступ к микрофону."
             !CortexAndroidCompatibility.offlineWakeAvailable(activity) ->
-                "На устройстве нет офлайн-распознавания Android."
+                if (android.os.Build.VERSION.SDK_INT < 31) "Вызов словом «Кортекс» работает на Android 12 и новее: звук распознаётся только на телефоне. Используйте кнопку или островок."
+                else "На телефоне нет офлайн-распознавания речи Android. Установите или обновите «Распознавание речи от Google» и русский язык для офлайн-режима."
             else -> null
         }
         if (problem != null) {
