@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · PR #100: ChatGPT-level answer Markdown
+
+- New `markdown-code.js` (escaped single-pass highlighter, fixed `tok-*` classes) and `markdown-math.js` (LaTeX subset → MathML: frac/sqrt/scripts/greek/operators/large ops/functions/accents/fonts/matrix/cases; every node name fixed, all text escaped, 1500-char limit). `markdown.js`: `==mark==`, `++u++` (word-boundary guarded, C++ stays text), `:badge[tone]{text}`, inline/block math (`$5 и $10` stays text), fences `cortex-hero`, `cortex-chart` (bar/line/donut SVG from validated numbers + accessible data table), `cortex-flow`, `details <title>` (nested Markdown, depth ≤ 2), `math/latex`; callouts NOTE/INFO/TIP/IMPORTANT/WARNING/CAUTION/SUCCESS/SECURITY; streaming typed blocks render a placeholder instead of raw JSON.
+- `markdown.css` loaded last, scoped `:is(.message.assistant, body) .markdown` to win over layered `style.css` rules.
+- `model.js` `FORMAT_GUIDE` tells the model which constructs exist (client context, not server authority).
+- QA: `qa/markdown-layout.test.mjs` 15 tests incl. TeX/chart injection; all JS QA 87/87. Visually checked at 393px in a browser fixture (not committed). MathML needs WebView ≥ Chromium 109; older WebView shows unstyled math text.
+
 ## 2026-11-20 UTC · PR #100: duck media during voice replies
 
 - `CortexVoiceOutput` now requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` (USAGE_ASSISTANT/SPEECH) before cloud PCM or Android TTS playback and abandons it on completion of the current turn, on `stop()` and `close()`. A superseded turn never abandons the newer turn's focus. Focus denial is ignored (still speaks). Compiles; not verified on a device with music playing.

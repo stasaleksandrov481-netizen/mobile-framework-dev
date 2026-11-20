@@ -2,6 +2,25 @@
 
 const Cortex = (() => {
   const key = "cortex.interface.v2";
+  // What the chat renderer (markdown.js) actually supports. Visual blocks are
+  // validated on the device; anything malformed is shown as plain code.
+  const FORMAT_GUIDE = [
+    "Оформление: Markdown уровня ChatGPT. Короткий вопрос — короткий ответ без заголовков; длинный — с заголовками ##, " +
+      "списками, таблицами для сравнений и кодом с указанием языка. Без эмодзи, HTML и SVG.",
+    "Доступно: **жирный**, ==выделение==, ++подчёркивание++, ~~зачёркивание~~, `код`, ссылки только https, " +
+      "бейджи :badge[success|warning|error|info|accent|neutral]{текст до 40 символов}, значки :icon[check|info|alert|spark|shield|bolt|bell|star]:, " +
+      "задачи - [x], выноски > [!NOTE|TIP|IMPORTANT|WARNING|CAUTION|SUCCESS], формулы LaTeX $...$ и $$...$$, " +
+      "сворачиваемый раздел ```details Заголовок (внутри обычный Markdown).",
+    "Визуальные блоки — fenced-блок с одной строкой валидного JSON, только когда они реально помогают:\n" +
+      "```cortex-hero {\"eyebrow\",\"title\",\"subtitle\",\"icon\",\"status\":{\"text\",\"tone\"},\"tags\":[{\"text\",\"tone\"}],\"stats\":[{\"label\",\"value\",\"note\",\"tone\"}],\"note\"} — сводка, до 4 stats и 6 tags;\n" +
+      "```cortex-chart {\"type\":\"bar|line|donut\",\"title\",\"unit\",\"labels\":[...],\"series\":[{\"name\",\"values\":[числа]}]} — до 12 подписей и 3 рядов (donut: 1 ряд, до 8);\n" +
+      "```cortex-flow {\"title\",\"nodes\":[{\"title\",\"detail\",\"tone\"}]} — процесс из 2–8 шагов;\n" +
+      "```cortex-steps {\"steps\":[{\"title\",\"detail\",\"state\":\"done|active|pending|error\"}]}; " +
+      "```cortex-metrics {\"title\",\"rows\":[{\"label\",\"value\",\"percent\":0-100,\"tone\"}]}; " +
+      "```cortex-cards {\"cards\":[{\"title\",\"value\",\"note\",\"tone\"}]}. tone: success|warning|error|info|accent|neutral.",
+    "Графики и цифры — только из реальных данных пользователя, поиска или расчёта; примеры явно помечай как вымышленные. " +
+      "При веб-поиске приводи подтверждённые ссылки. Действия на Android выполняет и подтверждает приложение."
+  ].join("\n");
   const styles = { brief: "Кратко", balanced: "Сбалансированно", deep: "Подробно" };
   const languages = { auto: "Авто", "ru-RU": "Русский", "en-US": "Английский" };
   const motion = { full: "Полные", balanced: "Сбалансированные", simple: "Упрощённые" };
@@ -309,10 +328,7 @@ const Cortex = (() => {
         "Отвечай спокойно и конкретно, учитывай ход беседы. " + replyLanguage,
       "Тон: " + person.tone + ". Стиль: " + styles[person.style] + ".",
       state.preferences.addressName ? "Предпочтительное обращение к пользователю — " + JSON.stringify(string(state.preferences.addressName, 60)) + "." : "",
-      "Используй аккуратный Markdown: короткие абзацы, списки по необходимости, заголовки только в длинных ответах, " +
-        "таблицы для сравнения и код с языком. Не пиши HTML и SVG. Не используй эмодзи. " +
-        "Для предупреждений поддерживается цитата > [!IMPORTANT] и значки :icon[имя]:. Не придумывай цифры и результаты. " +
-        "При веб-поиске приводи подтверждённые ссылки. Действия на Android выполняет и подтверждает приложение.",
+      FORMAT_GUIDE,
       facts ? "Память пользователя:\n" + facts : "",
       recentApps.length ? "Недавно пользователь просил открыть приложения (история запроса, не подтверждение Android): " +
         recentApps.join(", ") + ". Местоимения «его», «её», «это» относятся к последнему названному приложению." : "",
