@@ -689,9 +689,10 @@
     const account = M.account(value);
     const changed = previousId !== account?.id;
     if (changed && pending) stopAnswer(false);
-    if (changed && !account) {
+    if (changed) {
       closeVoice();
-      sendDevice("action-stop");
+      sendDevice("voice-stop");
+      if (!account) sendDevice("action-stop");
     }
     M.useAccount(account);
     if (changed) {
@@ -978,10 +979,21 @@
     if (job !== pending || !job.text.trim() || !appVisible()) return;
     const node = route === "chat" && chatId === job.chatId ? screen.querySelector("[data-stream]") : null;
     if (!node) return;
+    const guarded = M.guardReply(job.text);
+    const speaking = job.voice;
+    if (speaking && voice === speaking && !job.screen && S.preferences.voiceReplies) {
+      if (guarded !== job.text && !speaking.deferSpeech) {
+        stopVoiceOutput(speaking);
+        speaking.deferSpeech = true;
+        voiceStatus("thinking", "Думаю…");
+      } else if (!speaking.lead && !speaking.deferSpeech) {
+        primeVoice(speaking, M.voiceLead(job.text));
+      }
+    }
     const scroll = screen.querySelector(".conversation");
     const stick = pinned(scroll);
     node.closest(".message").classList.add("has-reply");
-    node.innerHTML = Markdown.renderStream(M.guardReply(job.text));
+    node.innerHTML = Markdown.renderStream(guarded);
     if (!job.streamPainted && !reduced()) Motion.reply(node);
     job.streamPainted = true;
     if (stick) scroll.scrollTop = scroll.scrollHeight;
@@ -1062,6 +1074,14 @@
       signal: job.controller.signal,
       onStatus(status) {
         if (pending !== job) return;
+        if (status === "text_ready") {
+          const spoken = job.voice;
+          if (!deviceRequest && !job.screen && spoken && voice === spoken && !spoken.lead &&
+              !spoken.deferSpeech && appVisible() && S.preferences.voiceReplies && M.guardReply(job.text) === job.text) {
+            primeVoice(spoken, job.text.trim().slice(0, 550));
+          }
+          return;
+        }
         job.action = status === "web_search" ? "Ищу информацию в интернете…"
           : status === "web_ready" ? "Проверяю, нужны ли свежие данные…" : "Пробую резервную модель…";
         if (status === "web_ready") job.webEnabled = true;
@@ -1073,8 +1093,11 @@
         job.action = "";
         job.text += delta;
         if (!job.streamPainted && job.text.trim() && appVisible() && activeChat(job)) { drawDelta(job); return; }
-        const cadence = job.text.length > 12000 ? 260 : job.text.length > 3500 ? 155 : 78;
-        if (!job.renderTimer) job.renderTimer = setTimeout(() => { job.renderTimer = 0; drawDelta(job); }, cadence);
+        const cadence = job.text.length > 12000 ? 140 : job.text.length > 3500 ? 70 : 28;
+        if (!job.renderTimer && !job.renderFrame) job.renderTimer = setTimeout(() => {
+          job.renderTimer = 0;
+          job.renderFrame = requestAnimationFrame(() => { job.renderFrame = 0; drawDelta(job); });
+        }, cadence);
       }
     });
     job.action = "";
@@ -1136,11 +1159,15 @@
       if (pending !== job) return;
       errors.set(chat.id, Object.assign(error, { explain }));
       if (error.code === "sign_in" && S.account) setAccount(null);
-      if (voiceTurn && voice === voiceTurn) voiceStatus("error", error.message);
+      if (voiceTurn && voice === voiceTurn) {
+        stopVoiceOutput(voiceTurn);
+        voiceStatus("error", error.message);
+      }
     } finally {
       if (pending === job) {
         pending = null;
         clearTimeout(job.renderTimer);
+        cancelAnimationFrame(job.renderFrame);
         if (activeChat(job)) render({ bottom: pinned(screen.querySelector(".conversation")), messageEnter: job.completed && !job.streamPainted });
         else if (route === "home") Wave.state(waveMode());
         historyItems();
@@ -1154,6 +1181,11 @@
     pending = null;
     job.controller.abort();
     clearTimeout(job.renderTimer);
+    cancelAnimationFrame(job.renderFrame);
+    if (job.voice && voice === job.voice) {
+      stopVoiceOutput(job.voice);
+      voiceStatus("waiting", "Готов слушать");
+    }
     const chat = M.chat(job.chatId);
     if (!chat || !keep) return;
     if (job.text.trim()) {
@@ -1377,9 +1409,8 @@
     if (!voice) return;
     const job = voice;
     voice = null;
-    clearTimeout(job.timer);
+    stopVoiceOutput(job);
     if (job.recognition) sendDevice("voice-cancel", { id: job.recognition });
-    if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
     voicePanel.hidden = true;
     delete voicePanel.dataset.voicePhase;
     Wave.state(waveMode());
@@ -1390,13 +1421,21 @@
   function listen(job) {
     if (voice !== job) return;
     if (!appVisible()) { voiceStatus("waiting", "Разговор приостановлен"); return; }
-    clearTimeout(job.timer);
+    stopVoiceOutput(job);
+    job.deferSpeech = false;
     job.recognition = M.id("voice");
     transcript("");
     voiceStatus("starting", "Включаю микрофон…");
     if (!sendDevice("voice-start", { id: job.recognition, language: language(), dictation: job.dictation })) {
       job.recognition = null;
       voiceStatus("error", "Не удалось запустить микрофон.");
+    } else {
+      job.timer = setTimeout(() => {
+        if (voice !== job || job.phase !== "starting") return;
+        sendDevice("voice-cancel", { id: job.recognition });
+        job.recognition = null;
+        voiceStatus("error", "Не удалось подключить микрофон.");
+      }, 10000);
     }
   }
 
@@ -1431,34 +1470,73 @@
     if (["listening", "hearing"].includes(job.phase)) {
       recognizing(job);
       sendDevice("voice-finish", { id: job.recognition });
-    } else if (["thinking", "opening", "speaking"].includes(job.phase)) {
+    } else if (["thinking", "opening", "preparing", "speaking"].includes(job.phase)) {
       if (pending?.voice === job) stopAnswer();
-      if (job.speechId) sendDevice("voice-stop", { id: job.speechId });
-      clearTimeout(job.timer);
+      stopVoiceOutput(job);
       voiceStatus("waiting", "Готовлю микрофон…");
-      job.timer = setTimeout(() => listen(job), 300);
+      job.timer = setTimeout(() => listen(job), 180);
     } else if (job.phase === "waiting" || job.phase === "error") listen(job);
   }
 
-  function voiceReplyReady(job, answer) {
+  function stopVoiceOutput(job) {
     clearTimeout(job.timer);
+    const id = job.speechId;
+    job.speechId = null;
+    job.lead = "";
+    job.leadOk = false;
+    job.finalSpeech = null;
+    if (id) sendDevice("voice-stop", { id });
+  }
+
+  function startVoiceSegment(job, text) {
+    clearTimeout(job.timer);
+    const id = M.id("speech");
+    job.speechId = id;
+    if (!sendDevice("voice-speak", { id, text })) { job.speechId = null; return false; }
+    voiceStatus("preparing", "Готовлю голос…");
+    job.timer = setTimeout(() => {
+      if (voice !== job || job.speechId !== id) return;
+      sendDevice("voice-stop", { id });
+      voiceSegmentDone(job, false);
+    }, 44000);
+    return true;
+  }
+
+  function primeVoice(job, text) {
+    if (text && startVoiceSegment(job, text)) job.lead = text;
+  }
+
+  function voiceReplyReady(job, answer) {
     if (!S.preferences.voiceReplies) { voiceSpoken(job, false); return; }
-    job.speechId = M.id("speech");
-    if (sendDevice("voice-speak", { id: job.speechId, text: answer.slice(0, 550) })) {
-      voiceStatus("speaking", "Озвучиваю ответ…");
-      job.timer = setTimeout(() => {
-        if (voice !== job || job.phase !== "speaking") return;
-        sendDevice("voice-stop", { id: job.speechId });
-        voiceSpoken(job, false);
-      }, 44000);
-    } else voiceSpoken(job, false);
+    const text = answer.trim().slice(0, 550);
+    if (job.lead) {
+      if (!text.startsWith(job.lead)) { voiceSpoken(job, false); return; }
+      job.finalSpeech = text.slice(job.lead.length).trim();
+      if (!job.speechId) voiceSegmentDone(job, job.leadOk);
+    } else if (!startVoiceSegment(job, text)) voiceSpoken(job, false);
+  }
+
+  function voiceSegmentDone(job, ok) {
+    clearTimeout(job.timer);
+    job.speechId = null;
+    if (job.lead) {
+      if (job.finalSpeech == null) {
+        job.leadOk = ok;
+        voiceStatus("thinking", "Думаю…");
+        return;
+      }
+      const rest = job.finalSpeech;
+      job.lead = "";
+      job.finalSpeech = null;
+      if (ok && rest && S.preferences.voiceReplies && startVoiceSegment(job, rest)) return;
+    }
+    voiceSpoken(job, ok);
   }
 
   function voiceSpoken(job, ok) {
-    clearTimeout(job.timer);
-    job.speechId = null;
+    stopVoiceOutput(job);
     voiceStatus("waiting", ok ? "Готов слушать" : "Ответ в чате");
-    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 420);
+    if (S.preferences.voiceContinue && appVisible()) job.timer = setTimeout(() => listen(job), 220);
   }
 
   function finishDictation(job, text) {
@@ -1478,8 +1556,8 @@
 
   function recognitionEvent(job, message) {
     switch (message.phase) {
-      case "ready": voiceStatus("listening", "Слушаю…"); break;
-      case "hearing": voiceStatus("hearing", "Слышу вас"); break;
+      case "ready": clearTimeout(job.timer); voiceStatus("listening", "Слушаю…"); break;
+      case "hearing": clearTimeout(job.timer); voiceStatus("hearing", "Слышу вас"); break;
       case "level":
         if (job.phase === "listening" || job.phase === "hearing") {
           const level = Math.max(0, Math.min(1, Number(message.level) || 0));
@@ -1487,7 +1565,7 @@
           Wave.state("voice", level);
         }
         break;
-      case "partial": transcript(message.text); syncComposer(); break;
+      case "partial": transcript(message.text); break;
       case "finishing": recognizing(job); break;
       case "error":
         clearTimeout(job.timer);
@@ -1522,9 +1600,12 @@
     }
     if (message.type === "voice-output" && message.id?.startsWith("manual-") && message.ok !== true &&
         S.preferences.voiceReplies) flash("Android не смог воспроизвести голос. Проверьте синтез речи и громкость.");
-    if (message.type === "voice-output" && voice?.speechId && message.id === voice.speechId) {
-      voiceSpoken(voice, message.ok === true);
-      void refreshConnection();
+    if (voice?.speechId && message.id === voice.speechId) {
+      if (message.type === "voice-output-start") voiceStatus("speaking", "Озвучиваю ответ…");
+      if (message.type === "voice-output") {
+        voiceSegmentDone(voice, message.ok === true);
+        if (!pending && !voice?.speechId) void refreshConnection();
+      }
     }
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";
@@ -1626,7 +1707,13 @@
     if (["model", "aiModel", "phoneActions", "visualAutomation", "visualLaunch", "reduceMotion", "haptics", "voiceReplies"].includes(key)) syncIslandOptions();
     if (key === "voiceReplies" && !value) {
       sendDevice("voice-stop");
-      if (voice?.speechId) voiceSpoken(voice, false);
+      if (voice?.speechId) {
+        if (pending?.voice === voice) {
+          stopVoiceOutput(voice);
+          voice.deferSpeech = true;
+          voiceStatus("thinking", "Думаю…");
+        } else voiceSpoken(voice, false);
+      }
     }
     render();
   }

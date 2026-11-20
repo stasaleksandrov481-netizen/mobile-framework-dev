@@ -28,6 +28,7 @@ internal class CortexDeviceBridge(
     private val engine by engineDelegate
     private val voiceOutputDelegate = lazy { CortexVoiceOutput(activity) }
     private val voiceOutput by voiceOutputDelegate
+    private var activeVoice: String? = null
     private var pendingImage = false
     private var pendingExport: String? = null
     private var scenarioExport: String? = null
@@ -45,7 +46,7 @@ internal class CortexDeviceBridge(
         if (body.optString("operation").startsWith("first-experience-")) {
             if (body.optString("operation") == "first-experience-start") {
                 speech.stop()
-                if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+                stopVoiceOutput()
             }
             CortexFirstExperience.handle(context, body)
             return
@@ -169,21 +170,31 @@ internal class CortexDeviceBridge(
             }
             "voice-start" -> {
                 val id = body.optString("id")
+                stopVoiceOutput()
                 if (android.os.Build.VERSION.SDK_INT >= 23 && activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     emit(JSONObject().put("type", "voice").put("id", id).put("phase", "error")
                         .put("text", "Разрешите микрофон CORTEX в Android."))
                     requestPermission(Manifest.permission.RECORD_AUDIO)
-                } else speech.listen(id, body.optString("language", "ru-RU"), preferOffline = !body.optBoolean("dictation"))
+                } else speech.listen(id, body.optString("language", "ru-RU"), dictation = body.optBoolean("dictation"))
             }
             "voice-finish" -> speech.finish(body.optString("id"))
             "voice-cancel" -> speech.cancel(body.optString("id"))
             "voice-speak" -> {
                 val id = body.optString("id").take(90)
-                voiceOutput.speak(body.optString("text")) { ok ->
-                    emit(JSONObject().put("type", "voice-output").put("id", id).put("ok", ok))
+                activeVoice = id
+                voiceOutput.speak(body.optString("text"), started = {
+                    if (activeVoice == id) emit(JSONObject().put("type", "voice-output-start").put("id", id))
+                }) { ok ->
+                    if (activeVoice == id) {
+                        activeVoice = null
+                        emit(JSONObject().put("type", "voice-output").put("id", id).put("ok", ok))
+                    }
                 }
             }
-            "voice-stop" -> if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+            "voice-stop" -> {
+                val id = body.optString("id")
+                if (id.isEmpty() || id == activeVoice) stopVoiceOutput()
+            }
             "copy" -> {
                 val text = body.optString("text").take(200_000)
                 val ok = runCatching {
@@ -228,6 +239,11 @@ internal class CortexDeviceBridge(
         }
     }
 
+    fun stopVoiceOutput() {
+        activeVoice = null
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+    }
+
     override fun close() {
         val recorder = pointRecorder
         pointRecorder = null
@@ -235,6 +251,7 @@ internal class CortexDeviceBridge(
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (CortexFirstExperience.listener === experienceListener) CortexFirstExperience.listener = null
         if (engineDelegate.isInitialized()) engine.close()
+        activeVoice = null
         if (voiceOutputDelegate.isInitialized()) voiceOutput.close()
     }
 

@@ -36,6 +36,15 @@ internal object CortexRuntime {
             wakeHook?.invoke()
         }
 
+    private val voicePlayers = mutableSetOf<Any>()
+    val voicePlaying get() = voicePlayers.isNotEmpty()
+
+    fun setVoicePlaying(player: Any, playing: Boolean) {
+        val previous = voicePlaying
+        if (playing) voicePlayers.add(player) else voicePlayers.remove(player)
+        if (previous != voicePlaying) wakeHook?.invoke()
+    }
+
     fun reportWake(value: String?) {
         if (wakeStatus == value) return
         wakeStatus = value

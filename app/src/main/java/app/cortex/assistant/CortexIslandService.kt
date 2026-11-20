@@ -572,6 +572,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         reply = ""
         updateStatus("thinking", "Думаю…")
         val streamed = StringBuilder()
+        var spoken = ""
+        fun canSpeak() = fromVoice && !poweringOff && preferences.getBoolean("voiceReplies", true)
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
             modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
             beforeScreen = { setExpanded(false) },
@@ -580,17 +582,27 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             progress = { updateStatus("executing", it) },
             delta = { chunk ->
                 if (streamed.length < 20_000) {
+                    val first = streamed.isEmpty()
                     streamed.append(chunk.take(20_000 - streamed.length))
                     reply = streamed.toString()
                     message = "Отвечаю…"
-                    if (!repaintPending) {
+                    if (first) render()
+                    else if (!repaintPending) {
                         repaintPending = true
-                        ui.postDelayed(repaintAnswer, 65)
+                        ui.postDelayed(repaintAnswer, 32L)
                     }
+                }
+            },
+            textReady = {
+                if (canSpeak() && streamed.isNotBlank()) {
+                    spoken = streamed.toString().trim()
+                    voiceOutput.speak(spoken) {}
                 }
             },
             finished = { answer, ok, questionId ->
                 busy = false
+                ui.removeCallbacks(repaintAnswer)
+                repaintPending = false
                 reply = answer.trim()
                 clarificationId = questionId
                 if (questionId != null) ui.postDelayed(expireClarification, CortexActionEngine.CLARIFICATION_TIMEOUT_MS)
@@ -607,7 +619,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                         }, 400L)
                     }
                 }
-                if (fromVoice && !poweringOff && reply.isNotBlank() && preferences.getBoolean("voiceReplies", true))
+                if (spoken.isNotEmpty() && reply != spoken) voiceOutput.stop()
+                if (reply != spoken && canSpeak() && reply.isNotBlank())
                     voiceOutput.speak(reply) { /* The answer stays visible if Android cannot play audio. */ }
             })
     }
@@ -624,9 +637,11 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun stopAnswer() {
         CortexSchedule.clearDraft("island")
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
         if (!busy) { if (actionBusy) CortexActionState.stop(); return }
         assistant.cancel()
-        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+        ui.removeCallbacks(repaintAnswer)
+        repaintPending = false
         busy = false
         if (reply.isBlank()) reply = "Ответ остановлен."
         updateStatus("stopped", "Остановлено")

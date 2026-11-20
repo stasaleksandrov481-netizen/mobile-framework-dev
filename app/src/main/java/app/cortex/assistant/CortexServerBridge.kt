@@ -105,7 +105,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
 
     private fun streamSpeechBytes(text: String, id: String, onChunk: (ByteArray, Int) -> Unit): Boolean {
         if (text.isBlank() || text.length > 550) return false
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        if (manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) return false
         val connection = URL(endpoint + "speech").openConnection() as HttpURLConnection
+        val buffer = ByteArray(4096)
         connections[id] = connection
         try {
             if (!jobs.containsKey(id)) return false
@@ -121,36 +124,31 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
             store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true
-            connection.outputStream.use {
-                it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8))
-            }
+            val payload = JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)
+            connection.setFixedLengthStreamingMode(payload.size)
+            connection.outputStream.use { it.write(payload) }
             if (connection.responseCode !in 200..299 ||
                 connection.getHeaderField("X-Cortex-Audio-Format") != CortexAudioCodec.PCM_FORMAT ||
                 !connection.contentType.orEmpty().startsWith("application/octet-stream")) return false
-            val buffer = ByteArray(4096)
             var size = 0
-            var pending = -1
+            var carry = 0
             connection.inputStream.use { input ->
                 while (true) {
                     if (Thread.currentThread().isInterrupted || !jobs.containsKey(id)) return false
-                    val read = input.read(buffer)
+                    val read = input.read(buffer, carry, buffer.size - carry)
                     if (read < 0) break
                     size += read
                     if (size > 2_400_000) return false
-                    // AudioTrack only accepts complete signed 16-bit samples.
-                    var offset = 0
-                    if (pending >= 0 && read > 0) {
-                        onChunk(byteArrayOf(pending.toByte(), buffer[0]), 2)
-                        pending = -1
-                        offset = 1
-                    }
-                    val even = (read - offset) and -2
-                    if (even > 0) onChunk(buffer.copyOfRange(offset, offset + even), even)
-                    if (offset + even < read) pending = buffer[read - 1].toInt() and 0xff
+                    val available = read + carry
+                    val even = available and -2
+                    if (even > 0) onChunk(buffer, even)
+                    carry = available - even
+                    if (carry != 0) buffer[0] = buffer[even]
                 }
             }
-            return size > 0 && pending < 0
+            return size > 0 && carry == 0
         } finally {
+            buffer.fill(0.toByte())
             connections.remove(id, connection)
             connection.disconnect()
         }
@@ -165,13 +163,12 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     }
 
     private fun enqueue(id: String, request: JSONObject, onEvent: (JSONObject) -> Unit, done: (JSONObject) -> Unit) {
+        val updates = ChatUpdates(id, onEvent)
         val task = FutureTask<Unit> {
             val outcome = JSONObject()
             try {
                 if (request.optString("operation") != "logout") retryPendingRevocation(id)
-                outcome.put("result", perform(request, id) { event ->
-                    main.post { if (jobs.containsKey(id)) onEvent(event) }
-                })
+                outcome.put("result", perform(request, id, updates::add))
             } catch (error: GatewayFailure) {
                 outcome.put("error", error.code)
                 if (error.retryAfter > 0) outcome.put("retry_after", error.retryAfter)
@@ -194,6 +191,28 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             }
         }
         if (!accepted) main.post { done(JSONObject().put("error", "busy")) }
+    }
+
+    private inner class ChatUpdates(val id: String, val publish: (JSONObject) -> Unit) {
+        private var pending = ArrayList<Any>()
+
+        @Synchronized fun add(event: JSONObject) {
+            val wasEmpty = pending.isEmpty()
+            val delta = event.opt("delta") as? String
+            val tail = pending.lastOrNull()
+            if (delta == null) pending.add(event)
+            else if (tail is StringBuilder) tail.append(delta)
+            else pending.add(StringBuilder(delta))
+            if (wasEmpty) main.post { drain() }
+        }
+
+        private fun drain() {
+            val batch = synchronized(this) { pending.also { pending = ArrayList() } }
+            for (update in batch) {
+                if (!jobs.containsKey(id)) return
+                publish(if (update is JSONObject) update else JSONObject().put("delta", update.toString()))
+            }
+        }
     }
 
     fun cancel(id: String) {
@@ -429,9 +448,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             val event = runCatching { JSONObject(value) }.getOrNull() ?: continue
             event.optJSONObject("quota")?.let { onEvent(JSONObject().put("quota", it).put("status", "quota")) }
             if (event.has("error")) throw GatewayFailure(event.optString("error", "provider"), event.optInt("retry_after"))
-            if (event.optString("status") == "fallback") onEvent(JSONObject().put("status", "fallback"))
-            if (event.optString("status") == "web_search") onEvent(JSONObject().put("status", "web_search"))
-            if (event.optString("status") == "web_ready") onEvent(JSONObject().put("status", "web_ready"))
+            when (val status = event.optString("status")) {
+                "fallback", "web_search", "web_ready", "text_ready" -> onEvent(JSONObject().put("status", status))
+            }
             if (event.has("delta")) {
                 val delta = event.optString("delta")
                 if (delta.isNotEmpty() && text.length < 20_000) {

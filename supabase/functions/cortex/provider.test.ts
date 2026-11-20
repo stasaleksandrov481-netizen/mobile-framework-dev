@@ -93,6 +93,25 @@ test("OpenRouter search does not fabricate model tokens in the user's balance", 
   assert.deepEqual(charged && { input: charged.input, output: charged.output }, { input: 40, output: 12 });
 });
 
+test("completed text reaches voice clients before quota settlement, while the terminal frame still waits", async () => {
+  let releaseQuota!: () => void;
+  const quota = new Promise<void>(resolve => { releaseQuota = resolve; });
+  const model = await completion(async () => new Response(
+    'data: {"choices":[{"delta":{"content":"Готово."}}]}\r\n\r\ndata: [DONE]\r\n\r\n',
+    { headers: { "content-type": "text/event-stream" } }),
+  "test-free-key", ["example/model:free"], [{ role: "user", content: "Привет" }], true,
+  740, new AbortController().signal, false, false, 12_000, true, false,
+  async () => ({ maxOutput: 740, finish: async () => { await quota; return { remaining: 1 }; } }));
+  const reader = relay(model, async () => undefined).getReader();
+  const decode = new TextDecoder();
+  assert.match(decode.decode((await reader.read()).value), /"delta":"Готово\."/);
+  assert.match(decode.decode((await reader.read()).value), /"status":"text_ready"/);
+  releaseQuota();
+  assert.match(decode.decode((await reader.read()).value), /"status":"quota"/);
+  assert.equal(decode.decode((await reader.read()).value), "data: [DONE]\n\n");
+  assert.equal((await reader.read()).done, true);
+});
+
 test("paid settlement prefers OpenRouter generation cost over estimates or streamed prices", async () => {
   let charged: { input: number; output: number; costMicros: number | null } | null = null;
   let metadataReads = 0;
