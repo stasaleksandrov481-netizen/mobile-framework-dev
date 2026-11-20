@@ -1,3 +1,7 @@
+## 2026-11-20 UTC · recovery website text fixes — NOT deployed
+
+- Branch `fix/cortex-payment-copy-20261120` from `fix/cortex-web-safe-recovery-20261118` at `50c70cc5aacce8d580c72d2813e1c740c09f159e`. PaymentMethods.tsx replaces only three displayed Platega strings with Robokassa (card method stays "not connected", Telegram Stars logic preserved). Date strings and date-based download auto-unlock removed from this recovery-site candidate; public APK gate explicitly requires CORTEX_PUBLIC_DOWNLOAD_ENABLED=true. No payment backend/DB/Android/Supabase changes, no site deploy. **Historical source is missing release-critical production files and differs from approved live UI (Telegram star icon etc.).** Must not merge into main or deploy until complete original source is reconciled with Vercel `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` and visual checkout tests. See main branch fix `fix/cortex-web-release-tbd-20261120` and `docs/WEB_RELEASE_DATE_AND_PAYMENT_COPY_20261120.md` there.
+
 # Журнал изменений и передачи между ИИ-агентами
 
 Каждый агент **обновляет этот файл в том же PR**, где меняет код/документацию, либо отдельным PR, если действие выполнено вне GitHub. Всегда отмечать, **что реально попало в production**, а что осталось в PR.
