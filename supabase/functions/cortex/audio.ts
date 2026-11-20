@@ -12,7 +12,7 @@ const INDEX_CHANGE = [-1, -1, -1, -1, 2, 4, 6, 8] as const;
 export const AUDIO_CODEC = "ima_adpcm4_24000_mono";
 
 /** Returns a versioned frame; only caller-negotiated speech should use this codec. */
-export function encodeAdpcm4(pcm: Uint8Array): Uint8Array {
+export function encodeAdpcm4(pcm: Uint8Array) {
   if (!pcm.length || pcm.length % 2 || pcm.length > 2_400_000) throw new Error("invalid_pcm");
   const samples = pcm.length / 2;
   const output = new Uint8Array(12 + Math.ceil((samples - 1) / 2));

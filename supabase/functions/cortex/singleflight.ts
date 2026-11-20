@@ -1,7 +1,7 @@
 import { Failure, type ModelProfile, type Turn } from "./provider.ts";
 
 type ChatRequest = {
-  messages: Turn[];
+  messages: readonly Turn[];
   limit: number;
   device: boolean;
   repair: boolean;
