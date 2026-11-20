@@ -7,9 +7,9 @@
 - Репозиторий: `stasaleksandrov481-netizen/mobile-framework-dev`.
 - Android: `app/`; интерфейс: `app/src/main/assets/web/`; нативные функции: `app/src/main/java/app/cortex/assistant/`.
 - Сайт: `cortex-web/`; служебная панель: `cortex-control/`.
-- Vercel production: проект `mobile-framework-dev` (Syndicate), домен `cortexapp.ru`. **Исходники сайта в `main` могут расходиться с подтверждённым production UI**. Не выкатывать сайт автоматически из Android-ветки.
-- Supabase: проект `jjcqrjztxohnifmziksy`. Последний read-only снимок на 19.11.2026 в `docs/RELEASE_INVENTORY.md`: Edge `cortex` **ACTIVE v48**. Состояние живого runtime может измениться; перед серверными правками сверять все 11 файлов и миграции, не деплоить автоматически.
-- Android: подтверждённая **опубликованная** бета 19.11.2026 — `v1.0.18-beta.8`, versionCode **125**, release source `ae790b946539d4c07cec934e62b26afe15693d8a` (GitHub release id 451431887). Актуальная `main` может быть новее из-за документации и исправлений, поэтому **не приравнивать зелёную CI к проверке телефона**, не переподписывать старый тег и сверять release inventory перед каждым новым APK. На физическом Samsung A23 и vivo автоматическая демонстрация, Telegram и FPS не подтверждены.
+- Vercel production: проект `mobile-framework-dev` (Syndicate), домены `cortexapp.ru` и `www.cortexapp.ru`. Оба домена проверяйте по фактическим алиасам. Исходники сайта выпускаются из отдельной веб-ветки, указанной в инвентаризации релизов.
+- Supabase: проект `jjcqrjztxohnifmziksy`, Edge `cortex` ACTIVE v50 на 20.11.2026. Перед серверными правками сверяйте 11 файлов и миграции с живым проектом.
+- Опубликованный Android APK на 20.11.2026: `v1.0.18-beta.11`, versionCode 128, исходник `44501c5`. Android PR #105 проверен на эмуляторе API 34 и объединён после выпуска APK. Перед новым выпуском сверяйте версию, подпись и матрицу устройств.
 - Первичный источник релизных фактов — `docs/RELEASE_INVENTORY.md` и начало `docs/AGENT_HANDOFF.md`; старые датированные записи в этом файле не являются актуальным статусом.
 
 ## Скиллы для работы с CORTEX

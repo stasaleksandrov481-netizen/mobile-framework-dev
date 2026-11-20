@@ -1,3 +1,11 @@
+## 2026-11-20 UTC · Итоги проверки сайта и Android
+
+- Веб-релиз `fe6630a` опубликован из `fix/cortex-web-quality-20261120`: Vercel `dpl_4KtfshurZ7wriji7neTZ8VFSkRNZ`, алиасы `cortexapp.ru` и `www.cortexapp.ru`. Откат: `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB` (`62b3dd6`).
+- Веб: 51 тест, сборка, TypeScript, проверка релиза, четыре ширины Chromium на production и 10 публичных HTTP-проверок. Входящие запросы оплаты и внутреннего уведомления без полномочий получили HTTP 401. Redis отвечает `ok`; Telegram Stars доступны. Сценарий восстановления согласия проверен в Chromium с имитацией ответов Supabase.
+- Android [PR #105](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/105) объединён в `main` (`29825ac`). Дерево совпало с проверенным PR head `3229230`. Зелёные сборка/JVM/lint, CodeQL, 91 локальная JS-проверка, 73 Edge-теста и 15 интеграционных тестов на Android API 34. Публичный APK остаётся beta.11.
+- В `AGENTS.md` закреплены правила четырёх предоставленных скиллов. Улучшения отдельной панели CORTEX Control прошли тесты в [PR #104](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/104).
+- Supabase Edge ACTIVE v50 совпал с исходниками по 11 файлам, RLS включён на 33 таблицах CORTEX в public. Для проверки физического поведения One UI, HyperOS и других оболочек нужны соответствующие устройства. Реальные письмо, вход и платёж не выполнялись.
+
 ## 2026-11-20 UTC · Устойчивость команд Android
 
 - База Android: опубликованная beta.11, `44501c5`; ветка `fix/cortex-android-reliability-20261120`.
