@@ -328,7 +328,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
           <p className="auth-success-kicker">АККАУНТ ПОДТВЕРЖДЁН</p>
           <h1 id="auth-title">{successKind === "signup" ? "Всё готово." : successKind === "signin" ? "С возвращением." : "Вы уже с нами."}</h1>
           <p className="auth-success-description">{successKind === "signup"
-            ? "Почта подтверждена. Аккаунт готов к открытой бете CORTEX 20 ноября."
+            ? "Почта подтверждена. Аккаунт готов к будущему запуску открытой беты CORTEX."
             : "Вы вошли в CORTEX. Повторно регистрироваться не нужно."}</p>
           <div className="auth-success-details">
             <span>ЭЛЕКТРОННАЯ ПОЧТА</span>
@@ -343,7 +343,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         <>
           <h1 id="auth-title">{mode === "signup" ? "Начнём." : mode === "verify" || mode === "signin_code_verify" ? "Проверь почту." : mode === "recovery" ? "Восстановление доступа." : "С возвращением."}</h1>
           <p className="auth-description">{mode === "signup"
-            ? "Создай аккаунт до запуска беты 20 ноября и получи 5 000 бонусных ИИ-токенов."
+            ? "Создай аккаунт до открытого запуска CORTEX и получи 5 000 бонусных ИИ-токенов."
             : mode === "recovery"
               ? "Укажите почту, с которой регистрировались. Если аккаунт существует, отправим ссылку для смены пароля."
             : mode === "verify"
