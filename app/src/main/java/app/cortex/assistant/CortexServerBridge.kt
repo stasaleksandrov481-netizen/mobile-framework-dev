@@ -43,7 +43,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     private val main = Handler(Looper.getMainLooper())
     private val connections = ConcurrentHashMap<String, HttpURLConnection>()
     private val lifecycle = Any()
-    @Volatile private var revocationAttemptedAt = 0L
+    private var revocationAttemptedAt = 0L
     private val installId = installToken(context)
     private val deviceId = runCatching {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -246,16 +246,16 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 result
             }
             "auth-cancel" -> synchronized(loginLock) { store.clear("login"); JSONObject().put("cancelled", true) }
-            "logout" -> synchronized(loginLock) {
-                // A local logout must be immediate even without connectivity,
-                // but the remotely valid bearer must not be forgotten forever.
-                val active = store.get()
-                if (active != null) store.put(active, "pending-revoke")
-                val revoked = runCatching { call("DELETE", "session", null, id) }.isSuccess
-                if (revoked && active != null && store.get("pending-revoke") == active) store.clear("pending-revoke")
-                store.clear("login")
-                store.clear()
-                CortexScenarios.selectAccount(context, null)
+            "logout" -> {
+                val active = synchronized(loginLock) {
+                    store.detachForLogout().also { CortexScenarios.selectAccount(context, null) }
+                }
+                // Revoke only the bearer detached by this operation. A sign-in
+                // that starts during the call must not be signed out.
+                val revoked = active != null && runCatching {
+                    call("DELETE", "session", null, id, bearerOverride = active, timeoutMs = 2500)
+                }.isSuccess
+                if (revoked) runCatching { store.removePendingRevocation(requireNotNull(active)) }
                 JSONObject().put("ok", true).put("revocation_pending", active != null && !revoked)
             }
             else -> throw GatewayFailure("endpoint_missing")
@@ -272,16 +272,17 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     }
 
     private fun retryPendingRevocation(id: String) {
-        val pending = store.get("pending-revoke") ?: return
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (revocationAttemptedAt > 0L && now - revocationAttemptedAt < 60_000L) return
-        revocationAttemptedAt = now
-        // Best-effort short retry: never block regular assistance for a long
-        // network timeout. The token is stored encrypted with Android Keystore.
+        val pending = synchronized(loginLock) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (revocationAttemptedAt > 0L && now - revocationAttemptedAt < 60_000L) return
+            val token = store.pendingRevocation() ?: return
+            revocationAttemptedAt = now
+            token
+        }
+        // This retry uses only the queued bearer and leaves a newly logged-in
+        // account intact.
         if (runCatching { call("DELETE", "session", null, id, bearerOverride = pending, timeoutMs = 2500) }.isSuccess) {
-            synchronized(loginLock) {
-                if (store.get("pending-revoke") == pending) store.clear("pending-revoke")
-            }
+            runCatching { store.removePendingRevocation(pending) }
         }
     }
 
@@ -493,13 +494,36 @@ private class SecureSession(context: Context) {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         generator.generateKey()
     }
-    @Synchronized fun put(token: String, name: String = "session") {
+    private fun encrypt(value: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        val combined = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        check(prefs.edit().putString(name, Base64.encodeToString(combined, Base64.NO_WRAP)).commit()) {
+        val combined = cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(combined, Base64.NO_WRAP)
+    }
+    @Synchronized fun put(token: String, name: String = "session") {
+        check(prefs.edit().putString(name, encrypt(token)).commit()) {
             "Could not persist encrypted session"
         }
     }
+    @Synchronized fun detachForLogout(): String? {
+        val session = get()
+        val editor = prefs.edit().remove("session").remove("login")
+        if (session != null) {
+            val pending = CortexRevocationQueue.append(pendingRevocations(), session)
+            editor.putString("pending-revoke", encrypt(CortexRevocationQueue.encode(pending)))
+        }
+        check(editor.commit()) { "Could not detach encrypted session" }
+        return session
+    }
+    @Synchronized fun pendingRevocation(): String? = pendingRevocations().firstOrNull()
+    @Synchronized fun removePendingRevocation(token: String) {
+        val pending = pendingRevocations()
+        if (token !in pending) return
+        val remaining = pending - token
+        if (remaining.isEmpty()) clear("pending-revoke")
+        else put(CortexRevocationQueue.encode(remaining), "pending-revoke")
+    }
+    private fun pendingRevocations(): List<String> = CortexRevocationQueue.decode(get("pending-revoke"))
+
     @Synchronized fun get(name: String = "session"): String? {
         val raw = prefs.getString(name, null) ?: return null
         return runCatching {
