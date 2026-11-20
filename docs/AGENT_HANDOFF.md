@@ -1,3 +1,10 @@
+## 2026-11-20 UTC · Android beta.11 опубликована
+
+- Релиз `v1.0.18-beta.11`, versionCode 128, коммит `44501c5`, GitHub release ID 452714392. Подписанный workflow 44741969985 завершился успешно.
+- APK скачан и сверён с `SHA256SUMS.txt`, SHA-256 `cbc43c9e2e50fa62b7e2659839087b7666a533d47adf3599fa798019c43f48be`. Проверены постоянный сертификат CORTEX, пакет `app.cortex.assistant`, версия и файлы WebView панели уточнения.
+- Прошли 15 тестов на эмуляторе Android API 34, Android CI и CodeQL. Поведение на физических устройствах предстоит подтвердить.
+- CORTEX Control `c1b4941` в production. Supabase Edge `cortex` v50 ACTIVE. Основной сайт возвращён к предыдущему дизайну на `dpl_AdZ76xMyr3Z7PJMETG31yCUYqgKj` после отзыва владельца.
+
 ## 2026-11-20 UTC · PR #100: one male voice, reliable wake word
 
 - Server (`handler.ts`): `/v1/speech` always uses Gemini voice `Charon` (male); no longer reads `cortex_voice_preferences` (default was female `Kore`, legacy rows differed per account). Edge tests updated, local `node --experimental-transform-types --test` 78/78. **Not deployed** — redeploy Edge `cortex` only after the standard checks and owner approval. The table/migration are left untouched (no DB change).
