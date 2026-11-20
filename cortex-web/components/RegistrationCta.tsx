@@ -1,25 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import UiIcon from "@/components/UiIcon";
 import { useCortexAccount } from "@/lib/use-cortex-account";
 
 export default function RegistrationCta({ isOpen }: { isOpen: boolean }) {
   const { checking, email } = useCortexAccount();
+  const className = "landing-button landing-button--primary";
+
   if (checking) {
-    return <span className="glass glass--lg glass--light is-pending" role="status" aria-label="Проверяем вход">Проверяем аккаунт…</span>;
+    return <span className={className} role="status">Проверяем вход…</span>;
   }
   if (email) {
-    return <Link className="glass glass--lg glass--light" href="/account" aria-label="Открыть личный кабинет CORTEX">
-      <UiIcon name="user" size={17} /><span>Личный кабинет</span><UiIcon name="arrow-up-right" size={17} />
-    </Link>;
+    return <Link className={className} href="/account">Личный кабинет</Link>;
   }
   if (!isOpen) {
-    return <Link className="glass glass--lg glass--light" href="/register?mode=signin">
-      <span>Войти в аккаунт</span><UiIcon name="arrow-right" size={17} />
-    </Link>;
+    return <Link className={className} href="/register?mode=signin">Войти в аккаунт</Link>;
   }
-  return <Link id="register" className="glass glass--lg glass--light" href="/register">
-    <span>Создать аккаунт</span><UiIcon name="arrow-up-right" size={17} />
-  </Link>;
+  return <Link id="register" className={className} href="/register">Создать аккаунт</Link>;
 }
