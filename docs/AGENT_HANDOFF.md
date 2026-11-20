@@ -1,3 +1,9 @@
+## 2026-11-20 UTC · Проверка CORTEX Control и платежей
+
+- База Vercel CORTEX Control: `c1b4941`, ветка `fix/cortex-control-security-20261120`. В этой ветке Platega, в актуальном Android main отдельная реализация Robokassa.
+- Входящие запросы ограничены по байтам; checkout URL разрешены на стандартном HTTPS-порту. Статусы сверяются только с объявленными значениями, формат ID проверяется до запроса авторизации возврата. В Supabase проверены живые требования MFA AAL2, действующей сессии и роли администратора для возврата.
+- Прошли 24 теста и сборка. Живые платежи и админские изменения не выполнялись. Ветка предназначена для отдельной проверки панели и не включена в веб-релиз.
+
 ## 2026-11-20 UTC · CORTEX Control v2 interface (local, not pushed)
 
 - Branch `feat/cortex-control-hardening-20261117` (Vercel production source for `cortex-control`). Owner asked for a full admin redesign. Changes are UI-only: sidebar with brand/icons/operator card (role, copyable public ID, MFA session, sign-out), mobile top bar unchanged, one-line page header with section icon, overview with four headline KPIs (online with pulse, 24h devices, AI requests + model success rate, open tickets with jump link) plus a compact stat table and people lists, styled error state, support desk surfaces, site page without duplicate intro. No RPC, auth, MFA, RLS or data-flow changes.
