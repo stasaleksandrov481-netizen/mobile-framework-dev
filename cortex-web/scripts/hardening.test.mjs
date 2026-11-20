@@ -53,7 +53,7 @@ test("Email OTP input retains the approved six digit boxes", () => {
   assert.match(input, /const CODE_LENGTH = EMAIL_OTP_LENGTH/);
   assert.match(form, /isEmailOtp\(code\)/);
   assert.doesNotMatch(form, /6 или 8|восьмизначн/);
-  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../app/pages.css", import.meta.url), "utf8");
   assert.match(styles, /\.otp-code \{ display: grid; grid-template-columns: repeat\(6,/);
 });
 

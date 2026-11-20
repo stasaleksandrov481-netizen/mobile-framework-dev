@@ -1,14 +1,15 @@
 import UiIcon from "@/components/UiIcon";
 
-/** Public downloads are enabled only by an explicit server-side release decision. */
-export default function DownloadCTA({ url, released = false }: { url?: string; released?: boolean }) {
-  return released && url ? (
-    <a className="button button--secondary" href={url} rel="noopener noreferrer">
-      Установить <span className="button-icon"><UiIcon name="download" size={18} /></span>
-    </a>
-  ) : (
-    <span className="button button--secondary button--disabled" aria-label="Дата выхода приложения ещё не объявлена">
-      <UiIcon name="clock" size={17} /> Установка <span className="button-soon">Скоро</span>
+/**
+ * Public APK downloads are closed by the owner's decision.
+ * No environment variable, date or client timer can reopen this control;
+ * reopening requires a reviewed code change and an approved release.
+ */
+export default function DownloadCTA() {
+  return (
+    <span className="glass glass--lg glass--closed" role="note" aria-label="Скачивание приложения временно закрыто">
+      <UiIcon name="lock" size={17} />
+      <span>Скачивание закрыто</span>
     </span>
   );
 }

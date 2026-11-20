@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { supportUrl, supportUsername } from "@/lib/merchant-details";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "Поддержка — CORTEX",
@@ -9,7 +11,9 @@ export const metadata: Metadata = {
 
 export default function SupportPage() {
   return (
-    <div className="shell">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader />
       <main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <h1>Поддержка CORTEX</h1>
@@ -27,6 +31,7 @@ export default function SupportPage() {
           <Link href="/privacy">Политика конфиденциальности</Link>
         </nav>
       </main>
+    <SiteFooter />
     </div>
   );
 }

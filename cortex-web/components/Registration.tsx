@@ -320,7 +320,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
         <div className="auth-success" role="status">
           <h1 id="auth-title">Проверьте почту.</h1>
           <p className="auth-success-description">Если для этого адреса существует аккаунт, мы отправили ссылку для восстановления. Проверьте также папку «Спам». Письмо может прийти не сразу.</p>
-          <button className="button button--primary auth-submit" type="button" onClick={() => switchMode("signin")}>Вернуться ко входу</button>
+          <button className="glass glass--lg glass--light glass--block auth-submit" type="button" onClick={() => switchMode("signin")}>Вернуться ко входу</button>
         </div>
       ) : mode === "done" ? (
         <div className="auth-success" role="status">
@@ -335,7 +335,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             <strong>{activeEmail || email}</strong>
             <div className="auth-success-status"><UiIcon name="check" size={14} /> Подтверждена</div>
           </div>
-          <Link href="/account" className="button button--primary auth-submit">Перейти в кабинет <UiIcon name="arrow-right" size={18} /></Link>
+          <Link href="/account" className="glass glass--lg glass--light glass--block auth-submit">Перейти в кабинет <UiIcon name="arrow-right" size={18} /></Link>
           <button className="auth-success-logout" type="button" disabled={busy} onClick={() => void signOut()}>Выйти или сменить аккаунт</button>
           {error && <p role="alert" className="form-error">{error}</p>}
         </div>
@@ -405,7 +405,7 @@ export function RegistrationForm({ signupEnabled }: { signupEnabled: boolean }) 
             {mode === "signup" && <p className="auth-legal-note">О раннем доступе и бонусах: <Link href="/terms" target="_blank" rel="noopener noreferrer">условия программы</Link>.</p>}
 
             {error && <p role="alert" aria-live="assertive" className="form-error">{error}</p>}
-            <button className="button button--primary auth-submit" type="submit" disabled={busy || ((mode === "signup" || mode === "recovery") && resendWait > 0)}>
+            <button className="glass glass--lg glass--light glass--block auth-submit" type="submit" disabled={busy || ((mode === "signup" || mode === "recovery") && resendWait > 0)}>
               <span>{busy ? "Подождите..." : (mode === "signup" || mode === "recovery") && resendWait > 0 ? `Повторить через ${resendWait} с` : mode === "signup" ? "Создать аккаунт" : mode === "verify" ? "Подтвердить почту" : mode === "signin_code" ? "Получить код" : mode === "signin_code_verify" ? "Войти по коду" : mode === "recovery" ? "Восстановить доступ" : "Войти"}</span>
               {!busy && <UiIcon name="arrow-right" size={18} />}
             </button>

@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import "./landing.css";
+import "./pages.css";
+import GlassPointer from "@/components/GlassPointer";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://cortexapp.ru"),
@@ -22,13 +25,15 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#080808",
+  themeColor: "#000000",
+  viewportFit: "cover",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
   return (
     <html lang="ru">
-      <body>{children}</body>
+      <body>{children}<GlassPointer /></body>
     </html>
   );
 }

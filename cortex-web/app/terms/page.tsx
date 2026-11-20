@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { paymentMerchant } from "@/lib/merchant-details";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata = {
   title: "Пользовательское соглашение — CORTEX",
@@ -9,7 +11,9 @@ export const metadata = {
 export default function TermsPage() {
   const merchant = paymentMerchant();
   return (
-    <div className="shell">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader />
       <main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / УСЛОВИЯ</p>
@@ -71,6 +75,7 @@ export default function TermsPage() {
           <Link href="/register">Регистрация</Link>
         </nav>
       </main>
+    <SiteFooter />
     </div>
   );
 }

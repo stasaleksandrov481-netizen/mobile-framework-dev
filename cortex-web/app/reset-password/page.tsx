@@ -55,7 +55,7 @@ export default function ResetPasswordPage() {
       {changed ? (
         <>
           <p>Теперь войдите с новым паролем. Старый пароль больше не подходит.</p>
-          <Link className="button button--primary" href="/register?mode=signin">Перейти ко входу</Link>
+          <Link className="glass glass--lg glass--light" href="/register?mode=signin">Перейти ко входу</Link>
         </>
       ) : checking ? (
         <p role="status">Проверяем ссылку восстановления…</p>
@@ -71,7 +71,7 @@ export default function ResetPasswordPage() {
           <label htmlFor="confirm-password">Повторите новый пароль</label>
           <input id="confirm-password" type="password" autoComplete="new-password" minLength={10} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Повторите пароль" />
           {error && <p role="alert" aria-live="assertive" className="form-error">{error}</p>}
-          <button className="button button--primary auth-submit" type="submit" disabled={busy}>{busy ? "Сохраняем..." : "Сменить пароль"}</button>
+          <button className="glass glass--lg glass--light glass--block auth-submit" type="submit" disabled={busy}>{busy ? "Сохраняем..." : "Сменить пароль"}</button>
         </form>
       )}
     </main>

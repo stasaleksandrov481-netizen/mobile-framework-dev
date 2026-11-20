@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "Вопросы о CORTEX — данные, безопасность и тарифы",
@@ -8,7 +10,9 @@ export const metadata: Metadata = {
 
 export default function QuestionsPage() {
   return (
-    <div className="shell">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader />
       <main className="simple-page legal-page questions-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / ВОПРОСЫ</p>
@@ -36,6 +40,7 @@ export default function QuestionsPage() {
           <Link href="/support">Поддержка</Link>
         </nav>
       </main>
+    <SiteFooter />
     </div>
   );
 }

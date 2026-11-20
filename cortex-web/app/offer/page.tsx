@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { paymentMerchant } from "@/lib/merchant-details";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "Публичная оферта на платные услуги — CORTEX",
@@ -10,7 +12,9 @@ export const metadata: Metadata = {
 export default function OfferPage() {
   const seller = paymentMerchant();
   return (
-    <div className="shell"><main className="simple-page legal-page">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader /><main className="simple-page legal-page">
       <Link className="legal-back" href="/">← На главную</Link>
       <p className="legal-eyebrow">CORTEX / ДОКУМЕНТЫ</p>
       <h1>Публичная оферта</h1>
@@ -54,6 +58,7 @@ export default function OfferPage() {
         <Link href="/privacy">Политика данных</Link>
         <Link href="/support">Поддержка</Link>
       </nav>
-    </main></div>
+    </main><SiteFooter />
+    </div>
   );
 }

@@ -175,9 +175,6 @@ export function AccountDashboard() {
   const reserved = reservation?.bonus_tokens ?? 0;
   const granted = Boolean(reservation?.bonus_granted_at);
   const remainingBonus = Math.max(0, reserved - (reservation?.bonus_spent ?? 0));
-  const currentDate = new Date();
-  const releaseDate = new Date("2026-11-20T00:00:00+03:00");
-  const untilRelease = currentDate.getTime() < releaseDate.getTime();
 
   async function saveProfile() {
     if (!user || saving || !profileDirty) return;
@@ -322,7 +319,7 @@ export function AccountDashboard() {
                 <div className="account-bonus-number">{loadingData && !reservation ? "…" : reservation ? `${granted ? "" : "+"}${numberFormat.format(granted ? remainingBonus : reserved)}` : "—"}</div>
                 <p className="account-muted">{granted ? "Осталось бонусных ИИ-токенов" : "Бонусных ИИ-токенов зарезервировано"}</p>
                 <div className="account-bonus-divider" />
-                <p className="account-bonus-note">{!reservation && loadingData ? "Загружаем бонусы аккаунта…" : !reservation ? "Для этого аккаунта подтверждённый бонус пока не найден." : granted ? "Бонус начислен. Его остаток уже учтён в общем доступном балансе." : untilRelease ? "Будут доступны после запуска открытой беты 20 ноября." : "Бонус станет доступен после подтверждения аккаунта в приложении."}</p>
+                <p className="account-bonus-note">{!reservation && loadingData ? "Загружаем бонусы аккаунта…" : !reservation ? "Для этого аккаунта подтверждённый бонус пока не найден." : granted ? "Бонус начислен. Его остаток уже учтён в общем доступном балансе." : "Бонус станет доступен после запуска приложения и входа в него с этой почтой."}</p>
               </section>
             </div>
 
@@ -331,7 +328,7 @@ export function AccountDashboard() {
 
             <div className="account-bottom-grid">
               <section className="account-panel account-status-panel"><div className="account-small-label">СТАТУС АККАУНТА</div><div className="account-status-heading"><span className="account-status-icon"><UiIcon name="check" size={21} /></span><div><strong>Почта подтверждена</strong><span>{user?.email}</span></div></div><p>Аккаунт CORTEX готов. При входе в приложение используй эту же почту, чтобы сохранить свои бонусы и подписку.</p><button type="button" className="account-text-button" onClick={() => setPanel("profile")}>Данные профиля <UiIcon name="arrow-right" size={15} /></button></section>
-              <section className="account-panel account-status-panel"><div className="account-small-label">ПРИЛОЖЕНИЕ</div><div className="account-status-heading"><span className="account-status-icon account-status-icon--soft"><UiIcon name="clock" size={21} /></span><div><strong>{untilRelease ? "Открытая бета — 20 ноября" : "CORTEX для Android"}</strong><span>{untilRelease ? "Осталось совсем немного" : "Управляй телефоном голосом"}</span></div></div><p>{untilRelease ? "Пока можешь настроить профиль и посмотреть тарифы. Когда приложение станет доступно, сообщим в нашем канале." : "Официальные обновления, инструкции и информация о доступности приложения в канале разработчиков."}</p><a className="account-text-button" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">Новости запуска <UiIcon name="arrow-up-right" size={15} /></a></section>
+              <section className="account-panel account-status-panel"><div className="account-small-label">ПРИЛОЖЕНИЕ</div><div className="account-status-heading"><span className="account-status-icon account-status-icon--soft"><UiIcon name="clock" size={21} /></span><div><strong>CORTEX для Android</strong><span>Скачивание пока закрыто</span></div></div><p>Пока можешь настроить профиль и посмотреть тарифы. Дату открытия скачивания объявим в канале CORTEX.</p><a className="account-text-button" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">Новости запуска <UiIcon name="arrow-up-right" size={15} /></a></section>
             </div>
           </> : panel === "profile" ? <>
             <div className="account-eyebrow">CORTEX / ПРОФИЛЬ</div>

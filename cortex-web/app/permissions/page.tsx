@@ -1,4 +1,6 @@
 import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata = {
   title: "Разрешения Android и ИИ — CORTEX",
@@ -7,7 +9,9 @@ export const metadata = {
 
 export default function PermissionsPage() {
   return (
-    <div className="shell">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader />
       <main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / ANDROID</p>
@@ -43,6 +47,7 @@ export default function PermissionsPage() {
           <Link href="/register">Регистрация</Link>
         </nav>
       </main>
+    <SiteFooter />
     </div>
   );
 }

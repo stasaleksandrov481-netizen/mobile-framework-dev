@@ -7,15 +7,19 @@ import { useCortexAccount } from "@/lib/use-cortex-account";
 export default function RegistrationCta({ isOpen }: { isOpen: boolean }) {
   const { checking, email } = useCortexAccount();
   if (checking) {
-    return <span className="button button--secondary registration-checking" role="status" aria-label="Проверяем вход">Проверяем аккаунт…</span>;
+    return <span className="glass glass--lg glass--light is-pending" role="status" aria-label="Проверяем вход">Проверяем аккаунт…</span>;
   }
   if (email) {
-    return <Link className="button button--secondary registration-registered" href="/account" aria-label="Открыть личный кабинет CORTEX">
-      <UiIcon name="check" size={18} /> Личный кабинет <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+    return <Link className="glass glass--lg glass--light" href="/account" aria-label="Открыть личный кабинет CORTEX">
+      <UiIcon name="user" size={17} /><span>Личный кабинет</span><UiIcon name="arrow-up-right" size={17} />
     </Link>;
   }
-  if (!isOpen) return <span className="button button--primary button--disabled">Регистрация скоро</span>;
-  return <Link id="register" className="button button--primary" href="/register">
-    Зарегистрироваться <span className="button-icon"><UiIcon name="arrow-up-right" size={18} /></span>
+  if (!isOpen) {
+    return <Link className="glass glass--lg glass--light" href="/register?mode=signin">
+      <span>Войти в аккаунт</span><UiIcon name="arrow-right" size={17} />
+    </Link>;
+  }
+  return <Link id="register" className="glass glass--lg glass--light" href="/register">
+    <span>Создать аккаунт</span><UiIcon name="arrow-up-right" size={17} />
   </Link>;
 }

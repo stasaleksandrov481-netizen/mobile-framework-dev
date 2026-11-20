@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { dataOperators } from "@/lib/merchant-details";
+import SiteFooter from "@/components/SiteFooter";
+import SiteHeader from "@/components/SiteHeader";
 
 export const metadata: Metadata = {
   title: "Согласие на обработку персональных данных — CORTEX",
@@ -10,7 +12,9 @@ export const metadata: Metadata = {
 export default function ConsentPage() {
   const operators = dataOperators();
   return (
-    <div className="shell"><main className="simple-page legal-page">
+    <div className="page">
+      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <SiteHeader /><main className="simple-page legal-page">
       <Link className="legal-back" href="/">← На главную</Link>
       <p className="legal-eyebrow">CORTEX / ДОКУМЕНТЫ</p>
       <h1>Согласие на обработку персональных данных</h1>
@@ -49,6 +53,7 @@ export default function ConsentPage() {
         <Link href="/register">Регистрация</Link>
         <Link href="/support">Поддержка</Link>
       </nav>
-    </main></div>
+    </main><SiteFooter />
+    </div>
   );
 }
