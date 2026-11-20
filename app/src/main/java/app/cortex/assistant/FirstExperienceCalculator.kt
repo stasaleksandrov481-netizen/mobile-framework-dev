@@ -68,7 +68,10 @@ internal class FirstExperienceCalculator(
         if (!navigation.launch(intent) || navigation.await(8_000L, ::ready) == null) return false
         // Readiness alone does not mean that the user has had time to see the app.
         pause(FirstExperienceTempo.BEFORE_ACTION)
-        return service.frame(fresh = true)?.let(::ready) == true
+        // Android can briefly replace a ready window while attaching the new activity.
+        return navigation.await(2_000L) { frame ->
+            ready(frame) && service.frame(fresh = true)?.let(::ready) == true
+        } != null
     }
 
     private fun controls(frame: VisualFrame): Map<String, VisualNode> {
