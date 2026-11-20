@@ -156,8 +156,6 @@
 }
 
 .command-visual {
-  isolation: isolate;
-  position: relative;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -168,19 +166,6 @@
     radial-gradient(ellipse at 57% 21%, #ffffff45, transparent 64%),
     radial-gradient(ellipse at 46% 83%, #adadad60, transparent 57%),
     #171717;
-}
-
-.command-visual::before, .device-visual::before {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  content: "";
-  pointer-events: none;
-}
-
-.command-visual::before {
-  background: repeating-radial-gradient(circle at 53% 54%, transparent 0 54px, #ffffff25 55px 56px);
-  mask-image: radial-gradient(ellipse at center, #000, #0000 71%);
 }
 
 .landing-phone {
@@ -240,21 +225,12 @@
 .device-facts dd { margin: 0; color: #444444; }
 
 .device-visual {
-  isolation: isolate;
   position: relative;
   display: grid;
   place-items: center;
   min-height: 350px;
   overflow: hidden;
   background: radial-gradient(ellipse at 48% 61%, #ababab, #e1e1e1 57%, #e7e7e7 94%);
-}
-
-.device-visual::before {
-  background:
-    linear-gradient(#45454522 1px, transparent 1px),
-    linear-gradient(90deg, #45454522 1px, transparent 1px);
-  background-size: 30px 30px;
-  mask-image: radial-gradient(ellipse at center, #000, #0000 74%);
 }
 
 .device-phone {
@@ -419,10 +395,7 @@
   aspect-ratio: 1;
   content: "";
   border-radius: 50%;
-  background:
-    repeating-radial-gradient(circle, transparent 0 29px, #ffffff3c 30px 31px),
-    radial-gradient(circle, #626262, #191919 62%, transparent 72%);
-  mask-image: radial-gradient(circle, #000, #0000 69%);
+  background: radial-gradient(circle, #626262, #191919 62%, transparent 72%);
 }
 
 .landing-launch-art img {
