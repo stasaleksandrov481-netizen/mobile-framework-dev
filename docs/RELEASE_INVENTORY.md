@@ -1,5 +1,11 @@
 # Инвентаризация релизов CORTEX
 
+## 20.11.2026 — Supabase Edge `cortex`: сверка live v49 перед деплоем PR #100
+
+- Live: `cortex` **ACTIVE v49**, `verify_jwt=false`, entrypoint `index.ts`. Все 11 файлов live (`index, handler, provider, device, tool_targets, control, redis, visual, settings, audio, singleflight`) **побайтно совпадают с `origin/main`** (сверка через `get_edge_function`, нормализация CRLF).
+- Ветка `fix/cortex-webview-ota-native-pin-20261120` (PR #100) отличается от live только в двух файлах: `handler.ts` (один мужской голос `Charon`, без чтения `cortex_voice_preferences`) и `provider.ts` (запрет раскрытия служебных инструкций). Остальные 9 файлов идентичны. Миграций БД нет.
+- Локально `node --experimental-transform-types --test` Edge/billing: 78/78. **Деплой одобрен владельцем 20.11.2026, ещё не выполнен** (нужен вход Supabase CLI); после деплоя записать новую версию и rollback-кандидат v49.
+
 ## 19.11.2026 — подтверждённая опубликованная бета 1.0.18-beta.8
 
 - GitHub release [v1.0.18-beta.8](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/releases/tag/v1.0.18-beta.8), source `ae790b946539d4c07cec934e62b26afe15693d8a`, versionCode 125, published 2026-11-19 14:06:51 UTC. Asset `CORTEX-1.0.18-beta.8.apk`, 19,052,020 bytes, GitHub digest `sha256:7e12d17f215039f2dfcc5627e8c393481af17d16d8d4b3cf524cfb9aa6f2b8ed`. Workflow Android 44539159455 and CodeQL 44539160225 SUCCESS.
