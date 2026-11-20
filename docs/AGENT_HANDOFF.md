@@ -1,3 +1,8 @@
+## 2026-11-20 UTC · PR #100: brightness command on vendor ranges
+
+- `CortexBrightness` assumed `screen_brightness` max 255 and returned `unavailable` for any larger value, so "увеличь/уменьши яркость" could never work on OEM builds storing 0..1023/2047/4095, although `FirstExperienceBrightness` already scaled such ranges. Now `Port.maximum()` (framework `config_screenBrightnessSettingMaximum`, trusted only if >=255 and >= current value) or a range inferred from the current value; readback verification unchanged. Existing test that asserted 1023 = unsupported updated (70_000 stays unsupported); 2 new tests; `CortexBrightnessTest` 8/8 locally.
+- Percent is linear in the raw value, not Android's gamma slider percent; first-experience scaling left untouched. Needs real Xiaomi/vivo check.
+
 ## 2026-11-20 UTC · Follow-up on PR #100: off-main-thread file work, risk gate, HTTPS links
 
 - Same branch. `CortexDeviceBridge.handleActivityResult`: image decode/JPEG compression (501), chat export (502), scenario import (503) and export (504) now run on a short background thread (`background {}`); `emit` is safe off-thread because `MainActivity.deviceEvent` uses `runOnUiThread`. Chat export previously reported `ok:true` when `openOutputStream` returned null; now requires a stream.

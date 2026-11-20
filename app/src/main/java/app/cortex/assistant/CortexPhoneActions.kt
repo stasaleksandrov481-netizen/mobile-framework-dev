@@ -230,6 +230,11 @@ internal class CortexPhoneActions(private val context: Context) {
                         .takeIf { it >= 0 }
                     override fun writeBrightness(value: Int) = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, value)
                     override fun writeMode(value: Int) = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS_MODE, value)
+                    override fun maximum() = runCatching {
+                        val system = android.content.res.Resources.getSystem()
+                        val id = system.getIdentifier("config_screenBrightnessSettingMaximum", "integer", "android")
+                        if (id != 0) system.getInteger(id) else null
+                    }.getOrNull()
                 }, mode, command.optInt("level", 10))
                 return status(outcome.status).apply {
                     outcome.percent?.let { put("level", it) }
