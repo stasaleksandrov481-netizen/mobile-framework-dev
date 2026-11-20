@@ -1,6 +1,6 @@
 import DownloadCTA from "@/components/DownloadCTA";
 import LandingAccountGate from "@/components/LandingAccountGate";
-import RegistrationCta from "@/components/RegistrationCta";
+import SilkHero from "@/components/SilkHero";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import UiIcon from "@/components/UiIcon";
@@ -33,33 +33,10 @@ export default function Home() {
   return (
     <LandingAccountGate>
       <div className="page">
-        <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
         <SiteHeader />
 
         <main>
-          <section className="hero" aria-labelledby="hero-title">
-            <div className="hero-copy">
-              <p className="status-chip"><span className="status-dot" /> Бета для Android · скачивание закрыто</p>
-              <h1 id="hero-title">Телефон,<br />который <em>слышит.</em></h1>
-              <p className="hero-lead">CORTEX управляет Android по вашей команде. Скажите — и приложение откроется, будильник встанет, а напоминание не потеряется.</p>
-              <div className="hero-actions">
-                <RegistrationCta isOpen={registrationIsOpen()} />
-                <DownloadCTA />
-              </div>
-              <p className="hero-note">Ранним участникам — <strong>+5 000 ИИ-токенов</strong> после запуска.</p>
-            </div>
-
-            <div className="voice-orb" aria-hidden="true">
-              <div className="orb-ring orb-ring--3" />
-              <div className="orb-ring orb-ring--2" />
-              <div className="orb-ring orb-ring--1" />
-              <div className="orb-core">
-                <div className="wave">{Array.from({ length: 9 }, (_, i) => <span key={i} style={{ animationDelay: `${(i % 5) * -0.18}s` }} />)}</div>
-              </div>
-              <div className="orb-bubble orb-bubble--a">«Поставь будильник на 7:30»</div>
-              <div className="orb-bubble orb-bubble--b"><UiIcon name="check" size={14} /> Будильник на 7:30</div>
-            </div>
-          </section>
+          <SilkHero registrationOpen={registrationIsOpen()} />
 
           <section className="section" id="features" aria-labelledby="features-title">
             <div className="section-head">
@@ -128,10 +105,11 @@ export default function Home() {
             <div className="card cta-card">
               <span className="card-icon"><UiIcon name="spark" size={20} /></span>
               <h2 id="cta-title">Следите за запуском.</h2>
-              <p>Новости, обновления и дата открытия скачивания — первыми в канале CORTEX.</p>
+              <p>Новости, обновления и дата открытия скачивания первыми в канале CORTEX. Ранним участникам после запуска начислим +5 000 ИИ-токенов.</p>
               <a className="glass glass--lg glass--light" href="https://t.me/cortexdevlog" target="_blank" rel="noopener noreferrer">
                 <UiIcon name="telegram" size={17} /><span>Канал в Telegram</span>
               </a>
+              <DownloadCTA />
             </div>
           </section>
         </main>

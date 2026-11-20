@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import DocGlow from "@/components/DocGlow";
+import LegalToc from "@/components/LegalToc";
 import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -11,9 +13,9 @@ export const metadata: Metadata = {
 export default function QuestionsPage() {
   return (
     <div className="page">
-      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <DocGlow />
       <SiteHeader />
-      <main className="simple-page legal-page questions-page">
+      <div className="doc-layout"><main className="simple-page legal-page questions-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / ВОПРОСЫ</p>
         <h1>Коротко о главном.</h1>
@@ -39,7 +41,7 @@ export default function QuestionsPage() {
           <Link href="/pricing">Тарифы</Link>
           <Link href="/support">Поддержка</Link>
         </nav>
-      </main>
+      </main><LegalToc /></div>
     <SiteFooter />
     </div>
   );

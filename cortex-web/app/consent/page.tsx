@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import DocGlow from "@/components/DocGlow";
+import LegalToc from "@/components/LegalToc";
 import Link from "next/link";
 import { dataOperators } from "@/lib/merchant-details";
 import SiteFooter from "@/components/SiteFooter";
@@ -13,8 +15,8 @@ export default function ConsentPage() {
   const operators = dataOperators();
   return (
     <div className="page">
-      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
-      <SiteHeader /><main className="simple-page legal-page">
+      <DocGlow />
+      <SiteHeader /><div className="doc-layout"><main className="simple-page legal-page">
       <Link className="legal-back" href="/">← На главную</Link>
       <p className="legal-eyebrow">CORTEX / ДОКУМЕНТЫ</p>
       <h1>Согласие на обработку персональных данных</h1>
@@ -53,7 +55,7 @@ export default function ConsentPage() {
         <Link href="/register">Регистрация</Link>
         <Link href="/support">Поддержка</Link>
       </nav>
-    </main><SiteFooter />
+    </main><LegalToc /></div><SiteFooter />
     </div>
   );
 }

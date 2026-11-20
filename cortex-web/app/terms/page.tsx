@@ -1,4 +1,6 @@
 import Link from "next/link";
+import DocGlow from "@/components/DocGlow";
+import LegalToc from "@/components/LegalToc";
 import { paymentMerchant } from "@/lib/merchant-details";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -12,9 +14,9 @@ export default function TermsPage() {
   const merchant = paymentMerchant();
   return (
     <div className="page">
-      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <DocGlow />
       <SiteHeader />
-      <main className="simple-page legal-page">
+      <div className="doc-layout"><main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / УСЛОВИЯ</p>
         <h1>Пользовательское соглашение</h1>
@@ -74,7 +76,7 @@ export default function TermsPage() {
           <Link href="/permissions">Разрешения Android и ИИ</Link>
           <Link href="/register">Регистрация</Link>
         </nav>
-      </main>
+      </main><LegalToc /></div>
     <SiteFooter />
     </div>
   );

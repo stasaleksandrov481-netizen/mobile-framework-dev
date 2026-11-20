@@ -1,4 +1,6 @@
 import Link from "next/link";
+import DocGlow from "@/components/DocGlow";
+import LegalToc from "@/components/LegalToc";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 
@@ -10,9 +12,9 @@ export const metadata = {
 export default function PermissionsPage() {
   return (
     <div className="page">
-      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <DocGlow />
       <SiteHeader />
-      <main className="simple-page legal-page">
+      <div className="doc-layout"><main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <p className="legal-eyebrow">CORTEX / ANDROID</p>
         <h1>Разрешения и ИИ</h1>
@@ -46,7 +48,7 @@ export default function PermissionsPage() {
           <Link href="/terms">Условия раннего доступа</Link>
           <Link href="/register">Регистрация</Link>
         </nav>
-      </main>
+      </main><LegalToc /></div>
     <SiteFooter />
     </div>
   );

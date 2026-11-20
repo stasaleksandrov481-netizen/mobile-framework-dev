@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "./landing.css";
 import "./pages.css";
+import "./silk.css";
 import GlassPointer from "@/components/GlassPointer";
 
 export const metadata: Metadata = {

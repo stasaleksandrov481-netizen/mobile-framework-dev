@@ -1,3 +1,14 @@
+## 2026-11-20 UTC · Site: silk hero, glow controls, documents, compact phone layouts
+
+Branch `feat/cortex-web-black-glass-20261120`, local commit only. Nothing deployed to Vercel.
+
+- First screen (`components/SilkHero.tsx`): animated monochrome silk shader (`components/SilkBackground.tsx`, raw WebGL, half/third resolution, pauses off-screen and in hidden tabs, still frame for reduced motion, CSS fallback), glass badge, light 2-line headline with blur-in word reveal, two glow buttons, scroll cue. Download stays closed (`DownloadCTA` moved to the final block; test keeps it on the page).
+- `app/silk.css`: every `.glass` control restyled as a dark 12px button lit from below (pointer-following on desktop); transparent header that turns to glass via CSS scroll timeline; mobile disclosure menu in `SiteHeader`; scrollbars hidden site-wide (scrolling unchanged).
+- Documents (terms, privacy, offer, consent, permissions, questions, support): dim silk header (`DocGlow`), pill eyebrow, sticky contents with scroll-spy and reading progress (`LegalToc`, ids `section-N`). Legal text untouched.
+- Pricing: aligned cards, «Рекомендуем» on Pro, price never wraps; phones get compact rows (about half the height). Register: silk panel instead of the grid, silk band above the form on phones.
+- Phones: landing features as icon rows, steps as a swipe row, document links as one swipe row, footer in two columns.
+- Checks: `tsc` OK, `node --test scripts/*.test.mjs` 50/50, visual check at 1280x800 and 375x812 in a local dev server. Not checked: production build, real iOS/Android browsers, Lighthouse.
+- Next: owner approval of the design before any deploy (AGENTS.md design-freeze rule).
 ## 2026-11-20 UTC · новый сайт и восстановление функций production
 
 - Ветка `release/cortex-web-20261120` от `dc67c12`. Интерфейс Black Glass, дата открытого запуска без фиксации, скачивание APK с сайта закрыто.

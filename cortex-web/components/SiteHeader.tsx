@@ -19,7 +19,17 @@ export default function SiteHeader() {
         <nav className="site-nav" aria-label="Навигация по сайту">
           {links.map(link => <Link key={link.href} href={link.href}>{link.label}</Link>)}
         </nav>
-        <HeaderAccount />
+        <div className="site-header-end">
+          <HeaderAccount />
+          {/* Phones: the same links in a disclosure menu (no JavaScript needed). */}
+          <details className="site-menu">
+            <summary aria-label="Меню"><span className="site-menu-icon" aria-hidden="true" /></summary>
+            <nav className="site-menu-panel" aria-label="Меню сайта">
+              {links.map(link => <Link key={link.href} href={link.href}>{link.label}</Link>)}
+              <Link href="/privacy">Документы</Link>
+            </nav>
+          </details>
+        </div>
       </div>
     </header>
   );

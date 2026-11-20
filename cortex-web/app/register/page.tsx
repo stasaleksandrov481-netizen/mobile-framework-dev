@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import InteractiveGrid from "@/components/InteractiveGrid";
+import SilkBackground from "@/components/SilkBackground";
 import { RegistrationForm } from "@/components/Registration";
 import UiIcon from "@/components/UiIcon";
 import { registrationIsOpen } from "@/lib/registration-gate";
@@ -37,9 +37,12 @@ export default function RegisterPage() {
         </div>
       </footer>
 
+      <div className="auth-mobile-silk" aria-hidden="true"><SilkBackground intensity={.7} shade={.2} /></div>
+
       <aside className="auth-art" aria-hidden="true">
-        <InteractiveGrid />
+        <SilkBackground intensity={1} shade={.5} />
         <div className="grid-logo"><img src="/cortex-mark.svg" alt="" /></div>
+        <p className="auth-art-caption">Один аккаунт для приложения, тарифов и поддержки.</p>
       </aside>
     </div>
   );

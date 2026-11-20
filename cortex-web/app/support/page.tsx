@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import DocGlow from "@/components/DocGlow";
+import LegalToc from "@/components/LegalToc";
 import Link from "next/link";
 import { supportUrl, supportUsername } from "@/lib/merchant-details";
 import SiteFooter from "@/components/SiteFooter";
@@ -14,9 +16,9 @@ export const metadata: Metadata = {
 export default function SupportPage() {
   return (
     <div className="page">
-      <div className="ambient" aria-hidden="true"><span /><span /><span /></div>
+      <DocGlow />
       <SiteHeader />
-      <main className="simple-page legal-page">
+      <div className="doc-layout"><main className="simple-page legal-page">
         <Link className="legal-back" href="/">← На главную</Link>
         <h1>Поддержка CORTEX</h1>
         <div className="support-chat-shell"><SupportChat /></div>
@@ -33,7 +35,7 @@ export default function SupportPage() {
           <Link href="/offer">Публичная оферта и возвраты</Link>
           <Link href="/privacy">Политика конфиденциальности</Link>
         </nav>
-      </main>
+      </main><LegalToc /></div>
     <SiteFooter />
     </div>
   );
