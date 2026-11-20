@@ -4,7 +4,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { ChangeEvent, KeyboardEvent } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { cortexAuth } from "@/lib/cortex-auth";
+import { useVerifiedCortexSession } from "@/lib/use-verified-cortex-session";
+import { cortexSupabaseUrl } from "@/lib/cortex-public-config";
+import { supportAttachmentUrl } from "@/lib/support-attachment-url";
+import { createLatestRequest } from "@/lib/latest-request";
+import { settleWithTimeout } from "@/lib/settle-with-timeout";
 import { compressSupportMedia, SUPPORT_MEDIA_LIMIT, supportMediaExtension } from "@/lib/support-media";
 import UiIcon from "@/components/UiIcon";
 
@@ -15,7 +19,6 @@ type Reply = {
   attachment_mime: string | null; attachment_bytes: number | null;
 };
 type VisibleReply = Reply & { attachment_url?: string };
-type Viewer = { id: string; email: string | undefined };
 type Receipt = { ticket_id: string; staff_seen_at: string | null; user_seen_at: string | null; unread_count: number };
 
 const categories = { contact: "Общий вопрос", bug: "Ошибка", idea: "Предложение" } as const;
@@ -30,8 +33,17 @@ function messageError(failure: unknown): string {
 }
 
 export default function SupportChat() {
-  const [viewer, setViewer] = useState<Viewer | null>(null);
-  const [accountLoading, setAccountLoading] = useState(true);
+  const { session, checking } = useVerifiedCortexSession();
+  return <SupportConversation key={session?.key ?? "anonymous"} session={session} accountLoading={checking} />;
+}
+
+function SupportConversation({ session, accountLoading }: {
+  session: ReturnType<typeof useVerifiedCortexSession>["session"];
+  accountLoading: boolean;
+}) {
+  const viewer = session?.user ?? null;
+  const client = session?.client;
+  const isCurrent = session?.isCurrent;
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [replies, setReplies] = useState<VisibleReply[]>([]);
@@ -48,6 +60,7 @@ export default function SupportChat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const sendLock = useRef(false);
   const activeIdRef = useRef(activeId);
+  const repliesRequest = useRef(createLatestRequest());
   activeIdRef.current = activeId;
 
   useLayoutEffect(() => {
@@ -59,59 +72,50 @@ export default function SupportChat() {
     field.style.overflowY = field.scrollHeight > 150 ? "auto" : "hidden";
   }, [text, activeId]);
 
-  useEffect(() => {
-    let alive = true;
-    void cortexAuth.auth.getUser().then(({ data, error: authError }) => {
-      if (!alive) return;
-      setViewer(authError || !data.user?.email_confirmed_at ? null : { id: data.user.id, email: data.user.email });
-      setAccountLoading(false);
-    }).catch(() => { if (alive) setAccountLoading(false); });
-    const { data: listener } = cortexAuth.auth.onAuthStateChange((_event, session) => {
-      if (!alive) return;
-      if (!session?.user?.email_confirmed_at) {
-        setViewer(null); setThreads([]); setActiveId(null); setReceipts({});
-      } else setViewer({ id: session.user.id, email: session.user.email });
-    });
-    return () => { alive = false; listener.subscription.unsubscribe(); };
-  }, []);
-
   const loadThreads = useCallback(async () => {
-    if (!viewer) return;
-    const { data, error: loadError } = await cortexAuth.from("cortex_support")
+    if (!viewer || !client) return;
+    const { data, error: loadError } = await settleWithTimeout(client.from("cortex_support")
       .select("id,category,message,status,created_at")
-      .eq("user_id", viewer.id).order("created_at", { ascending: false }).limit(50);
+      .eq("user_id", viewer.id).order("created_at", { ascending: false }).limit(50), 9_000);
     if (loadError) throw loadError;
-    setThreads((data || []) as Thread[]);
-  }, [viewer]);
+    if (isCurrent?.()) setThreads((data || []) as Thread[]);
+  }, [client, isCurrent, viewer]);
 
   const loadReceipts = useCallback(async () => {
-    if (!viewer) return;
-    const { data, error: loadError } = await cortexAuth.rpc("cortex_support_receipt_overview", { p_side: "user" });
+    if (!viewer || !client) return;
+    const { data, error: loadError } = await settleWithTimeout(client.rpc("cortex_support_receipt_overview", { p_side: "user" }), 9_000);
     if (loadError) throw loadError;
-    setReceipts(Object.fromEntries(((data || []) as Receipt[]).map(item => [item.ticket_id, item])));
-  }, [viewer]);
+    if (isCurrent?.()) setReceipts(Object.fromEntries(((data || []) as Receipt[]).map(item => [item.ticket_id, item])));
+  }, [client, isCurrent, viewer]);
 
   const loadReplies = useCallback(async () => {
-    if (!viewer || !activeId) { setReplies([]); return; }
-    const { data, error: loadError } = await cortexAuth.from("cortex_support_replies")
+    if (!viewer || !activeId || !client) { setReplies([]); return; }
+    const requestId = repliesRequest.current.begin();
+    const currentRequest = () => isCurrent?.() && activeIdRef.current === activeId && repliesRequest.current.isCurrent(requestId);
+    const { data, error: loadError } = await settleWithTimeout(client.from("cortex_support_replies")
       .select("id,author_id,ticket_id,message,created_at,attachment_path,attachment_name,attachment_mime,attachment_bytes")
-      .eq("ticket_id", activeId).order("created_at", { ascending: true }).limit(100);
+      .eq("ticket_id", activeId).order("created_at", { ascending: true }).limit(100), 9_000);
     if (loadError) throw loadError;
+    if (!currentRequest()) return;
     const resolved = await Promise.all(((data || []) as Reply[]).map(async reply => {
       if (!reply.attachment_path) return reply;
-      const { data: signed } = await cortexAuth.storage.from("cortex-support")
-        .createSignedUrl(reply.attachment_path, 300);
-      return { ...reply, attachment_url: signed?.signedUrl };
+      try {
+        const { data: signed } = await settleWithTimeout(client.storage.from("cortex-support")
+          .createSignedUrl(reply.attachment_path, 300), 9_000);
+        return { ...reply, attachment_url: supportAttachmentUrl(signed?.signedUrl, cortexSupabaseUrl) };
+      } catch {
+        return reply;
+      }
     }));
-    if (activeIdRef.current !== activeId) return;
+    if (!currentRequest()) return;
     setReplies(resolved);
     if (!document.hidden && document.hasFocus()) {
-      const { error: receiptError } = await cortexAuth.rpc("cortex_support_mark_read", {
+      const { error: receiptError } = await settleWithTimeout(client.rpc("cortex_support_mark_read", {
         p_ticket_id: activeId, p_last_reply_id: resolved.at(-1)?.id || null, p_side: "user",
-      });
-      if (!receiptError && activeIdRef.current === activeId) await loadReceipts().catch(() => {});
+      }), 9_000);
+      if (!receiptError && currentRequest()) await loadReceipts().catch(() => {});
     }
-  }, [activeId, viewer, loadReceipts]);
+  }, [activeId, client, isCurrent, viewer, loadReceipts]);
 
   useEffect(() => {
     if (!viewer) return;
@@ -132,12 +136,12 @@ export default function SupportChat() {
 
   useEffect(() => {
     if (!activeId || !viewer) { setReplies([]); return; }
-    void loadReplies().catch(() => setError("Не удалось загрузить переписку."));
+    void loadReplies().catch(() => { if (isCurrent?.() && activeIdRef.current === activeId) setError("Не удалось загрузить переписку."); });
     const timer = window.setInterval(() => {
       if (!document.hidden) void loadReplies().catch(() => {});
     }, 15_000);
-    return () => window.clearInterval(timer);
-  }, [activeId, viewer, loadReplies]);
+    return () => { window.clearInterval(timer); repliesRequest.current.invalidate(); };
+  }, [activeId, isCurrent, viewer, loadReplies]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [replies.length, activeId]);
 
   useEffect(() => {
@@ -171,7 +175,7 @@ export default function SupportChat() {
   }
 
   async function send() {
-    if (!viewer || sending || sendLock.current) return;
+    if (!viewer || !client || !isCurrent?.() || sending || sendLock.current) return;
     const message = text.trim();
     if (!message && !attached) return;
     if (message.length > 4000) { setError("Максимум 4000 символов."); return; }
@@ -181,12 +185,17 @@ export default function SupportChat() {
     let uploadedPath: string | null = null;
     let written = false;
     try {
+      const processed = attached ? await compressSupportMedia(attached) : null;
+      const ext = processed && supportMediaExtension(processed.type);
+      if (processed && (!ext || processed.size > SUPPORT_MEDIA_LIMIT)) throw new Error("Неверный формат вложения.");
+      if (!isCurrent()) return;
       let ticketId = activeId;
       if (!ticketId) {
-        const { data, error: writeError } = await cortexAuth.from("cortex_support").insert({
+        const { data, error: writeError } = await client.from("cortex_support").insert({
           user_id: viewer.id, category, message, status: "open",
         }).select("id,category,message,status,created_at").single();
         if (writeError || !data) throw writeError || new Error("Ticket creation failed");
+        if (!isCurrent()) return;
         ticketId = data.id;
         setThreads(items => [data as Thread, ...items]);
         activeIdRef.current = ticketId;
@@ -194,19 +203,16 @@ export default function SupportChat() {
         written = true;
       }
       let payload: Pick<Reply, "attachment_path" | "attachment_name" | "attachment_mime" | "attachment_bytes"> | null = null;
-      if (attached) {
-        const processed = await compressSupportMedia(attached);
-        const ext = supportMediaExtension(processed.type);
-        if (!ext || processed.size > SUPPORT_MEDIA_LIMIT) throw new Error("Неверный формат вложения.");
+      if (processed && ext && attached) {
         uploadedPath = `${viewer.id}/${ticketId}/${crypto.randomUUID()}.${ext}`;
-        const { error: uploadError } = await cortexAuth.storage.from("cortex-support")
+        const { error: uploadError } = await client.storage.from("cortex-support")
           .upload(uploadedPath, processed, { contentType: processed.type, upsert: false });
         if (uploadError) throw uploadError;
         payload = { attachment_path: uploadedPath, attachment_name: attached.name.slice(0, 120),
           attachment_mime: processed.type, attachment_bytes: processed.size };
       }
       if (!written || payload) {
-        const { error: replyError } = await cortexAuth.from("cortex_support_replies").insert({
+        const { error: replyError } = await client.from("cortex_support_replies").insert({
           ticket_id: ticketId, author_id: viewer.id,
           message: written ? "Вложение" : message || "Вложение", ...payload,
         });
@@ -216,7 +222,9 @@ export default function SupportChat() {
       void Promise.all([loadThreads(), loadReceipts()]).catch(() => {});
       if (!written) void loadReplies().catch(() => {});
     } catch (failure) {
-      if (uploadedPath) await cortexAuth.storage.from("cortex-support").remove([uploadedPath]).catch(() => {});
+      if (!isCurrent()) return;
+      if (written) setText("");
+      if (uploadedPath) void client.storage.from("cortex-support").remove([uploadedPath]).catch(() => {});
       if (failure instanceof Error && /Слишком большой|не поддерживается|Не удалось сжать|не соответствует|не должен превышать|Неверный формат/.test(failure.message)) {
         setError(failure.message);
       } else setError(messageError(failure));

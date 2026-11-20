@@ -87,7 +87,8 @@ test("Recovery validates the email without requiring an old password and does no
   assert.match(callback, /exchangeCodeForSession\(code\)/);
   assert.match(callback, /recoveryFlow\.current \? "recovery" : "email"/);
   assert.match(callback, /router\.replace\(recoveryFlow\.current \? "\/reset-password" : "\/account"\)/);
-  assert.match(reset, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(reset, /updateCortexUser\(token, \{ password \}\)/);
+  assert.match(reset, /matchesRecoverySession\(session.user.id, token\)/);
   assert.match(reset, /password\.length < 10/);
   assert.doesNotMatch(reset, /service.role|service_role/i);
 });
@@ -223,9 +224,11 @@ test("registration and account security keep identity verification and confirmed
   assert.match(registerPage, /export const dynamic = "force-dynamic"/);
   assert.match(registration, /if \(!signupEnabled\) throw new Error\("Регистрация временно закрыта\."\)/);
   assert.match(registration, /useState<Mode>\(signupEnabled \? "signup" : "signin"\)/);
-  assert.match(dashboard, /auth\.getUser\(\)/);
+  const session = readFileSync(new URL("../lib/use-verified-cortex-session.ts", import.meta.url), "utf8");
+  assert.match(dashboard, /useVerifiedCortexSession\(\)/);
+  assert.match(session, /verifyCortexUser\(accessToken\)/);
   assert.match(dashboard, /!confirmAllSessions/);
-  assert.match(dashboard, /auth\.signOut\(\{ scope: "global" \}\)/);
+  assert.match(dashboard, /auth\.admin\.signOut\(token, "global"\)/);
   assert.match(dashboard, /role="group" aria-label="Подтверждение завершения сеансов"/);
 });
 

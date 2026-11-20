@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { cortexAuth } from "@/lib/cortex-auth";
+import { useVerifiedCortexSession } from "@/lib/use-verified-cortex-session";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 
 type Plan = "start" | "pro" | "ultra";
@@ -41,10 +41,21 @@ function paymentError(code: unknown): string {
   }
 }
 
-export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigured }: {
+type PaymentProps = {
   initialPlan: Plan; prices: Price[]; starsPrices: StarsPrice[]; starsConfigured: boolean;
-}) {
+};
+
+export function PaymentMethods({ initialPlan, ...props }: PaymentProps) {
+  const { session } = useVerifiedCortexSession();
   const [plan, setPlan] = useState<Plan>(initialPlan);
+  return <PaymentScreen key={session?.key ?? "anonymous"} {...props} session={session} plan={plan} setPlan={setPlan} />;
+}
+
+function PaymentScreen({ plan, setPlan, prices, starsPrices, starsConfigured, session }: Omit<PaymentProps, "initialPlan"> & {
+  session: ReturnType<typeof useVerifiedCortexSession>["session"];
+  plan: Plan;
+  setPlan: (plan: Plan) => void;
+}) {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [invoice, setInvoice] = useState<{ id: string; url: string; stars: number } | null>(null);
@@ -63,22 +74,21 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
   }
 
   async function checkStarsPayment() {
-    if (!invoice || checking) return;
+    if (!invoice || checking || !session?.isCurrent()) return;
     setChecking(true);
     setError("");
     try {
       // RLS is closed; this RPC verifies auth.uid and live auth.sessions again.
-      const { data, error: statusError } = await settleWithTimeout(cortexAuth.rpc("cortex_stars_my_status", { p_id: invoice.id }), 8_000);
+      const { data, error: statusError } = await settleWithTimeout(session.client.rpc("cortex_stars_my_status", { p_id: invoice.id }), 8_000);
       if (statusError || !data || data.id !== invoice.id || data.stars !== invoice.stars) throw new Error();
       let state = data.status;
       if (state === "prechecked") {
         // The original webhook may have been delayed. This self-scoped,
         // rate-limited server check verifies Telegram's independent ledger.
-        const { data: { session } } = await settleWithTimeout(cortexAuth.auth.getSession(), 8_000);
-        if (!session?.access_token) throw new Error();
+        const token = await session.getToken();
         const check = await fetch("/api/telegram/stars/reconcile", {
           method: "POST", cache: "no-store", credentials: "same-origin",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ id: invoice.id }), signal: AbortSignal.timeout(15_000),
         });
         if (check.ok) {
@@ -87,6 +97,7 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
           state = (result as { status?: unknown }).status;
         } else if (check.status !== 202 && check.status !== 429) throw new Error();
       }
+      if (!session.isCurrent()) return;
       setPaymentStatus(state === "paid" ? "paid" : state === "refunded" ? "refunded" : "pending");
     } catch { setError("Не удалось проверить статус. Повтори проверку через несколько секунд."); }
     finally { setChecking(false); }
@@ -98,16 +109,15 @@ export function PaymentMethods({ initialPlan, prices, starsPrices, starsConfigur
     setError("");
     setInvoice(null);
     try {
-      const { data: { session }, error: sessionError } = await settleWithTimeout(cortexAuth.auth.getSession(), 8_000);
-      if (sessionError || !session?.access_token) { setError(paymentError("login_required")); return; }
-      const { data: { user }, error: accountError } = await settleWithTimeout(cortexAuth.auth.getUser(), 8_000);
-      if (accountError || !user?.email_confirmed_at) { setError(paymentError("login_required")); return; }
+      if (!session?.isCurrent()) { setError(paymentError("login_required")); return; }
+      const token = await session.getToken();
       const response = await fetch("/api/telegram/stars/checkout", {
         method: "POST", cache: "no-store", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ plan }), signal: AbortSignal.timeout(14_000),
       });
       const result: unknown = await response.json();
+      if (!session.isCurrent()) return;
       if (!result || typeof result !== "object") throw new Error();
       const data = result as { error?: unknown; id?: unknown; stars?: unknown; invoice_url?: unknown };
       const link = response.ok ? safeInvoice(data.invoice_url) : null;

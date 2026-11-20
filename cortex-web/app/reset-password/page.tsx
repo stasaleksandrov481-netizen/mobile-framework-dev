@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import Link from "next/link";
-import { cortexAuth } from "@/lib/cortex-auth";
+import { cortexAuth, updateCortexUser } from "@/lib/cortex-auth";
+import { useVerifiedCortexSession } from "@/lib/use-verified-cortex-session";
+import { clearRecoverySession, matchesRecoverySession } from "@/lib/recovery-session";
 import { safeAuthErrorMessage } from "@/lib/auth-error";
 import { settleWithTimeout } from "@/lib/settle-with-timeout";
 
 export default function ResetPasswordPage() {
-  const [checking, setChecking] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
+  const { session, checking } = useVerifiedCortexSession();
+  const [authorizedKey, setAuthorizedKey] = useState<number | null>(null);
+  const authorized = Boolean(session && session.key === authorizedKey);
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,31 +21,40 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let active = true;
-    void settleWithTimeout(cortexAuth.auth.getUser(), 12_000).then(({ data, error: authError }) => {
-      if (active) setAuthorized(!authError && Boolean(data.user?.id && data.user.email_confirmed_at));
-    }).catch(() => { if (active) setAuthorized(false); }).finally(() => {
-      if (active) setChecking(false);
-    });
+    if (session) void session.getToken().then(token => {
+      if (active && session.isCurrent() && matchesRecoverySession(session.user.id, token)) setAuthorizedKey(session.key);
+    }).catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [session]);
+
+  useEffect(() => {
+    setPassword("");
+    setConfirmation("");
+  }, [session?.key]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || changed || !authorized) return;
+    if (busy || changed || !authorized || !session) return;
     if (password.length < 10) { setError("Новый пароль должен содержать минимум 10 символов."); return; }
     if (password !== confirmation) { setError("Пароли не совпадают."); return; }
     setError("");
     setBusy(true);
     try {
-      const { data: { user }, error: identityError } = await settleWithTimeout(cortexAuth.auth.getUser(), 12_000);
-      if (identityError || !user?.id || !user.email_confirmed_at) throw new Error("Сессия восстановления недействительна.");
-      const { error: changeError } = await settleWithTimeout(cortexAuth.auth.updateUser({ password }), 15_000);
-      if (changeError) throw changeError;
+      const token = await session.getToken();
+      if (!matchesRecoverySession(session.user.id, token)) throw new Error("recovery_session_changed");
+      const user = await updateCortexUser(token, { password });
+      if (user.id !== session.user.id) throw new Error("recovery_session_changed");
+      clearRecoverySession();
+      if (!session.isCurrent()) return;
       setPassword("");
       setConfirmation("");
       setChanged(true);
-      // The recovery session should not stay signed in after credentials change.
-      try { await settleWithTimeout(cortexAuth.auth.signOut({ scope: "local" }), 10_000); } catch { /* Password update already succeeded. */ }
+      try {
+        const { data: { session: current } } = await cortexAuth.auth.getSession();
+        if (session.isCurrent() && current?.access_token === token) {
+          await settleWithTimeout(cortexAuth.auth.signOut({ scope: "local" }), 10_000);
+        }
+      } catch { /* Password update already succeeded. */ }
     } catch (failure) {
       setError(safeAuthErrorMessage(failure));
     } finally { setBusy(false); }

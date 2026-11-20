@@ -216,7 +216,7 @@ test("Payment selection is a separate page and never passes client-selected amou
   assert.match(methods, /Telegram Stars/);
   assert.match(methods, /JSON\.stringify\(\{ plan \}\)/);
   assert.doesNotMatch(methods, /JSON\.stringify\(\{.*(?:subject|amount|stars).*\}\)/);
-  assert.match(methods, /getUser\(\)/);
+  assert.match(methods, /useVerifiedCortexSession\(\)/);
   assert.match(methods, /target="_blank" rel="noopener noreferrer"/);
   assert.match(methods, /Не удалось создать счёт/);
   assert.match(page, /loadPublicStarsPrices/);
