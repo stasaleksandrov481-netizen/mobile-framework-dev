@@ -1,5 +1,11 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-21 UTC · Supabase Edge CORTEX v52 (production)
+
+- **ACTIVE v52**, `verify_jwt=false`, SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. Деплой основан на побайтно полученных 11 исходниках v51 и меняет ровно `redis.ts`, `provider.ts` и `singleflight.ts`. После выкладки 11/11 файлов проверены по исходникам: `handler.ts` сохраняет тройной fallback v51, остальные неизменённые файлы совпали с rollback baseline `6a6a9dc`, новые `provider.ts` и `redis.ts` совпали с `main`, а `singleflight.ts` — с точечным добавлением `text_ready` к live.
+- Тестирование PR #115: Edge **77/77**, billing и GitHub handoff, security scan и UI успешны. `main` коммит `4eddc60`, PR объединён. SQL, Android APK, Vercel и настройки тарифов не менялись. Внешний HTTP smoke и физическое устройство не проверены; провайдер веб-просмотра возвращает ошибку доступа к Supabase URL.
+- **Rollback**: Edge v51, SHA256 `313bf1f4969d35b61353a3361d70ee188cc459ec18023f83c85baa6be15db72f` (исходники 11 файлов: GitHub `6a6a9dc` и три правки `handler.ts` из PR #114). Никогда не выкладывать `main` без сверки 11 файлов: голос/stream могут отличаться.
+
 ## 2026-11-21 UTC · Кандидат: Redis Vault retry и ранняя готовность речи
 
 - Перед изменениями Supabase Edge `cortex` ACTIVE **v51**, `verify_jwt=false`, SHA256 `313bf1f4969d35b61353a3361d70ee188cc459ec18023f83c85baa6be15db72f`. Наличие `text_ready` проверено: `main` уже передаёт событие после текстовой генерации, live v51 пока не передаёт. Redis `redis.ts` в `main` совпадает с live v51; обнаружено 5-минутное удержание отрицательной конфигурации Vault.
