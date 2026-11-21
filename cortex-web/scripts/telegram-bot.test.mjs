@@ -186,3 +186,47 @@ test("Rich catalog error falls back to real plain prices and same controls",asyn
  assert.equal(h.calls[0].method,"sendMessage");assert.match(h.calls[0].args.text,/Pro.*250/);
  assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="cortex:plan_pro"));
 });
+
+test("Rich production menu embeds controls and welcome media with no external keyboard",async()=>{
+ const h=harness();h.services.richUi=true;await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
+ assert.equal(h.calls[0].method,"sendRichMessage");const a=h.calls[0].args;
+ assert.equal(a.reply_markup,undefined);assert.match(a.rich_message.markdown,/!\[\]\(https:\/\/cortexapp\.ru\/telegram\/welcome\.jpg\)/);
+ assert.match(a.rich_message.markdown,/<tg-button type="callback_data" data="cortex:plans" style="link">/);
+ assert.match(a.rich_message.markdown,/<tg-emoji emoji-id="/);
+ assert.match(a.rich_message.markdown,/<tg-button-row align="left">/);
+});
+test("Rich prices use same catalog and embedded plan details",async()=>{
+ const h=harness();h.services.richUi=true;await processCortexBotUpdate(message("/plans"),h.services);
+ const a=h.calls[0].args;assert.equal(a.reply_markup,undefined);
+ assert.match(a.rich_message.markdown,/\| Тариф \| Токенов\/день \| Цена \|/);
+ assert.match(a.rich_message.markdown,/<details><summary>Pro · 250 ⭐/);
+ assert.match(a.rich_message.markdown,/data="cortex:plan_pro"/);
+});
+test("Rich callbacks edit one existing screen without an attached keyboard",async()=>{
+ const h=harness();h.services.richUi=true;await processCortexBotUpdate({update_id:159,callback_query:{id:"rich",data:"cortex:plan_pro",from:{id:user},message:{chat,message_id:25}}},h.services);
+ assert.deepEqual(h.calls.map(c=>c.method),["answerCallbackQuery","editMessageText"]);
+ const a=h.calls[1].args;assert.deepEqual(a.reply_markup.inline_keyboard,[]);
+ assert.match(a.rich_message.markdown,/url="https:\/\/cortexapp\.ru\/payment\?plan=pro"/);
+});
+test("Rich support provides inline email copy and links",async()=>{
+ const h=harness();h.services.richUi=true;await processCortexBotUpdate(message("/support"),h.services);
+ const a=h.calls[0].args;assert.match(a.rich_message.markdown,/<code>support@cortexapp\.ru<\/code> <tg-button type="copy_text" text="support@cortexapp\.ru"/);
+ assert.equal(a.reply_markup,undefined);
+});
+test("Rich rejection falls back to regular welcome and native keyboard",async()=>{
+ const h=harness();h.services.richUi=true;const call=h.services.telegram;
+ h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Object.assign(Error("unsupported"),{status:400});return call(m,a)};
+ await processCortexBotUpdate(message("/start"),h.services);
+ assert.equal(h.calls[0].method,"sendPhoto");assert.ok(h.calls[0].args.reply_markup.inline_keyboard.length);
+});
+test("Rich premium rejection retries without premium, not with an external keyboard",async()=>{
+ const h=harness();h.services.richUi=true;const call=h.services.telegram;
+ h.services.telegram=async(m,a)=>{if(a.rich_message?.markdown.includes("tg-emoji"))throw Object.assign(Error("unsupported"),{status:400});return call(m,a)};
+ await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
+ assert.equal(h.calls[0].method,"sendRichMessage");assert.doesNotMatch(h.calls[0].args.rich_message.markdown,/tg-emoji/);
+ assert.equal(h.calls[0].args.reply_markup,undefined);
+});
+test("Rich mode preserves escaped greeting names without markdown injection",async()=>{
+ const h=harness();h.services.richUi=true;const m=message("/start");m.message.from.first_name="<tg-button>Injected</tg-button>";
+ await processCortexBotUpdate(m,h.services);assert.match(h.calls[0].args.rich_message.markdown,/&lt;tg-button&gt;Injected&lt;\/tg-button&gt;/);
+});

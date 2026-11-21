@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
       return respond(status);
     }
     const status = await processCortexBotUpdate(update as CortexTelegramUpdate, {
+      richUi: true,
       catalog: async () => {
         const [plans,stars]=await Promise.all([loadPublicPlans(),loadPublicStarsPrices()]);
         return plans ? {plans,stars:stars??[],starsEnabled} : null;

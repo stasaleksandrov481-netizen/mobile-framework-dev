@@ -21,6 +21,7 @@ type StorePlan = {code:"guest"|"free"|"start"|"pro"|"ultra"; price_kopecks:numbe
 type StoreStars = {plan:"start"|"pro"|"ultra"; stars:number; enabled:boolean};
 type StoreCatalog = {plans:StorePlan[]; stars:StoreStars[]; starsEnabled:boolean};
 export type BotServices = {
+  richUi?: boolean;
   catalog?(): Promise<StoreCatalog | null>;
   claim(updateId: number, chatId: number): Promise<boolean>;
   linked(telegramId: number): Promise<boolean>;
@@ -261,6 +262,100 @@ function view(page:string,linked:boolean,options:EmojiOptions,name="",catalog:St
   return {text:head+"\n\n"+body,parse_mode:"HTML",disable_web_page_preview:true,
     reply_markup:{inline_keyboard:page==="home"?buttons(options,linked):[...extra,back]},...(rich?{rich}:{})};
 }
+// Native Rich Markdown controls, documented under Rich Message Formatting Options.
+// Only the trusted view model can produce actions; names and attributes are escaped.
+function richButton(b:Button,options:EmojiOptions,style?: "link"|"primary"|"success"|"danger"):string {
+  const symbol=Object.keys(iosIcons).find(s=>b.text.startsWith(s+" "));
+  const id=options.enabled ? (icon(b.icon_custom_emoji_id) || (symbol && configuredId(symbol,options))) : undefined;
+  const label=escapeHtml(id&&symbol ? b.text.slice(symbol.length+1) : b.text);
+  const visual=id ? '<tg-emoji emoji-id="'+id+'">'+escapeHtml(alternative[symbol||""]||symbol||"✨")+'</tg-emoji> ' : "";
+  const appearance=' style="'+(style||b.style||"link")+'"';
+  const action=b.callback_data ? 'type="callback_data" data="'+escapeHtml(b.callback_data)+'"'
+    : b.url ? 'type="url" url="'+escapeHtml(b.url)+'"'
+    : b.copy_text ? 'type="copy_text" text="'+escapeHtml(b.copy_text.text)+'"' : 'type="disabled"';
+  return '<tg-button '+action+appearance+'>'+visual+label+'</tg-button>';
+}
+function richMarkdown(page:string,payload:View,options:EmojiOptions,catalog:StoreCatalog|null,withPhoto:boolean):string {
+  const rows=payload.reply_markup.inline_keyboard;
+  const btn=(b:Button,style?: "link"|"primary"|"success"|"danger")=>richButton(b,options,style);
+  const line=(buttons:Button[],style?: "link"|"primary"|"success"|"danger")=>buttons.map(b=>btn(b,style)).join("  ");
+  const find=(predicate:(b:Button)=>boolean)=>rows.flat().find(predicate);
+  const action=(data:string,style:"link"|"primary"|"success"|"danger"="link")=>{
+    const b=find(b=>b.callback_data==="cortex:"+data);
+    return b ? btn(b,style) : "";
+  };
+  const url=(path:string,style:"link"|"primary"|"success"|"danger"="link")=>{
+    const b=find(b=>b.url===site+path);return b?btn(b,style):"";
+  };
+  const footer=(r:Button[])=>r.length?'<tg-button-row align="left">'+r.map(b=>btn(b,"link")).join("")+'</tg-button-row>':"";
+  const [heading,...paragraphs]=payload.text.split("\n\n");
+  const title='<h3>'+(options.enabled?decorateText(heading,options):heading)+'</h3>';
+  const textBlocks=paragraphs.map(p=>'<p>'+(options.enabled?decorateText(p,options):p).replace(/\n/g,"<br/>")+'</p>').join("\n\n");
+  if(page==="home") {
+    const main=rows[0][0];
+    return (withPhoto?'![]('+welcomePhoto+')\n\n':"")+title+"\n\n"+textBlocks+
+      "\n\n<tg-button-row align=\"left\">"+btn(main,main.style||"primary")+"</tg-button-row>"+
+      "\n\n---\n\n**Подписки и покупки**\n\nВыбрать тариф "+action("plans")+"  ·  "+action("pay")+
+      "\n\n**Помощь и новости**\n\n"+line(rows[2],"link")+
+      "\n\n"+line(rows[3],"link");
+  }
+  if(page==="plans"&&catalog&&catalog.plans.some(isVisible)) {
+    const all=catalog.plans.filter(isVisible).sort((a,b)=>Object.keys(planMeta).indexOf(a.code)-Object.keys(planMeta).indexOf(b.code));
+    const details=all.map(p=>"<details><summary>"+planMeta[p.code][0]+" · "+priceLabel(catalog,p)+"</summary><p>"+planMeta[p.code][1]+".<br/>"+
+      fmt(p.daily_tokens)+" токенов в день"+(p.advanced_tokens>0?"<br/>"+fmt(p.advanced_tokens)+" на продвинутые модели":"")+".</p><p>"+action("plan_"+p.code,"primary")+"</p></details>").join("\n\n");
+    return "## Тарифы CORTEX\n\nКоманды телефона бесплатны. Выбери дневной лимит облачного ИИ.\n\n"+
+      "| Тариф | Токенов/день | Цена |\n|:---|---:|---:|\n"+all.map(p=>"| **"+planMeta[p.code][0]+"** | "+fmt(p.daily_tokens)+" | "+priceLabel(catalog,p)+" |").join("\n")+
+      "\n\n"+details+"\n\n<footer>Цены за месяц. Лимиты обновляются в 03:00 МСК. Без автосписаний.</footer>\n\n"+footer(rows.slice(-2).flat());
+  }
+  if(page==="pay"&&catalog&&catalog.plans.some(isVisible)) {
+    const paid=catalog.plans.filter(p=>isVisible(p)&&p.code!=="free");
+    return "## Оплата подписки\n\nОдин месяц доступа, без автосписаний.\n\n"+
+      paid.map(p=>{const b=find(b=>b.url===site+"/payment?plan="+p.code||b.callback_data==="cortex:plan_"+p.code);
+        return "<p><b>"+planMeta[p.code as VisibleCode][0]+"</b> · "+priceLabel(catalog,p)+" "+(b?btn(b,starPrice(catalog,p)===null?"link":"success"):"")+"</p>";}).join("\n\n")+
+      "\n\n<footer>Оплата через официальный счёт Telegram. Перед покупкой войди в CORTEX.</footer>\n\n"+footer(rows.slice(-2).flat());
+  }
+  if(page.startsWith("plan_")&&catalog) {
+    const p=catalog.plans.find(p=>isVisible(p)&&p.code===page.slice(5));
+    if(p&&isVisible(p)) return "## CORTEX "+planMeta[p.code][0]+"\n\n"+planMeta[p.code][1]+"\n\n**"+priceLabel(catalog,p)+(starPrice(catalog,p)?" / месяц":"")+"**\n\n"+
+      "- "+fmt(p.daily_tokens)+" токенов в день"+(p.advanced_tokens>0?"\n- "+fmt(p.advanced_tokens)+" на продвинутые модели":"")+
+      "\n\n"+line(rows[0])+"\n\n<footer>Лимиты обновляются в 03:00 МСК. Автосписаний нет.</footer>\n\n"+footer(rows.slice(1).flat());
+  }
+  if(page==="support"||page==="paysupport") {
+    const copy=find(b=>!!b.copy_text);
+    return "## "+(page==="support"?"Поддержка CORTEX":"Вопрос по оплате")+"\n\n"+
+      (page==="support"?"Расскажи, что произошло. Если есть скриншот, приложи его.":"Если подписка не активировалась, укажи дату покупки, тариф и номер заказа.")+
+      "\n\n<p><b>Почта</b> · <code>"+email+"</code> "+(copy?btn(copy,"link"):"")+"</p>\n\n"+
+      line(rows[0])+"\n\n"+(page==="support"?"Оплата или подписка "+action("paysupport")+" \n\nКак пользоваться "+action("help"):url("/support","primary"))+
+      "\n\n<footer>Не отправляй пароли, данные карты и коды входа.</footer>\n\n"+footer(rows.slice(-1).flat());
+  }
+  if(page==="help") return "## Частые вопросы\n\n"+
+    "<details><summary>Как подключить аккаунт?</summary>Войди на сайт CORTEX, открой «Безопасность» и нажми «Привязать Telegram».</details>\n\n"+
+    "<details><summary>Как продлить подписку?</summary>Оплати новый месяц вручную через Telegram Stars. Автосписаний нет.</details>\n\n"+
+    "<details><summary>Где общаться с ИИ?</summary>В приложении CORTEX.</details>\n\n"+
+    "<p>Нужна помощь? "+action("support","primary")+"</p>\n\n"+footer(rows.slice(1).flat());
+  return title+"\n\n"+textBlocks+"\n\n"+rows.map((r,i)=>i===rows.length-1?footer(r):"<p>"+line(r)+"</p>").join("\n\n");
+}
+const rejectedRich=(e:unknown)=>e instanceof Error && "status" in e && [400,404].includes(Number(e.status));
+// Never put an InlineKeyboardMarkup under a successfully rendered rich message.
+// An explicit empty keyboard is used only when editing an older message.
+async function tryNativeRich(services:BotServices,chatId:number,page:string,payload:View,options:EmojiOptions,catalog:StoreCatalog|null,
+  editId?:number,withPhoto=false):Promise<boolean> {
+  const send=async(o:EmojiOptions)=>services.telegram(editId?"editMessageText":"sendRichMessage",{
+    chat_id:chatId,...(editId?{message_id:editId,reply_markup:{inline_keyboard:[]}}:{}),
+    rich_message:{markdown:richMarkdown(page,payload,o,catalog,withPhoto)}
+  });
+  try {await send(options);return true;}
+  catch(e) {
+    if(!rejectedRich(e))throw e;
+    if(options.enabled) {
+      try {await send({...options,enabled:false});return true;}
+      catch(e2){if(!rejectedRich(e2))throw e2;}
+    }
+    console.warn("cortex_rich_fallback",page);
+    return false;
+  }
+}
+
 async function deliverScreen(services:BotServices,chatId:number,payload:View,editId?:number) {
   const {rich,...plain}=payload;
   if(rich) {
@@ -316,6 +411,7 @@ function safePerson(person: TelegramPerson | undefined, id: number) {
 export async function processCortexBotUpdate(
   update: CortexTelegramUpdate, services: BotServices, emoji: EmojiOptions = {},
 ): Promise<number> {
+  const rawServices=services;
   services = premiumTransport(services, emoji);
   const callback = update.callback_query;
   const message = callback?.message || update.message;
@@ -335,8 +431,9 @@ export async function processCortexBotUpdate(
     const hashed = createHash("sha256").update(command.linkCode).digest("hex");
     const ok = await services.verifyLink(hashed, safePerson(from, userId));
     if (ok) {
-      const home = view("home", true, emoji, displayName(from));
-      await sendWelcome(services, chatId, { ...home, text: "✅ <b>Telegram успешно привязан</b>\n\nГотово! Теперь можно открыть свой кабинет, выбрать подписку или обратиться в поддержку." });
+      const home = {...view("home",true,rawServices.richUi?{}:emoji,displayName(from)),text:"✅ <b>Telegram успешно привязан</b>\n\nГотово! Теперь можно открыть свой кабинет, выбрать подписку или обратиться в поддержку."};
+      if(rawServices.richUi && await tryNativeRich(rawServices,chatId,"home",home,emoji,null,undefined,true))return 200;
+      await sendWelcome(services,chatId,home);
       return 200;
     }
     await services.telegram("sendMessage", {
@@ -369,7 +466,20 @@ export async function processCortexBotUpdate(
   const storePage=page==="plans"||page==="pay"||page.startsWith("plan_");
   const [linked,catalog]=await Promise.all([services.linked(userId),
     storePage&&services.catalog ? services.catalog().catch(()=>null) : Promise.resolve(null)]);
-  const payload=view(page,linked,emoji,displayName(from),catalog);
+  let payload=view(page,linked,rawServices.richUi?{}:emoji,displayName(from),catalog);
+  if(rawServices.richUi && (callback || command)) {
+    const messageId=message?.message_id;
+    const isPhoto=Array.isArray(message?.photo)&&message.photo.length>0;
+    const editId=callback&&!isPhoto&&validId(messageId)?messageId:undefined;
+    if(await tryNativeRich(rawServices,chatId,page,payload,emoji,catalog,editId,!editId&&page==="home"&&!callback)) {
+      if(callback&&isPhoto&&validId(messageId)) {
+        try {await rawServices.telegram("editMessageReplyMarkup",{chat_id:chatId,message_id:messageId,reply_markup:{inline_keyboard:[]}});} catch { /* New menu is already visible. */ }
+      }
+      return 200;
+    }
+    // A definitive rich rejection falls back to the current native keyboard and equivalent data.
+    payload={...payload,rich:undefined};
+  }
   if(callback) {
     const messageId=message?.message_id;
     if(validId(messageId) && Array.isArray(message?.photo) && message.photo.length>0) {
