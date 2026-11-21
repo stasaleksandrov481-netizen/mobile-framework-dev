@@ -154,8 +154,8 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
     deep: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "cohere/north-mini-code:free", "nvidia/nemotron-3.5-super-vl:free"],
   };
   const visualSchemas = [
-    "inclusionai/ling-3.2-flash:free", "baidu/ernie-5.5-flash-preview:free",
-    "nvidia/nemotron-3.5-super-vl:free",
+    "inclusionai/ling-3.2-flash:free", "nvidia/nemotron-3.5-super-vl:free",
+    "baidu/ernie-5.5-flash-preview:free",
   ];
   const visualTools = ["nvidia/nemotron-3.5-lightning:free", "cohere/north-mini-code:free"];
   // A funded OpenRouter account may receive 1,000 free-model attempts/day.
@@ -991,7 +991,10 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const ready = choices.filter(model => (modelCooldown.get(scope + model) || 0) <= Date.now());
         const ordered = input.visual || input.settings ? [
           ...ready.filter(model => visualTools.includes(model)).slice(0, 1),
-          ...ready.filter(model => visualSchemas.includes(model)).slice(0, 1),
+          // Keep a third, schema-based recovery candidate for visual tasks.
+          // Provider-specific 429s and invalid plans must not exhaust the route
+          // after just one tool model and one structured-output model.
+          ...ready.filter(model => visualSchemas.includes(model)).slice(0, input.visual ? 2 : 1),
         ] : ready;
         if (!ordered.length && choices[0]) ordered.push(choices[0]);
         // Paid capacity is earmarked per subscription. Free requests retain their own provider quota.
@@ -1010,7 +1013,7 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const routeModels = chosenPaid ? paidCandidates : chosenFree
           ? [{ model: chosenFree, advanced: false }]
           : [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
-        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.visual || input.settings ? 2 : 3);
+        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.settings ? 2 : 3);
         const messages = [...input.messages];
         if (access?.context_chars) {
           let chars = messages.reduce((total, turn) => total + turn.content.length, 0);
