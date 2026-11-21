@@ -49,7 +49,7 @@ export async function telegramBotApi<T>(
   });
   if (!response.ok) {
     await response.body?.cancel();
-    throw new Error("telegram_provider_unavailable");
+    throw Object.assign(new Error("telegram_provider_unavailable"), { status: response.status });
   }
   const payload = await response.json() as { ok?: boolean; result?: T };
   if (payload.ok !== true) throw new Error("telegram_provider_unavailable");

@@ -67,6 +67,84 @@ function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
     [nav("Помощь", "💬", "support", options, options.support), open("Новости", "📢", news)],
   ];
 }
+
+ // Public IDs from https://emoji.wivvi.net/ (Telegram iOS Icons, tgiosicons).
+const iosIcons: Readonly<Record<string, string>> = {
+  "✨": "5890925363067886150",
+  "✦": "5890925363067886150",
+  "👤": "6035084557378654059",
+  "🔗": "6028171274939797252",
+  "💎": "6037083366438737901",
+  "⭐": "6028338546736107668",
+  "↗": "5776233299424843260",
+  "💬": "5843918217323484232",
+  "📢": "6021418126061605425",
+  "🔒": "6030445631921721471",
+  "‹": "5960671702059848143",
+  "✅": "5938252440926163756",
+  "↻": "6030657343744644592",
+  "⚪": "5884332803016891855",
+  "🟢": "5938252440926163756",
+  "📖": "6030848053177486888",
+  "🧾": "5890727932011223292"
+};
+const alternative: Readonly<Record<string, string>> = { "✦":"✨", "↗":"🌐", "‹":"⬅️", "↻":"🔁", "🟢":"✅", "📖":"❓", "🧾":"🏷" };
+function configuredId(symbol: string, options: EmojiOptions): string | undefined {
+  const override = symbol === "✦" ? options.brand : symbol === "👤" || symbol === "🔗" ? options.account :
+    symbol === "⭐" ? options.payment : symbol === "💬" ? options.support : undefined;
+  return icon(override) || iosIcons[symbol];
+}
+function decorateText(text: string, options: EmojiOptions): string {
+  // Only author-controlled line-leading symbols; never interpret user-provided HTML or emoji.
+  return text.split("\n").map(line => {
+    const symbol = Object.keys(iosIcons).find(key => line.startsWith(key + " ") || line.startsWith(key + "️ "));
+    if (!symbol) return line;
+    const id = configuredId(symbol, options);
+    const trailing = line.slice(symbol.length).replace(/^\uFE0F/, "");
+    return id ? '<tg-emoji emoji-id="' + id + '">' + (alternative[symbol] || symbol) + '</tg-emoji>' + trailing : line;
+  }).join("\n");
+}
+function decoratePayload(args: Record<string, unknown>, options: EmojiOptions): Record<string, unknown> {
+  const out = {...args};
+  for (const key of ["text","caption"]) if (typeof out[key] === "string" && out.parse_mode === "HTML")
+    out[key] = decorateText(out[key] as string, options);
+  const markup = out.reply_markup as {inline_keyboard?: Button[][]} | undefined;
+  if (markup?.inline_keyboard) out.reply_markup = {...markup, inline_keyboard:markup.inline_keyboard.map(row=>row.map(b=>{
+    if (b.icon_custom_emoji_id) return b;
+    const symbol = Object.keys(iosIcons).find(key=>b.text.startsWith(key+" "));
+    if (!symbol) return b;
+    return {...b,text:b.text.slice(symbol.length+1),icon_custom_emoji_id:configuredId(symbol,options)};
+  }))};
+  return out;
+}
+function withoutPremium(args: Record<string, unknown>): Record<string, unknown> {
+  const out={...args};
+  for (const key of ["text","caption"]) if(typeof out[key]==="string")
+    out[key]=(out[key] as string).replace(/<tg-emoji emoji-id="[0-9]+">([^<]*)<\/tg-emoji>/g,"$1");
+  const markup=out.reply_markup as {inline_keyboard?:Button[][]}|undefined;
+  if(markup?.inline_keyboard) out.reply_markup={...markup,inline_keyboard:markup.inline_keyboard.map(row=>row.map(b=>{
+    const {icon_custom_emoji_id: id, ...rest}=b;
+    if(!id) return rest;
+    const symbol=Object.keys(iosIcons).find(key=>iosIcons[key]===id);
+    return {...rest,text:(symbol ? symbol+" " : "")+rest.text};
+  }))};
+  return out;
+}
+function premiumTransport(services:BotServices, options:EmojiOptions):BotServices {
+  if (!options.enabled) return services;
+  return {...services, telegram:async(method,args)=>{
+    if (!["sendMessage","sendPhoto","editMessageText","editMessageCaption","sendRichMessage"].includes(method)) return services.telegram(method,args);
+    const decorated=decoratePayload(args,options);
+    try {return await services.telegram(method,decorated);}
+    catch (error) {
+      // Only retry a definitive HTTP 400, never duplicate a message after a network timeout.
+      if (!(error instanceof Error) || !("status" in error) || error.status!==400 ||
+          !JSON.stringify(decorated).match(/tg-emoji|icon_custom_emoji_id/)) throw error;
+      return services.telegram(method,withoutPremium(decorated));
+    }
+  }};
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -75,7 +153,7 @@ function displayName(person?: TelegramPerson): string {
   return escapeHtml(person.first_name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 60));
 }
 function view(page: string, linked: boolean, options: EmojiOptions, name = ""): View {
-  const mark = premium("✦", options.brand, options);
+  const mark = premium(options.enabled ? "✨" : "✦", options.brand, options);
   let head = "", body = "";
   let extra: Button[][] = [];
   const back = [nav("В главное меню", "‹", "home")];
@@ -181,6 +259,7 @@ function safePerson(person: TelegramPerson | undefined, id: number) {
 export async function processCortexBotUpdate(
   update: CortexTelegramUpdate, services: BotServices, emoji: EmojiOptions = {},
 ): Promise<number> {
+  services = premiumTransport(services, emoji);
   const callback = update.callback_query;
   const message = callback?.message || update.message;
   const from = callback?.from || update.message?.from;

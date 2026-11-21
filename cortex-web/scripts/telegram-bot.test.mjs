@@ -118,3 +118,23 @@ test("Unrecognized plain text does not pretend to be an AI chat", async () => {
  const h=harness(); await processCortexBotUpdate(message("Привет"),h.services);
  assert.match(h.calls[0].args.text,/Для диалога с ИИ/);
 });
+
+test("iOS custom emoji cover all home buttons when enabled", async () => {
+ const h=harness(); await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
+ const args=h.calls[0].args,rows=args.reply_markup.inline_keyboard.flat();
+ assert.equal(rows.length,6);
+ assert.ok(rows.every(b=>typeof b.icon_custom_emoji_id==="string" && /^\d{19}$/.test(b.icon_custom_emoji_id)));
+ assert.equal(rows[0].icon_custom_emoji_id,"6028171274939797252");
+ assert.match(args.caption,/tg-emoji emoji-id="5890925363067886150"/);
+});
+test("Premium rejected by provider: retry same method with safe ordinary icons", async () => {
+ const h=harness(), call=h.services.telegram; let rejects=0;
+ h.services.telegram=async(m,a)=>{
+   if (JSON.stringify(a).match(/tg-emoji|icon_custom_emoji_id/)) {rejects++;throw Object.assign(Error("bad request"),{status:400});}
+   return call(m,a);
+ };
+ await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
+ assert.equal(rejects,1); assert.equal(h.calls[0].method,"sendPhoto");
+ assert.doesNotMatch(JSON.stringify(h.calls),/tg-emoji|icon_custom_emoji_id/);
+ assert.match(h.calls[0].args.reply_markup.inline_keyboard[0][0].text,/🔗/);
+});
