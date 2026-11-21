@@ -1,5 +1,10 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-21 UTC · Кандидат обработки ошибок OpenRouter 429
+
+- База production: Supabase Edge `cortex` **ACTIVE v52**, `verify_jwt=false`, SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. В `main` добавлен кандидат классификации HTTP/SSE 429: `metadata.headers` может содержать `X-RateLimit-*`, даже если эти поля отсутствуют в HTTP-заголовках. При наличии upstream provider name/code не блокировать глобально все модели.
+- Визуальное планирование, расчёт токенов, модели, биллинг, безопасность и Android не затрагиваются. Перед возможной публикацией сравнить 11 модулей текущей v52 с `main`, внести только дельту `provider.ts`, прогнать регрессионные тесты и проверить `/v1/status`. Откат — источник v52, полученный до релиза; в базу SQL изменений нет.
+
 ## 2026-11-21 UTC · Supabase Edge CORTEX v52 (production)
 
 - **ACTIVE v52**, `verify_jwt=false`, SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. Деплой основан на побайтно полученных 11 исходниках v51 и меняет ровно `redis.ts`, `provider.ts` и `singleflight.ts`. После выкладки 11/11 файлов проверены по исходникам: `handler.ts` сохраняет тройной fallback v51, остальные неизменённые файлы совпали с rollback baseline `6a6a9dc`, новые `provider.ts` и `redis.ts` совпали с `main`, а `singleflight.ts` — с точечным добавлением `text_ready` к live.
