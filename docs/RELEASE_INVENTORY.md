@@ -1,5 +1,11 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-21 UTC · Сверка Edge и кандидат восстановления Redis
+
+- Production Supabase `cortex` ACTIVE v50, `verify_jwt=false`, 11 файлов. Сравнение с `main` `eeae28e`: 7 файлов идентичны; `handler.ts`, `provider.ts`, `audio.ts`, `singleflight.ts` **отличаются от live**. Нельзя разворачивать содержимое `main` без сохранения действующих отличий. Текущая v50 — rollback-кандидат.
+- [PR #112](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/112) изменяет только `redis.ts` (кэширование неудачной Vault-конфигурации 15 секунд), регрессионный тест, запуск CI и документы передачи. `redis.ts` до исправления побайтно совпадает с live v50. Схема БД и конфигурация секретов не изменены.
+- За 24 часа функции `/v1/chat` зафиксированы 13 ответов 429, 4 ответа 502 и 3 ответа 504. Причины требуют отдельного анализа; связь с Redis не доказана. Ни Edge, ни Android APK, ни Vercel production в рамках PR #112 не публиковались. Для Edge потребуется сверка всех 11 файлов и успешные тесты.
+
 ## 2026-11-20 UTC · Кандидат потоковой озвучки Android
 
 - В [PR #108](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/108) вошли Android и Edge. База `f4e0e3c` побайтно совпала с 11 файлами действующего `cortex` ACTIVE v50, `verify_jwt=false`. Этот комплект сохраняет состояние для отката.
