@@ -1,3 +1,4 @@
+import { loadPublicPlans, loadPublicStarsPrices } from "@/lib/public-catalog";
 import { readBoundedJson } from "@/lib/bounded-json";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
@@ -58,6 +59,10 @@ export async function POST(request: NextRequest) {
       return respond(status);
     }
     const status = await processCortexBotUpdate(update as CortexTelegramUpdate, {
+      catalog: async () => {
+        const [plans,stars]=await Promise.all([loadPublicPlans(),loadPublicStarsPrices()]);
+        return plans ? {plans,stars:stars??[],starsEnabled} : null;
+      },
       claim: async (updateId, chatId) => {
         const result = await admin.rpc("cortex_telegram_claim_update", {
           p_update: updateId, p_chat: chatId,

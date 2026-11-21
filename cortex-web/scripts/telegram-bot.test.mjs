@@ -9,7 +9,9 @@ function message(text, update_id = 100) {
 function harness() {
   const calls = [], confirmations = [];
   let linked = false, allowed = true;
+  const catalog = {plans:[{code:"guest",daily_tokens:1,advanced_tokens:0,price_kopecks:0},{code:"free",daily_tokens:15000,advanced_tokens:0,price_kopecks:0},{code:"start",daily_tokens:50000,advanced_tokens:10000,price_kopecks:19900},{code:"pro",daily_tokens:100000,advanced_tokens:25000,price_kopecks:49900},{code:"ultra",daily_tokens:250000,advanced_tokens:100000,price_kopecks:99900}],stars:[{plan:"start",stars:100,enabled:true},{plan:"pro",stars:250,enabled:true},{plan:"ultra",stars:500,enabled:false}],starsEnabled:true};
   const services = {
+    catalog: async()=>catalog,
     claim: async (updateId, chatId) => { assert.equal(chatId, user); return allowed && updateId > 0; },
     linked: async id => { assert.equal(id, user); return linked; },
     verifyLink: async (hash, person) => { confirmations.push({ hash, person }); return true; },
@@ -57,7 +59,7 @@ test("Callbacks are acknowledged and menus edited, never charged", async () => {
     from: { id: user }, message: { chat, message_id: 91 } } };
   assert.equal(await processCortexBotUpdate(update, h.services), 200);
   assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "editMessageText"]);
-  assert.match(h.calls[1].args.text, /Telegram Stars/);
+  assert.match(h.calls[1].args.text, /Оплата подписки/);
 });
 test("Groups, forged chat senders and duplicate events have no private effects", async () => {
   const h = harness();
@@ -79,12 +81,13 @@ test("Bot commands include payment support without administrative or grant opera
   assert.ok(botCommands.every(c => !/(admin|grant|refund)/.test(c.command)));
 });
 
-test("Photo menu updates its caption without sending a second photo", async () => {
+test("Photo menu opens a dedicated text screen and removes old controls", async () => {
   const h = harness();
   await processCortexBotUpdate({ update_id: 113, callback_query: { id: "photo-callback", data: "cortex:pay",
     from: { id: user }, message: { chat, message_id: 99, photo: [{ file_id: "photo" }] } } }, h.services);
-  assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "editMessageCaption"]);
-  assert.match(h.calls[1].args.caption, /Telegram Stars/);
+  assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "sendMessage", "editMessageReplyMarkup"]);
+  assert.match(h.calls[1].args.text, /Оплата подписки/);
+  assert.deepEqual(h.calls[2].args.reply_markup.inline_keyboard,[]);
 });
 test("Photo failure leaves a fully functional text menu", async () => {
   const h = harness();
@@ -110,10 +113,10 @@ test("Rich guide uses supported HTML blocks and only safe direct URL actions", a
  assert.equal(h.calls[0].method,"sendRichMessage"); assert.match(h.calls[0].args.rich_message.html,/<details>/);
  assert.match(h.calls[0].args.rich_message.html, /<tg-button type="copy_text" style="link"/);
  assert.match(h.calls[0].args.rich_message.html, /<tg-button-row>/);
- assert.equal(h.calls[0].args.reply_markup, undefined);
+ assert.ok(h.calls[0].args.reply_markup.inline_keyboard.length);
 });
 test("Rich guide gracefully falls back", async () => {
- const h=harness(),call=h.services.telegram; h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Error("unavailable");return call(m,a)};
+ const h=harness(),call=h.services.telegram; h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Object.assign(Error("unavailable"),{status:400});return call(m,a)};
  await processCortexBotUpdate(message("/help"),h.services); assert.equal(h.calls[0].method,"sendMessage");
 });
 test("Unrecognized plain text does not pretend to be an AI chat", async () => {
@@ -152,5 +155,34 @@ test("Commercial greeting has no filler or long dashes", async () => {
 });
 test("FAQ opens rich content directly from support callback", async () => {
  const h=harness(); await processCortexBotUpdate({update_id:145,callback_query:{id:"faq",data:"cortex:help",from:{id:user},message:{chat,message_id:99,photo:[{file_id:"photo"}]}}},h.services);
- assert.deepEqual(h.calls.map(c=>c.method),["answerCallbackQuery","sendRichMessage"]);
+ assert.deepEqual(h.calls.map(c=>c.method),["answerCallbackQuery","sendRichMessage","editMessageReplyMarkup"]);
+});
+
+test("Catalog is real-data-driven, excludes guest, and uses rich comparison",async()=>{
+ const h=harness();await processCortexBotUpdate(message("/plans"),h.services);
+ assert.equal(h.calls[0].method,"sendRichMessage");
+ const html=h.calls[0].args.rich_message.html;
+ assert.match(html,/<table compact>/);assert.match(html,/Ultra/);assert.match(html,/250/);assert.match(html,/Недоступно/);assert.doesNotMatch(html,/guest/i);
+ assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="cortex:plan_pro"));
+});
+test("Plan selection has exact plan checkout, without invoice creation",async()=>{
+ const h=harness();await processCortexBotUpdate({update_id:150,callback_query:{id:"plan",data:"cortex:plan_pro",from:{id:user},message:{chat,message_id:27}}},h.services);
+ assert.equal(h.calls[1].method,"editMessageText");
+ assert.match(h.calls[1].args.text,/CORTEX Pro/);assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().some(b=>b.url==="https://cortexapp.ru/payment?plan=pro"));
+ assert.ok(h.calls.every(c=>c.method!=="sendInvoice"&&c.method!=="createInvoiceLink"));
+});
+test("Unavailable catalog shows no invented numbers or checkout",async()=>{
+ const h=harness();h.services.catalog=async()=>null;await processCortexBotUpdate(message("/plans"),h.services);
+ assert.match(h.calls[0].args.text,/Не получилось загрузить каталог/);
+ assert.doesNotMatch(JSON.stringify(h.calls),/payment\?plan|stars.*[0-9]/);
+});
+test("Token store never promises an unsupported purchase",async()=>{
+ const h=harness();await processCortexBotUpdate(message("/tokens"),h.services);
+ assert.match(h.calls[0].args.text,/пока нельзя купить/);assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().every(b=>!b.url?.includes("/payment")));
+});
+test("Rich catalog error falls back to real plain prices and same controls",async()=>{
+ const h=harness(),call=h.services.telegram;h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Object.assign(Error("bad rich"),{status:400});return call(m,a)};
+ await processCortexBotUpdate(message("/plans"),h.services);
+ assert.equal(h.calls[0].method,"sendMessage");assert.match(h.calls[0].args.text,/Pro.*250/);
+ assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="cortex:plan_pro"));
 });
