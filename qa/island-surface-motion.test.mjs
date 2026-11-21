@@ -50,7 +50,7 @@ test("Android Assistant invocation opens the island without loading MainActivity
   const service = native("CortexIslandService.kt");
   assert.match(service, /if \(systemRequested\)[\s\S]*?openFromSystem\(\)/);
   assert.match(service, /systemInvocation = true[\s\S]*?setExpanded\(true\)/);
-  assert.match(service, /ACTION_SCREEN_OFF && systemInvocation/);
+  assert.match(service, /ACTION_SCREEN_OFF\) \{\s*if \(!demonstrating\) resetConversation\(clearDraft = false\)\s*if \(!systemInvocation\) return/);
   assert.match(service, /if \(systemInvocation && !busy && !actionBusy\)[\s\S]*?dismissIsland\(power = true\)/);
 });
 

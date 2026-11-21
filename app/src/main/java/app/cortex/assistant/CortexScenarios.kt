@@ -24,10 +24,11 @@ internal object CortexScenarios {
     private fun owner(context: Context) = store(context).getString("owner", "").orEmpty()
 
     fun currentOwner(context: Context): String = owner(context)
+    fun accountOwner(candidate: String?): String = candidate?.takeIf { id.matches(it) || yandexId.matches(it) }.orEmpty()
 
     @Synchronized
     fun selectAccount(context: Context, candidate: String?) {
-        val next = candidate?.takeIf { id.matches(it) || yandexId.matches(it) }.orEmpty()
+        val next = accountOwner(candidate)
         if (next == owner(context)) return
         val store = store(context)
         val editor = store.edit().putString("owner", next)

@@ -38,28 +38,32 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private var localTts: TextToSpeech? = null
     private var localTurn: Int? = null
     private var generation = 0
+    private var session = -1L
     private var streamedFrames = 0
     private var streamStarted = false
 
     init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
 
-    @Synchronized fun speak(text: String, started: () -> Unit = {}, done: (Boolean) -> Unit) {
+    @Synchronized fun speak(text: String, started: () -> Unit = {}, revision: Long = CortexServerBridge.sessionRevision(),
+                            done: (Boolean) -> Unit) {
+        if (revision != CortexServerBridge.sessionRevision()) { handler.post { done(false) }; return }
         stop()
         if (!options.getBoolean("voiceReplies", true)) { handler.post { done(false) }; return }
         val turn = generation
+        session = revision
         val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
         if (normalized.isBlank()) { handler.post { done(false) }; return }
         // Speaking without focus is still better than staying silent, so the result is ignored.
         CortexRuntime.setVoicePlaying(this, true)
         runCatching { audio?.requestAudioFocus(focus) }
         val complete: (Boolean) -> Unit = { ok ->
-            if (synchronized(this) { turn == generation }) {
+            if (synchronized(this) { current(turn) }) {
                 releaseFocus()
                 done(ok)
             }
         }
         val notifyStarted = {
-            handler.post { if (synchronized(this) { turn == generation }) started() }
+            handler.post { if (synchronized(this) { current(turn) }) started() }
             Unit
         }
         if (BuildConfig.DEBUG) {
@@ -70,9 +74,9 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         streamStarted = false
         request = bridge.speechPcmStream(normalized, { bytes, count ->
             if (writeStreamChunk(turn, bytes, count)) notifyStarted()
-        }) { ok ->
+        }, session = revision) { ok ->
             synchronized(this) {
-                if (turn != generation || request == null) return@speechPcmStream
+                if (!current(turn) || request == null) return@speechPcmStream
                 request = null
             }
             val started = synchronized(this) { streamStarted }
@@ -89,7 +93,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         // Only fall back when no first chunk arrives; never cut off live streaming audio.
         handler.postDelayed({
             val stale = synchronized(this) {
-                if (turn != generation || streamStarted) null else request.also { request = null }
+                if (!current(turn) || streamStarted) null else request.also { request = null }
             }
             if (stale != null) {
                 bridge.cancel(stale)
@@ -101,7 +105,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
 
     private fun writeStreamChunk(turn: Int, pcm: ByteArray, count: Int): Boolean {
         val player = synchronized(this) {
-            if (turn != generation || request == null) return false
+            if (!current(turn) || request == null) return false
             track ?: AudioTrack.Builder()
                 .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -120,12 +124,12 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         var written = 0
         var first = false
         while (written < count) {
-            synchronized(this) { if (turn != generation || track !== player) return false }
+            synchronized(this) { if (!current(turn) || track !== player) return false }
             val next = player.write(pcm, written, count - written)
             if (next <= 0) throw IllegalStateException("AudioTrack stream rejected samples")
             written += next
             synchronized(this) {
-                if (turn != generation || track !== player) return false
+                if (!current(turn) || track !== player) return false
                 streamedFrames += next / 2
                 if (!streamStarted) {
                     streamStarted = true
@@ -137,7 +141,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     }
 
     private fun waitForPlayback(turn: Int, complete: (Boolean) -> Unit) {
-        val player = synchronized(this) { if (turn == generation) track else null }
+        val player = synchronized(this) { if (current(turn)) track else null }
         if (player == null) { complete(false); return }
         val frameCount = synchronized(this) { streamedFrames }
         if (Build.VERSION.SDK_INT >= 31 && frameCount in 1 until 1_920) runCatching {
@@ -145,7 +149,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         }
         val deadline = SystemClock.elapsedRealtime() + frameCount * 1000L / 24_000L + 2500L
         fun poll() {
-            synchronized(this) { if (turn != generation) return }
+            synchronized(this) { if (!current(turn)) return }
             if (player.playbackHeadPosition >= frameCount) {
                 synchronized(this) { if (track === player) track = null }
                 runCatching { player.stop() }
@@ -164,7 +168,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
 
     private fun releaseStreamPlayer(turn: Int) {
         val old = synchronized(this) {
-            if (turn != generation) return
+            if (!current(turn)) return
             track.also { track = null }
         }
         runCatching { old?.pause() }
@@ -175,14 +179,14 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private fun useAndroidVoice(turn: Int, text: String, started: () -> Unit, complete: (Boolean) -> Unit) {
         handler.post {
             synchronized(this) {
-                if (turn != generation || localTurn == turn) return@post
+                if (!current(turn) || localTurn == turn) return@post
                 localTurn = turn
             }
             try {
                 val engine = TextToSpeech(applicationContext) { status ->
                     handler.post {
                         val voice = synchronized(this) {
-                            if (turn == generation && localTurn == turn) localTts else null
+                            if (current(turn) && localTurn == turn) localTts else null
                         } ?: return@post
                         if (status != TextToSpeech.SUCCESS) {
                             finishAndroidVoice(turn, false, complete)
@@ -227,7 +231,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
                     }
                 }
                 synchronized(this) {
-                    if (turn == generation && localTurn == turn) localTts = engine
+                    if (current(turn) && localTurn == turn) localTts = engine
                     else runCatching { engine.shutdown() }
                 }
                 handler.postDelayed({ finishAndroidVoice(turn, false, complete) }, 75_000L)
@@ -240,7 +244,7 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
     private fun finishAndroidVoice(turn: Int, ok: Boolean, complete: (Boolean) -> Unit) {
         handler.post {
             val engine = synchronized(this) {
-                if (turn != generation || localTurn != turn) return@post
+                if (!current(turn) || localTurn != turn) return@post
                 localTurn = null
                 localTts.also { localTts = null }
             }
@@ -255,8 +259,12 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
         runCatching { audio?.abandonAudioFocusRequest(focus) }
     }
 
+    private fun current(turn: Int) = turn == generation && session == CortexServerBridge.sessionRevision()
+
     @Synchronized fun stop() {
         ++generation
+        session = -1L
+        handler.removeCallbacksAndMessages(null)
         releaseFocus()
         request?.let(bridge::cancel)
         request = null

@@ -72,6 +72,8 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     private var systemInvocation = false
     private var screenListenerRegistered = false
     private var hiddenByVoice = false
+    private var conversationSession = CortexServerBridge.sessionRevision()
+    private val sessionListener: () -> Unit = { refreshConversationSession() }
     private var touchThrough = false
     private val passThroughAlpha by lazy {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -104,7 +106,9 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF && systemInvocation) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                if (!demonstrating) resetConversation(clearDraft = false)
+                if (!systemInvocation) return
                 systemInvocation = false
                 if (backgroundDisabled()) dismissIsland(power = true) else setExpanded(false)
             }
@@ -117,6 +121,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         running = this
         CortexActionState.listener = actionStatus
         CortexRuntime.islandVisibility = visibilityChanged
+        CortexRuntime.addSessionListener(sessionListener)
         CortexRuntime.wakeLevel = wakeLevel
         CortexRuntime.reminder = showReminder
         CortexRuntime.islandTouchPassThrough = passThrough
@@ -332,7 +337,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun updateTask(status: CortexActionState.Status) {
-        if (poweringOff) return
+        if (poweringOff || status.session != CortexServerBridge.sessionRevision()) return
         if (status.phase == "executing") closeReminder(true)
         task = status
         ui.removeCallbacks(clearTask)
@@ -552,6 +557,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
 
     private fun submit(raw: String, fromVoice: Boolean = false) {
         if (demonstrating) return
+        refreshConversationSession()
         val text = raw.trim().take(2400)
         if (clarificationId == null) handleControl(this, text)?.let { control ->
             if (control.startsWith("Выключить островок")) {
@@ -573,11 +579,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         updateStatus("thinking", "Думаю…")
         val streamed = StringBuilder()
         var spoken = ""
-        fun canSpeak() = fromVoice && !poweringOff && preferences.getBoolean("voiceReplies", true)
+        val revision = conversationSession
+        fun canSpeak() = fromVoice && !poweringOff && revision == CortexServerBridge.sessionRevision() &&
+            CortexSchedule.screenReady(this) && preferences.getBoolean("voiceReplies", true)
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
             modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
             beforeScreen = { setExpanded(false) },
             clarificationId = answering,
+            session = revision,
             toolsAllowed = { preferences.getBoolean("phoneActions", true) && Settings.canDrawOverlays(this) },
             progress = { updateStatus("executing", it) },
             delta = { chunk ->
@@ -596,7 +605,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             textReady = {
                 if (canSpeak() && streamed.isNotBlank()) {
                     spoken = streamed.toString().trim()
-                    voiceOutput.speak(spoken) {}
+                    voiceOutput.speak(spoken, revision = revision) {}
                 }
             },
             finished = { answer, ok, questionId ->
@@ -621,7 +630,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 }
                 if (spoken.isNotEmpty() && reply != spoken) voiceOutput.stop()
                 if (reply != spoken && canSpeak() && reply.isNotBlank())
-                    voiceOutput.speak(reply) { /* The answer stays visible if Android cannot play audio. */ }
+                    voiceOutput.speak(reply, revision = revision) { /* The answer stays visible if Android cannot play audio. */ }
             })
     }
 
@@ -645,6 +654,34 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         busy = false
         if (reply.isBlank()) reply = "Ответ остановлен."
         updateStatus("stopped", "Остановлено")
+    }
+
+    private fun refreshConversationSession() {
+        val revision = CortexServerBridge.sessionRevision()
+        if (conversationSession == revision) return
+        conversationSession = revision
+        resetConversation(clearDraft = true)
+    }
+
+    private fun resetConversation(clearDraft: Boolean) {
+        if (assistantDelegate.isInitialized()) assistant.cancel()
+        if (voiceOutputDelegate.isInitialized()) voiceOutput.stop()
+        clarificationId?.let { CortexActionEngine.dismissClarification("island", it) }
+        clarificationId = null
+        ui.removeCallbacks(expireClarification)
+        ui.removeCallbacks(repaintAnswer)
+        ui.removeCallbacks(clearTask)
+        repaintPending = false
+        busy = false
+        task = null
+        reply = ""
+        if (clearDraft) {
+            draft = ""
+            island?.conversation?.draft("")
+            CortexSchedule.clearDraft("island")
+        }
+        setExpanded(false)
+        updateStatus("idle", "")
     }
 
     private fun openApplication() {
@@ -798,6 +835,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         if (CortexRuntime.reminder === showReminder) CortexRuntime.reminder = null
         if (CortexActionState.listener === actionStatus) CortexActionState.listener = null
         if (CortexRuntime.islandVisibility === visibilityChanged) CortexRuntime.islandVisibility = null
+        CortexRuntime.removeSessionListener(sessionListener)
         if (CortexRuntime.wakeLevel === wakeLevel) CortexRuntime.wakeLevel = null
         if (CortexRuntime.islandTouchPassThrough === passThrough) CortexRuntime.islandTouchPassThrough = null
         if (running === this) running = null

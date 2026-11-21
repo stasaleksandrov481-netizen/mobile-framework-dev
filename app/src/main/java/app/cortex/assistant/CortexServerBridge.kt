@@ -72,10 +72,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         enqueue(id, request, ::publish, ::publish)
     }
 
-    fun chat(payload: JSONObject, onEvent: (JSONObject) -> Unit, done: (JSONObject) -> Unit): String {
+    fun chat(payload: JSONObject, onEvent: (JSONObject) -> Unit, session: Long = sessionRevision(), done: (JSONObject) -> Unit): String {
         val id = UUID.randomUUID().toString()
         val request = JSONObject().put("operation", "chat").put("payload", payload)
-        enqueue(id, request, onEvent, done)
+        enqueue(id, request, onEvent, done, session)
         return id
     }
 
@@ -86,13 +86,13 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     }
 
     /** Streams signed 24 kHz mono PCM on the worker thread; no full-audio buffering. */
-    fun speechPcmStream(text: String, onChunk: (ByteArray, Int) -> Unit, done: (Boolean) -> Unit): String {
+    fun speechPcmStream(text: String, onChunk: (ByteArray, Int) -> Unit, session: Long, done: (Boolean) -> Unit): String {
         val id = UUID.randomUUID().toString()
         val task = FutureTask<Unit> {
             var success = false
-            try { success = streamSpeechBytes(text, id, onChunk) }
+            try { success = streamSpeechBytes(text, id, session, onChunk) }
             catch (_: Exception) { /* Caller chooses the Android TTS fallback. */ }
-            main.post { if (jobs.remove(id) != null) done(success) }
+            main.post { if (jobs.remove(id) != null) done(success && sessionScope.accepts(session)) }
         }
         val accepted = synchronized(lifecycle) {
             if (executor.isShutdown || jobs.size >= 19 || jobs.putIfAbsent(id, task) != null) false
@@ -103,7 +103,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         return id
     }
 
-    private fun streamSpeechBytes(text: String, id: String, onChunk: (ByteArray, Int) -> Unit): Boolean {
+    private fun streamSpeechBytes(text: String, id: String, session: Long, onChunk: (ByteArray, Int) -> Unit): Boolean {
         if (text.isBlank() || text.length > 550) return false
         val manager = context.getSystemService(ConnectivityManager::class.java)
         if (manager.getNetworkCapabilities(manager.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) return false
@@ -122,10 +122,11 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Install", installId)
             if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
-            store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            bearer(session)?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true
             val payload = JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)
             connection.setFixedLengthStreamingMode(payload.size)
+            if (!sessionScope.accepts(session)) return false
             connection.outputStream.use { it.write(payload) }
             if (connection.responseCode !in 200..299 ||
                 connection.getHeaderField("X-Cortex-Audio-Format") != CortexAudioCodec.PCM_FORMAT ||
@@ -134,9 +135,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             var carry = 0
             connection.inputStream.use { input ->
                 while (true) {
-                    if (Thread.currentThread().isInterrupted || !jobs.containsKey(id)) return false
+                    if (Thread.currentThread().isInterrupted || !jobs.containsKey(id) || !sessionScope.accepts(session)) return false
                     val read = input.read(buffer, carry, buffer.size - carry)
                     if (read < 0) break
+                    if (!sessionScope.accepts(session)) return false
                     size += read
                     if (size > 2_400_000) return false
                     val available = read + carry
@@ -162,13 +164,19 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         enqueue(UUID.randomUUID().toString(), JSONObject().put("operation", "support-inbox"), {}, done)
     }
 
-    private fun enqueue(id: String, request: JSONObject, onEvent: (JSONObject) -> Unit, done: (JSONObject) -> Unit) {
-        val updates = ChatUpdates(id, onEvent)
+    private fun enqueue(id: String, request: JSONObject, onEvent: (JSONObject) -> Unit, done: (JSONObject) -> Unit,
+                        expectedSession: Long = sessionRevision()) {
+        val operation = request.optString("operation")
+        val session = expectedSession.takeUnless { operation.startsWith("auth-") }
+        val updates = ChatUpdates(id, session, onEvent)
         val task = FutureTask<Unit> {
             val outcome = JSONObject()
             try {
-                if (request.optString("operation") != "logout") retryPendingRevocation(id)
-                outcome.put("result", perform(request, id, updates::add))
+                if (!sessionScope.accepts(session)) throw CortexSessionScope.Changed()
+                if (operation != "logout") retryPendingRevocation(id)
+                outcome.put("result", perform(request, id, session, updates::add))
+            } catch (_: CortexSessionScope.Changed) {
+                outcome.put("error", "session_changed")
             } catch (error: GatewayFailure) {
                 outcome.put("error", error.code)
                 if (error.retryAfter > 0) outcome.put("retry_after", error.retryAfter)
@@ -178,7 +186,10 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             } catch (_: Exception) {
                 outcome.put("error", "offline")
             }
-            main.post { if (jobs.remove(id) != null) done(outcome) }
+            main.post {
+                if (jobs.remove(id) != null) done(if (operation == "logout" || sessionScope.accepts(session)) outcome
+                    else JSONObject().put("error", "session_changed"))
+            }
         }
         val accepted = synchronized(lifecycle) {
             if (executor.isShutdown || jobs.size >= 19 || jobs.putIfAbsent(id, task) != null) false
@@ -193,10 +204,11 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         if (!accepted) main.post { done(JSONObject().put("error", "busy")) }
     }
 
-    private inner class ChatUpdates(val id: String, val publish: (JSONObject) -> Unit) {
+    private inner class ChatUpdates(val id: String, val session: Long?, val publish: (JSONObject) -> Unit) {
         private var pending = ArrayList<Any>()
 
         @Synchronized fun add(event: JSONObject) {
+            if (!sessionScope.accepts(session)) throw CortexSessionScope.Changed()
             val wasEmpty = pending.isEmpty()
             val delta = event.opt("delta") as? String
             val tail = pending.lastOrNull()
@@ -209,28 +221,34 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         private fun drain() {
             val batch = synchronized(this) { pending.also { pending = ArrayList() } }
             for (update in batch) {
-                if (!jobs.containsKey(id)) return
+                if (!jobs.containsKey(id) || !sessionScope.accepts(session)) return
                 publish(if (update is JSONObject) update else JSONObject().put("delta", update.toString()))
             }
         }
     }
 
     fun cancel(id: String) {
-        jobs.remove(id)?.cancel(true)
+        synchronized(lifecycle) {
+            jobs.remove(id)?.let { task ->
+                task.cancel(true)
+                executor.remove(task)
+            }
+        }
         connections.remove(id)?.let { socket -> Thread(socket::disconnect, "cortex-cancel").start() }
     }
 
-    private fun perform(request: JSONObject, id: String, onEvent: (JSONObject) -> Unit): JSONObject {
+    private fun perform(request: JSONObject, id: String, session: Long?, onEvent: (JSONObject) -> Unit): JSONObject {
+        fun post(route: String) = call("POST", route, request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, session = session)
         return when (request.optString("operation")) {
-            "status" -> call("GET", "status", null, id, timeoutMs = 8_000)
-            "subscription" -> call("GET", "subscription", null, id)
-            "subscription-payment" -> call("POST", "subscription/payment", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
-            "presence" -> call("POST", "presence", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
-            "support-inbox" -> call("GET", "support/inbox", null, id)
-            "support-ai" -> call("POST", "support/ai", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
-            "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent)
-            "speech" -> speechBytes(request.optString("text"), id)
-            "support" -> call("POST", "support", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id)
+            "status" -> call("GET", "status", null, id, timeoutMs = 8_000, session = session)
+            "subscription" -> call("GET", "subscription", null, id, session = session)
+            "subscription-payment" -> post("subscription/payment")
+            "presence" -> post("presence")
+            "support-inbox" -> call("GET", "support/inbox", null, id, session = session)
+            "support-ai" -> post("support/ai")
+            "chat" -> call("POST", "chat", request.optJSONObject("payload") ?: throw GatewayFailure("invalid"), id, onEvent, session = session)
+            "speech" -> speechBytes(request.optString("text"), id, session)
+            "support" -> post("support")
             "auth-start" -> synchronized(loginLock) {
                 call("POST", "auth/start?return=android&scheme=${BuildConfig.APPLICATION_ID}", JSONObject(), id).also {
                     val code = it.optString("poll")
@@ -258,16 +276,15 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 val payload = request.optJSONObject("payload") ?: throw GatewayFailure("invalid")
                 val result = call("POST", "auth/$route", payload, id)
                 adoptSession(result)
-                if (route == "reset") {
-                    store.clear()
-                    CortexScenarios.selectAccount(context, null)
-                }
+                if (route == "reset") clearSession()
                 result
             }
             "auth-cancel" -> synchronized(loginLock) { store.clear("login"); JSONObject().put("cancelled", true) }
             "logout" -> {
                 val active = synchronized(loginLock) {
-                    store.detachForLogout().also { CortexScenarios.selectAccount(context, null) }
+                    changeSession(session) {
+                        store.detachForLogout().also { CortexScenarios.selectAccount(context, null) }
+                    }
                 }
                 // Revoke only the bearer detached by this operation. A sign-in
                 // that starts during the call must not be signed out.
@@ -285,9 +302,27 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         val token = result.remove("token") as? String
         if (result.optString("state") != "signed_in") return
         if (token == null || !LOGIN_CODE.matches(token)) throw GatewayFailure("auth_denied")
-        store.put(token)
+        changeSession {
+            store.put(token)
+            CortexScenarios.selectAccount(context, result.optJSONObject("account")?.optString("id"))
+        }
         store.clear("login")
-        CortexScenarios.selectAccount(context, result.optJSONObject("account")?.optString("id"))
+    }
+
+    private fun bearer(session: Long?): String? = sessionScope.read(session) { store.get() }
+
+    private fun <T> changeSession(expected: Long? = null, write: () -> T): T {
+        val previous = sessionRevision()
+        try {
+            return sessionScope.advance(expected, write)
+        } finally {
+            if (previous != sessionRevision()) main.post { CortexRuntime.publishSessionChange() }
+        }
+    }
+
+    private fun clearSession() = changeSession {
+        store.clear()
+        CortexScenarios.selectAccount(context, null)
     }
 
     private fun retryPendingRevocation(id: String) {
@@ -307,7 +342,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
 
     private fun call(method: String, route: String, payload: JSONObject?, id: String,
                      onEvent: ((JSONObject) -> Unit)? = null, bearerOverride: String? = null,
-                     timeoutMs: Int? = null): JSONObject {
+                     timeoutMs: Int? = null, session: Long? = null): JSONObject {
         val network = context.getSystemService(ConnectivityManager::class.java)
         val capabilities = network.getNetworkCapabilities(network.activeNetwork)
         if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) throw GatewayFailure("offline")
@@ -327,8 +362,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Version-Code", cortexPackage?.versionCode?.toString() ?: BuildConfig.VERSION_CODE.toString())
             connection.setRequestProperty("X-Cortex-Version-Name", cortexPackage?.versionName ?: BuildConfig.VERSION_NAME)
             connection.setRequestProperty("Cache-Control", "no-store")
-            val token = bearerOverride ?: store.get()
+            val token = bearerOverride ?: bearer(session)
             if (!token.isNullOrEmpty()) connection.setRequestProperty("Authorization", "Bearer $token")
+            if (!sessionScope.accepts(session)) throw CortexSessionScope.Changed()
             if (payload != null) {
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -339,11 +375,8 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 val body = connection.errorStream?.let { readBounded(it, 2_000) }.orEmpty()
                 val error = runCatching { JSONObject(body) }.getOrNull()
                 val code = error?.optString("error").orEmpty().ifBlank { if (status == 429) "rate_limit" else "server" }
-                if (code == "sign_in" && !token.isNullOrEmpty()) synchronized(loginLock) {
-                    if (store.get() == token) {
-                        store.clear()
-                        CortexScenarios.selectAccount(context, null)
-                    }
+                if (code == "sign_in" && bearerOverride == null && !token.isNullOrEmpty()) synchronized(loginLock) {
+                    if (sessionScope.accepts(session) && store.get() == token) clearSession()
                 }
                 throw GatewayFailure(code, error?.optInt("retry_after") ?: 0, error?.optJSONObject("quota"))
             }
@@ -357,12 +390,18 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 if (!jobs.containsKey(id)) throw InterruptedException()
                 JSONObject(text).also {
                     if (route == "status" && it.optString("fault").isEmpty() && it.has("account")) synchronized(loginLock) {
-                        if (store.get() != token) throw GatewayFailure("auth_busy")
+                        if (!sessionScope.accepts(session) || store.get() != token) throw CortexSessionScope.Changed()
                         val account = it.optJSONObject("account")
-                        if (account == null && !token.isNullOrEmpty()) store.clear()
-                        CortexScenarios.selectAccount(context, account?.optString("id"))
+                        val owner = CortexScenarios.accountOwner(account?.optString("id"))
+                        if (account == null && !token.isNullOrEmpty()) clearSession()
+                        else if (CortexScenarios.currentOwner(context) != owner) changeSession {
+                            CortexScenarios.selectAccount(context, owner)
+                        }
                         it.optJSONObject("gate")?.let { gate ->
-                            main.post { if (jobs.containsKey(id)) CortexActionState.saveGate(context, gate) }
+                            val verifiedSession = sessionRevision()
+                            main.post {
+                                if (jobs.containsKey(id) && sessionScope.accepts(verifiedSession)) CortexActionState.saveGate(context, gate)
+                            }
                         }
                     }
                 }
@@ -373,7 +412,7 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
         }
     }
 
-    private fun speechBytes(text: String, id: String): JSONObject {
+    private fun speechBytes(text: String, id: String, session: Long?): JSONObject {
         if (text.isBlank() || text.length > 550) throw GatewayFailure("invalid")
         val connection = (URL(endpoint + "speech").openConnection() as HttpURLConnection)
         connections[id] = connection
@@ -389,8 +428,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
             connection.setRequestProperty("X-Cortex-Install", installId)
             if (approvedApkSignature) deviceId?.let { connection.setRequestProperty("X-Cortex-Device", it) }
             connection.setRequestProperty("X-Cortex-Version-Code", BuildConfig.VERSION_CODE.toString())
-            store.get()?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
+            bearer(session)?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             connection.doOutput = true
+            if (!sessionScope.accepts(session)) throw CortexSessionScope.Changed()
             connection.outputStream.use { it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)) }
             if (connection.responseCode !in 200..299) {
                 val json = runCatching { JSONObject(connection.errorStream?.let { readBounded(it, 300) }.orEmpty()) }.getOrNull()
@@ -489,6 +529,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     companion object {
         private val installLock = Any()
         private val loginLock = Any()
+        private val sessionScope = CortexSessionScope()
+        fun sessionRevision(): Long = sessionScope.revision
+        fun <T> forSession(revision: Long, action: () -> T): T = sessionScope.read(revision, action)
         private val LOGIN_CODE = Regex("^[A-Za-z0-9_-]{43}$")
         private const val ENCODING = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 

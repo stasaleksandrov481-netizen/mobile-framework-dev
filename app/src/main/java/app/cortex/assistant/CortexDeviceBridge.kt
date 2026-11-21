@@ -36,9 +36,15 @@ internal class CortexDeviceBridge(
     private val scheduleListener: () -> Unit = ::scheduleList
     private val experienceListener: (JSONObject) -> Unit = { emit(it) }
     private val screenAccessListener: () -> Unit = { refreshPermissions() }
+    private val sessionListener: () -> Unit = {
+        stopVoiceOutput()
+        speech.stop()
+        emit(JSONObject().put("type", "session-changed").put("accountId", CortexScenarios.currentOwner(context)))
+    }
     init {
         CortexRuntime.scheduleChanged = scheduleListener
         CortexRuntime.screenAccessChanged = screenAccessListener
+        CortexRuntime.addSessionListener(sessionListener)
         CortexFirstExperience.listener = experienceListener
     }
 
@@ -254,6 +260,7 @@ internal class CortexDeviceBridge(
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
         if (CortexRuntime.screenAccessChanged === screenAccessListener) CortexRuntime.screenAccessChanged = null
+        CortexRuntime.removeSessionListener(sessionListener)
         if (CortexFirstExperience.listener === experienceListener) CortexFirstExperience.listener = null
         if (engineDelegate.isInitialized()) engine.close()
         activeVoice = null
