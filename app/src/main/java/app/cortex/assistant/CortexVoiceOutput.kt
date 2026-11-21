@@ -44,11 +44,12 @@ internal class CortexVoiceOutput(context: Context) : AutoCloseable {
 
     init { options.registerOnSharedPreferenceChangeListener(speechSetting) }
 
-    @Synchronized fun speak(text: String, started: () -> Unit = {}, done: (Boolean) -> Unit) {
+    @Synchronized fun speak(text: String, started: () -> Unit = {}, revision: Long = CortexServerBridge.sessionRevision(),
+                            done: (Boolean) -> Unit) {
+        if (revision != CortexServerBridge.sessionRevision()) { handler.post { done(false) }; return }
         stop()
         if (!options.getBoolean("voiceReplies", true)) { handler.post { done(false) }; return }
         val turn = generation
-        val revision = CortexServerBridge.sessionRevision()
         session = revision
         val normalized = text.replace(Regex("""[*_#\[\]<>]"""), "").trim().take(550)
         if (normalized.isBlank()) { handler.post { done(false) }; return }

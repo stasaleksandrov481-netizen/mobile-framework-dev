@@ -389,8 +389,9 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
                 JSONObject(text).also {
                     if (route == "status" && it.optString("fault").isEmpty() && it.has("account")) synchronized(loginLock) {
                         if (!sessionScope.accepts(session) || store.get() != token) throw CortexSessionScope.Changed()
-                        val owner = it.optJSONObject("account")?.optString("id").orEmpty()
-                        if (owner.isEmpty() && !token.isNullOrEmpty()) clearSession()
+                        val account = it.optJSONObject("account")
+                        val owner = CortexScenarios.accountOwner(account?.optString("id"))
+                        if (account == null && !token.isNullOrEmpty()) clearSession()
                         else if (CortexScenarios.currentOwner(context) != owner) changeSession {
                             CortexScenarios.selectAccount(context, owner)
                         }

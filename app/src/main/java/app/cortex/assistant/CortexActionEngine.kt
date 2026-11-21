@@ -80,9 +80,9 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         explicitConversation: ConversationRequest? = null,
         explicitScenario: CortexScenarios.Scenario? = null,
         clarificationId: String? = null,
+        session: Long = CortexServerBridge.sessionRevision(),
         finished: (Result) -> Unit
     ): Boolean {
-        val session = CortexServerBridge.sessionRevision()
         val owner = try { CortexServerBridge.forSession(session) { CortexScenarios.currentOwner(context).ifBlank { "guest" } } }
         catch (_: CortexSessionScope.Changed) { finished(Result("Сеанс изменился. Повторите команду.", false)); return true }
         val now = SystemClock.uptimeMillis()
@@ -200,7 +200,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             fun report(message: String) {
                 if (session != CortexServerBridge.sessionRevision()) throw CancellationException("Session changed")
                 if (CortexActionState.status?.message == message && CortexActionState.status?.phase == "executing") return
-                CortexActionState.report(context, "executing", message)
+                CortexActionState.report(context, "executing", message, session = session)
                 progress(message)
             }
             try {
@@ -291,7 +291,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     CortexActionState.log(context, if (result.ok) "Команда выполнена · шагов экрана: ${task.completed}"
                         else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
                 }
-                CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible)
+                CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible, session = session)
                 if (sameSession) turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
                 finished(result)
             }

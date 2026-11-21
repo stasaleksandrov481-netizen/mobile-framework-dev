@@ -579,11 +579,14 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
         updateStatus("thinking", "Думаю…")
         val streamed = StringBuilder()
         var spoken = ""
-        fun canSpeak() = fromVoice && !poweringOff && CortexSchedule.screenReady(this) && preferences.getBoolean("voiceReplies", true)
+        val revision = conversationSession
+        fun canSpeak() = fromVoice && !poweringOff && revision == CortexServerBridge.sessionRevision() &&
+            CortexSchedule.screenReady(this) && preferences.getBoolean("voiceReplies", true)
         assistant.send(text, preferences.getString("profile", "auto") ?: "auto",
             modelId = preferences.getString("aiModel", "auto").takeUnless { it == "auto" },
             beforeScreen = { setExpanded(false) },
             clarificationId = answering,
+            session = revision,
             toolsAllowed = { preferences.getBoolean("phoneActions", true) && Settings.canDrawOverlays(this) },
             progress = { updateStatus("executing", it) },
             delta = { chunk ->
@@ -602,7 +605,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
             textReady = {
                 if (canSpeak() && streamed.isNotBlank()) {
                     spoken = streamed.toString().trim()
-                    voiceOutput.speak(spoken) {}
+                    voiceOutput.speak(spoken, revision = revision) {}
                 }
             },
             finished = { answer, ok, questionId ->
@@ -627,7 +630,7 @@ class CortexIslandService : Service(), DisplayManager.DisplayListener {
                 }
                 if (spoken.isNotEmpty() && reply != spoken) voiceOutput.stop()
                 if (reply != spoken && canSpeak() && reply.isNotBlank())
-                    voiceOutput.speak(reply) { /* The answer stays visible if Android cannot play audio. */ }
+                    voiceOutput.speak(reply, revision = revision) { /* The answer stays visible if Android cannot play audio. */ }
             })
     }
 

@@ -25,14 +25,14 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
         text: String, profile: String, modelId: String? = null, beforeScreen: () -> Unit,
         toolsAllowed: () -> Boolean, progress: (String) -> Unit, delta: (String) -> Unit,
         clarificationId: String? = null,
+        session: Long,
         textReady: () -> Unit,
         finished: (String, Boolean, String?) -> Unit
     ) {
-        if (request != null) return
+        if (request != null || session != CortexServerBridge.sessionRevision()) return
         refreshGate()
         CortexActionState.gateMessage()?.let { finished(it, false, null); return }
         val turn = ++generation
-        val session = CortexServerBridge.sessionRevision()
         fun current() = turn == generation && session == CortexServerBridge.sessionRevision()
         val tools = toolsAllowed()
         val unlocked = !context.getSystemService(KeyguardManager::class.java).isDeviceLocked
@@ -55,7 +55,7 @@ internal class IslandAssistant(private val context: Context) : AutoCloseable {
             if (current()) finished(answer, ok, null)
         }
         if (engine.start(text, profile, allowPhone = tools, beforeScreen = beforeScreen, progress = progress,
-                clarificationId = clarificationId) { result ->
+                clarificationId = clarificationId, session = session) { result ->
                 if (current()) {
                     engine.observeAssistantAnswer(result.text)
                     finished(result.text, result.ok, result.clarificationId)

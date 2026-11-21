@@ -78,10 +78,11 @@ internal object CortexActionState {
 
     fun stop() { cancel?.invoke() }
 
-    fun report(context: Context, phase: String, message: String, showResult: Boolean = false) {
+    fun report(context: Context, phase: String, message: String, showResult: Boolean = false,
+               session: Long = CortexServerBridge.sessionRevision()) {
         val active = phase == "executing"
         if (!active) cancel = null
-        val next = Status(phase, message.take(180), if (showResult) message.take(4_000) else "")
+        val next = Status(phase, message.take(180), if (showResult) message.take(4_000) else "", session = session)
         status = next
         runCatching { listener?.invoke(next) }.onFailure {
             android.util.Log.w("CortexActions", "Status listener failed: ${it.javaClass.simpleName}")
