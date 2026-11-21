@@ -1,3 +1,10 @@
+## 2026-11-21 UTC · GitHub Actions: ручная сборка APK не должна переиздавать beta.11
+
+- Диагноз: ручной Android workflow run #376 (ID 44910410096, commit `e653f691`) завершился до компиляции на шаге `Validate Android release version before building`: `v1.0.18-beta.11 already points to a different commit`. Это правильно работающая защита идентичности опубликованного релиза, а не ошибка Gradle. Предыдущий push run #375 на том же коммите прошёл успешно.
+- Кандидат исправления: ветка `fix/android-manual-build-no-republish-20261121`, основа `main` `e653f691`, изменение `.github/workflows/android-apk.yml` (начальный commit `633d500`). `workflow_dispatch` по умолчанию запускает сборку и прикладывает `CORTEX-test-debug-<run_number>` в Artifacts, **не публикуя** прежний tag. Для намеренного выпуска нового подписанного релиза теперь требуется явный флаг `publish_release` и новая версия с повышенным `versionCode`; существующие проверки подписи/релизных тегов сохранены.
+- Ограничения: debug APK подписан тестовым сертификатом и не устанавливается поверх публичного release APK. Новый подписанный релиз пока **не опубликован**. Android-код, версия, дизайн, Supabase и Vercel не менялись; production release `v1.0.18-beta.11` остаётся кандидатом отката/основой.
+- Проверки: проверены логи run #376, успешный run #375 и конфигурация Workflow. Следующий шаг: PR CI (Android debug/release, тесты, lint/security), затем безопасное объединение в `main` и контроль нового запуска.
+
 ## 2026-11-21 UTC · Production v54: каталоговый fallback восстановлен
 
 - PR #117 squash merged to GitHub `main` as `814595009290a1124b703498ccf72e8024306f47`. Edge regression tests 85/85 passed, billing, handoff, UI, CodeQL passed. В GitHub изменения сосредоточены в `handler.ts`, `handler.test.ts` и документации; Edge release выполнен отдельно из live v53.
