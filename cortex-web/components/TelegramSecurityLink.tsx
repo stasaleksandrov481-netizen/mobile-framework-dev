@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { invalidateTelegramAvatar } from "@/lib/use-telegram-avatar";
 import { cortexAuth } from "@/lib/cortex-auth";
 
 type LinkState = "loading" | "none" | "pending" | "linked" | "expired";
@@ -29,12 +30,14 @@ function errorText(error: unknown): string {
   return "Не удалось выполнить действие. Попробуй позже.";
 }
 
-export function TelegramSecurityLink({ active }: { active: boolean }) {
+export function TelegramSecurityLink({active,photo=null}:{active:boolean;photo?:string|null}) {
   const [state, setState] = useState<LinkStatus>({ state: "loading" });
   const [linkUrl, setLinkUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmUnlink, setConfirmUnlink] = useState(false);
+  const previousState=useRef<LinkState>("loading");
+  useEffect(()=>{const previous=previousState.current;previousState.current=state.state;if(previous!=="loading"&&previous!==state.state&&(previous==="linked"||state.state==="linked"))invalidateTelegramAvatar();},[state.state]);
 
   const request = useCallback(async (method: "GET" | "POST" | "DELETE", action?: "create") => {
     const { data: { session } } = await cortexAuth.auth.getSession();
@@ -100,6 +103,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
         setLinkUrl(null);
         setState(next);
         setConfirmUnlink(false);
+        invalidateTelegramAvatar();
       }
     } catch (err) {
       setError(errorText(err));
@@ -115,12 +119,12 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
   return <section className="account-panel account-telegram-panel" aria-labelledby="account-telegram-title">
     <div className="account-telegram-heading">
       <div className="account-telegram-mark" aria-hidden="true">
-        <img src="/cortex-mark.svg" width="28" height="28" alt="" />
+        {connected&&photo?<img className="cortex-avatar-photo account-telegram-photo" src={photo} width="40" height="40" alt="" />:<img src="/cortex-mark.svg" width="28" height="28" alt="" />}
       </div>
       <div>
         <div className="account-small-label">ПОДКЛЮЧЁННЫЕ СЕРВИСЫ</div>
         <h2 id="account-telegram-title">Telegram</h2>
-        <p>Привяжи Telegram к CORTEX, чтобы использовать бота с подтверждённым аккаунтом.</p>
+        <p>Привяжи Telegram к CORTEX, чтобы пользоваться ботом и автоматически показывать фото Telegram в профиле.</p>
       </div>
     </div>
 

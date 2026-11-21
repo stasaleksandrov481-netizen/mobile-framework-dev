@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { cortexPublishableKey, cortexSupabaseUrl } from "@/lib/cortex-public-config";
+import { telegramAvatar } from "@/lib/telegram-avatar";
 import { readBoundedJson } from "@/lib/bounded-json";
 import { telegramBotApi, telegramConfigurationValid } from "@/lib/telegram-stars";
 
@@ -81,7 +82,15 @@ export async function GET(request: NextRequest) {
   try {
     const context = await authenticated(request);
     if (!context) return response(401, { error: "login_required" });
-    return response(200, safeState(await rowFor(context.admin, context.user.id)));
+    const row=await rowFor(context.admin,context.user.id);
+    if(request.nextUrl.searchParams.get("avatar")==="1"){
+      const headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff","Cross-Origin-Resource-Policy":"same-origin"};
+      if(row?.state!=="linked"||!row.telegram_id)return new Response(null,{status:204,headers});
+      const image=await telegramAvatar(context.user.id,row.telegram_id,row.updated_at);
+      return image ? new Response(image,{status:200,headers:{...headers,"Content-Type":"image/jpeg"}})
+        : new Response(null,{status:204,headers});
+    }
+    return response(200,safeState(row));
   } catch { return response(503, { error: "link_unavailable" }); }
 }
 
