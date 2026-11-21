@@ -1,5 +1,10 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-21 UTC · Кандидат Edge: третий резерв визуального планировщика
+
+- Подготовлен [PR #114](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/114) из `main` `eeae28e`. Изменены `handler.ts`, интеграционный тест и документы. Резервная модель для визуального планирования добавляется только после отказов первых двух моделей; настройки и обычный чат не затронуты, 20-секундный общий deadline сохраняется.
+- Действующий Supabase Edge `cortex` ACTIVE v50, `verify_jwt=false`; в 7/11 файлах идентичен `main`, 4/11 (`handler.ts`, `provider.ts`, `audio.ts`, `singleflight.ts`) различаются из-за других непубликованных кандидатов голосового потока. **Публикация этого PR в Supabase без переноса исправлений из live запрещена**. Текущий v50 — rollback-кандидат; ни Edge, ни схема SQL, ни Android не развёртывались.
+
 ## 2026-11-20 UTC · Кандидат потоковой озвучки Android
 
 - В [PR #108](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/108) вошли Android и Edge. База `f4e0e3c` побайтно совпала с 11 файлами действующего `cortex` ACTIVE v50, `verify_jwt=false`. Этот комплект сохраняет состояние для отката.
