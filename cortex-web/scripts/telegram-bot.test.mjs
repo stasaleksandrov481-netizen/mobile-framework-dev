@@ -108,7 +108,9 @@ test("Personal greetings escape hostile HTML", async () => {
 test("Rich guide uses supported HTML blocks and only safe direct URL actions", async () => {
  const h=harness(); await processCortexBotUpdate(message("/help"),h.services);
  assert.equal(h.calls[0].method,"sendRichMessage"); assert.match(h.calls[0].args.rich_message.html,/<details>/);
- assert.match(h.calls[0].args.rich_message.html, /<tg-button type="copy_text" style="link"/);\n assert.match(h.calls[0].args.rich_message.html, /<tg-button-row>/);\n assert.equal(h.calls[0].args.reply_markup, undefined);
+ assert.match(h.calls[0].args.rich_message.html, /<tg-button type="copy_text" style="link"/);
+ assert.match(h.calls[0].args.rich_message.html, /<tg-button-row>/);
+ assert.equal(h.calls[0].args.reply_markup, undefined);
 });
 test("Rich guide gracefully falls back", async () => {
  const h=harness(),call=h.services.telegram; h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Error("unavailable");return call(m,a)};
