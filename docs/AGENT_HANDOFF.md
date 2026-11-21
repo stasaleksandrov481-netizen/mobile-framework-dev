@@ -1,3 +1,10 @@
+## 2026-11-21 UTC · Верификация live Edge v52 и следующий шаг
+
+- Исправление Redis и тест безопасного `text_ready` объединены в `main` через [PR #115](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/115), squash `4eddc60`. 77/77 Edge тестов, billing, handoff и security scan успешны; Android workflow не использовался для выпуска APK.
+- Supabase проект `jjcqrjztxohnifmziksy`, Edge функция `cortex`: **ACTIVE v52**, `verify_jwt=false`, deployment SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. Из 11 файлов v51 изменены только `redis.ts`, `provider.ts` и `singleflight.ts`. Источники v52 повторно получены через Supabase и совпали 11/11 с ожидаемым результатом.
+- Внесено: повтор Redis Vault после отрицательной конфигурации через 15 секунд; `text_ready` до settlement при полученном тексте, без раскрытия личных квот в shared-stream. Никаких правок SQL, оплаты, токенов, входа, APK или Vercel. В случае регресса откатиться к проверенному комплекту v51 (SHA256 `313bf1f4969d35b61353a3361d70ee188cc459ec18023f83c85baa6be15db72f`, 11 файлов v50 `6a6a9dc` + 3 изменения `handler.ts` из PR #114).
+- Осталось: выполнить независимый HTTP smoke `/v1/status` и проверку `text_ready` на реальном Android; внешний веб-инструмент не открыл прямой URL Supabase. Мониторить новые 502/504/429 по версии 52 без чтения персональных данных; не заявлять об их устранении без статистики.
+
 ## 2026-11-21 UTC · Backend: Redis Vault и ранний сигнал готовности текста
 
 - Проверен проект Supabase и GitHub `main`. Действующая Edge v51 ACTIVE, 11 модулей, `verify_jwt=false`. Наблюдался один новый ответ HTTP 502 от `/v1/chat` на v51; это не доказательство Redis-проблемы.
