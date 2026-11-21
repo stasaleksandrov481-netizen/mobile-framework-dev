@@ -34,10 +34,12 @@ test("Main menu uses official colored button styles, no fake premium IDs", async
   const payload = h.calls[0].args;
   assert.equal(h.calls[0].method, "sendPhoto");
   assert.equal(payload.photo, "https://cortexapp.ru/telegram/welcome.jpg");
-  assert.match(payload.caption, /Добро пожаловать/);
+  assert.match(payload.caption, /Привет, Tester/);
   assert.equal(payload.parse_mode, "HTML");
   assert.ok(payload.reply_markup.inline_keyboard.flat().some(b => b.style === "primary"));
-  assert.ok(payload.reply_markup.inline_keyboard.flat().some(b => b.style === "success"));
+  assert.equal(payload.reply_markup.inline_keyboard[0].length, 1);
+  assert.deepEqual(payload.reply_markup.inline_keyboard.map(r => r.length), [1,2,1,2]);
+  assert.match(payload.reply_markup.inline_keyboard[0][0].text, /🔗/);
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.icon_custom_emoji_id));
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.url || /^https:\/\/(?:cortexapp\.ru|t\.me)\//.test(b.url)));
 });
@@ -46,7 +48,7 @@ test("Premium emoji require explicit safe IDs and an enabled flag", async () => 
   await processCortexBotUpdate(message("/menu"), h.services,
     { enabled: true, brand: "5368324170671202286", account: "5368324170671202286" });
   await processCortexBotUpdate(message("/account", 105), h.services, { enabled: true, brand: "5368324170671202286", account: "5368324170671202286" });
-  assert.match(h.calls[1].args.text, /tg-emoji/);
+  assert.match(h.calls[0].args.caption, /tg-emoji/);
   assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b => b.icon_custom_emoji_id));
 });
 test("Callbacks are acknowledged and menus edited, never charged", async () => {
@@ -69,7 +71,7 @@ test("Groups, forged chat senders and duplicate events have no private effects",
 test("Linked Telegram status only exposes link existence, never an email or quota", async () => {
   const h = harness();h.setLinked(true);
   await processCortexBotUpdate(message("/status"), h.services);
-  assert.match(h.calls[0].args.text, /привязан/);
+  assert.match(h.calls[0].args.text, /Подключение активно/);
   assert.doesNotMatch(JSON.stringify(h.calls), /@example|balance|user_id|quota/);
 });
 test("Bot commands include payment support without administrative or grant operations", () => {
@@ -90,5 +92,29 @@ test("Photo failure leaves a fully functional text menu", async () => {
   h.services.telegram = async (method,args) => { if (method === "sendPhoto") throw Error("photo unavailable"); return call(method,args); };
   await processCortexBotUpdate(message("/start"), h.services);
   assert.equal(h.calls[0].method, "sendMessage");
-  assert.match(h.calls[0].args.text, /Добро пожаловать/);
+  assert.match(h.calls[0].args.text, /Привет, Tester/);
+});
+
+test("Linked home promotes dashboard and keeps payment neutral", async () => {
+ const h=harness(); h.setLinked(true); await processCortexBotUpdate(message("/start"), h.services);
+ const rows=h.calls[0].args.reply_markup.inline_keyboard;
+ assert.equal(rows[0][0].style,"success"); assert.equal(rows[0][0].callback_data,"cortex:account");
+ assert.equal(rows[1][1].style,undefined); assert.match(h.calls[0].args.caption,/Аккаунт подключён/);
+});
+test("Personal greetings escape hostile HTML", async () => {
+ const h=harness(); const m=message("/start"); m.message.from.first_name='<b>A&B</b>';
+ await processCortexBotUpdate(m,h.services); assert.match(h.calls[0].args.caption,/&lt;b&gt;A&amp;B&lt;\/b&gt;/);
+});
+test("Rich guide uses supported HTML blocks and only safe direct URL actions", async () => {
+ const h=harness(); await processCortexBotUpdate(message("/help"),h.services);
+ assert.equal(h.calls[0].method,"sendRichMessage"); assert.match(h.calls[0].args.rich_message.html,/<details>/);
+ assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().every(b=>b.url.startsWith("https://cortexapp.ru/")));
+});
+test("Rich guide gracefully falls back", async () => {
+ const h=harness(),call=h.services.telegram; h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Error("unavailable");return call(m,a)};
+ await processCortexBotUpdate(message("/help"),h.services); assert.equal(h.calls[0].method,"sendMessage");
+});
+test("Unrecognized plain text does not pretend to be an AI chat", async () => {
+ const h=harness(); await processCortexBotUpdate(message("Привет"),h.services);
+ assert.match(h.calls[0].args.text,/Для диалога с ИИ/);
 });
