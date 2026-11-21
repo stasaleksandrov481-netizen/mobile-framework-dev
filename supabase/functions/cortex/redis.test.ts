@@ -80,3 +80,36 @@ test("warm cache avoids Redis reads and parallel cold reads are coalesced", asyn
   assert.deepEqual(await cache.getFreeModels(m => m.endsWith(":free")), ["example/working:free"]);
   assert.equal(calls, 1);
 });
+
+test("transient Vault failure is retried after 15 seconds instead of five minutes", async () => {
+  let now = 10_000;
+  let lookups = 0;
+  let redisCalls = 0;
+  const previousNow = Date.now;
+  Date.now = () => now;
+  try {
+    const cache = createRedisCache({}, async () => {
+      redisCalls++;
+      return Response.json({ result: '["example/recovered:free"]' });
+    }, () => {
+      lookups++;
+      if (lookups === 1) throw new Error("temporary synchronous Vault outage");
+      return Promise.resolve({ url: "https://cortex-demo.upstash.io", token: "R".repeat(24) });
+    });
+    assert.equal(await cache.getFreeModels(model => model.endsWith(":free")), null);
+    now += 14_999;
+    assert.equal(await cache.getFreeModels(model => model.endsWith(":free")), null);
+    assert.equal(lookups, 1, "failed Vault lookups are briefly coalesced");
+    now += 2;
+    assert.deepEqual(await cache.getFreeModels(model => model.endsWith(":free")),
+      ["example/recovered:free"]);
+    assert.equal(lookups, 2, "Vault is retried after the short negative TTL");
+    assert.equal(redisCalls, 1);
+    now += 60_000;
+    await cache.putFreeModels(["example/recovered:free"]);
+    assert.equal(lookups, 2, "successful Vault credentials remain cached");
+    assert.equal(redisCalls, 2);
+  } finally {
+    Date.now = previousNow;
+  }
+});
