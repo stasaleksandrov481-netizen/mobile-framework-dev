@@ -31,9 +31,8 @@ test("unverified hotword voice cannot disclose or edit private memory on the loc
   const island = source("app/src/main/java/app/cortex/assistant/IslandAssistant.kt");
   const memory = source("app/src/main/java/app/cortex/assistant/CortexPrivateMemory.kt");
   assert.match(island, /val unlocked = !context\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceLocked/);
-  assert.match(island, /if \(unlocked\) memory\.listFacts\(\) else emptyList\(\)/);
-  assert.match(island, /if \(unlocked\) memory\.recent\(\)/);
-  assert.match(island, /if \(ok && unlocked\) memory\.remember\(text, answer\)/);
+  assert.match(island, /if \(unlocked\) memory\.listFacts\(\) to memory\.recent\(\) else emptyList/);
+  assert.match(island, /if \(ok && unlocked && CortexSchedule\.screenReady\(context\)\) memory\.remember\(text, answer\)/);
   assert.match(island, /if \(!unlocked \|\| address\.isBlank\(\)\)/);
   assert.match(memory, /memoryRequest && context\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceLocked/);
 });

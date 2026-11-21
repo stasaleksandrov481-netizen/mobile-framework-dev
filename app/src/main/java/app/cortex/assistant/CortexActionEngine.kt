@@ -34,12 +34,21 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val phone = CortexPhoneActions(this.context)
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
+    private var actionSession: Long? = null
+    private val sessionListener: () -> Unit = {
+        if (actionSession?.let { it != CortexServerBridge.sessionRevision() } == true) cancel()
+    }
+    init { CortexRuntime.addSessionListener(sessionListener) }
+
     private val turnContexts = LinkedHashMap<String, CortexTurnContext>(16, .75f, true)
     private var contextOwner = ""
+    private var contextSession = -1L
 
     private fun turnContext(owner: String, source: String): CortexTurnContext {
-        if (contextOwner != owner) {
+        val session = CortexServerBridge.sessionRevision()
+        if (contextOwner != owner || contextSession != session) {
             contextOwner = owner
+            contextSession = session
             turnContexts.clear()
         }
         turnContexts[source]?.let { return it }
@@ -73,9 +82,12 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         clarificationId: String? = null,
         finished: (Result) -> Unit
     ): Boolean {
-        val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
+        val session = CortexServerBridge.sessionRevision()
+        val owner = try { CortexServerBridge.forSession(session) { CortexScenarios.currentOwner(context).ifBlank { "guest" } } }
+        catch (_: CortexSessionScope.Changed) { finished(Result("Сеанс изменился. Повторите команду.", false)); return true }
         val now = SystemClock.uptimeMillis()
         val turnContext = turnContext(owner, source)
+        if (saved?.session != session) saved = null
         val clarification = clarificationId?.let { id ->
             saved?.takeIf { it.clarificationId == id && it.owner == owner && it.source == source &&
                 now - it.pausedAt < CLARIFICATION_TIMEOUT_MS }
@@ -161,7 +173,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             paused.owner == owner && (paused.source == source || resumeText && paused.question.isBlank() && paused.conversation == null)
         } else null
         val task = state?.copy(plans = 0, failures = linkedSetOf(), progress = CortexPlanTracker())
-            ?: Task(command, profile, source, owner, conversation = conversation, search = search, schoolSite = schoolSite, scheduled = scheduled)
+            ?: Task(command, profile, source, owner, session, conversation = conversation, search = search, schoolSite = schoolSite, scheduled = scheduled)
         if (reply != null) {
             task.conversation = task.conversation?.withAnswer(text)
             if (task.conversation == null) {
@@ -181,10 +193,12 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         if (state != null) saved = null
         else if (saved?.source == source) saved = null
 
+        actionSession = session
         job = scope.launch(start = CoroutineStart.LAZY) {
             var result = Result("Задача остановлена.", false)
             var preserve = false
             fun report(message: String) {
+                if (session != CortexServerBridge.sessionRevision()) throw CancellationException("Session changed")
                 if (CortexActionState.status?.message == message && CortexActionState.status?.phase == "executing") return
                 CortexActionState.report(context, "executing", message)
                 progress(message)
@@ -239,6 +253,11 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 preserve = task.completed > 0 || task.queue.isNotEmpty() || task.plans > 0
                 result = Result("Не удалось получить подтверждение Android. Можно продолжить с текущего экрана.", false, preserve)
             } finally {
+                val sameSession = session == CortexServerBridge.sessionRevision()
+                if (!sameSession) {
+                    preserve = false
+                    result = Result("Сеанс изменился. Повторите команду.", false)
+                }
                 if (!result.ok) runCatching { service?.stopTouch() }
                 task.recognized = null
                 if (preserve) {
@@ -260,6 +279,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     }
                 }
                 job = null
+                actionSession = null
                 val phase = when {
                     result.ok -> "done"
                     preserve && task.question.isNotBlank() -> "understood"
@@ -272,7 +292,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                         else "Команда завершена без подтверждения цели · шагов экрана: ${task.completed}")
                 }
                 CortexActionState.report(context, phase, status, showResult = !CortexRuntime.appVisible)
-                turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
+                if (sameSession) turnContext.observeAnswer(result.text, owner, SystemClock.uptimeMillis())
                 finished(result)
             }
         }
@@ -1049,7 +1069,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                 var id: String? = null
                 try {
                     suspendCancellableCoroutine { pending ->
-                        id = gateway.chat(payload, {}) { outcome -> if (pending.isActive) pending.resume(outcome) }
+                        id = gateway.chat(payload, {}, task.session) { outcome -> if (pending.isActive) pending.resume(outcome) }
                     }
                 } finally {
                     id?.let(gateway::cancel)
@@ -1089,6 +1109,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
 
     fun cancel() { job?.cancel() }
     override fun close() {
+        CortexRuntime.removeSessionListener(sessionListener)
         cancel()
         scope.cancel()
         gateway.close()
@@ -1107,6 +1128,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         val profile: String,
         val source: String,
         val owner: String,
+        val session: Long,
         val queue: ArrayDeque<VisualStep> = ArrayDeque(),
         val failures: MutableSet<Attempt> = linkedSetOf(),
         val verified: ArrayDeque<String> = ArrayDeque(),
@@ -1142,7 +1164,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
         fun dismissClarification(source: String, id: String) {
             if (saved?.let { it.source == source && it.clarificationId == id } == true) saved = null
         }
-        fun canResume(source: String) = saved?.source == source
+        fun canResume(source: String) = saved?.let { it.source == source && it.session == CortexServerBridge.sessionRevision() } == true
         private val RETRYABLE_PLAN_ERRORS = setOf("offline", "timeout", "server", "server_busy")
         private const val MAX_PLANS = 24
         private const val MAX_SCREEN_STEPS = 120

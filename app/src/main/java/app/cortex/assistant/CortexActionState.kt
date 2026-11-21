@@ -18,7 +18,8 @@ import java.util.UUID
 
 /** One phone task at a time, independent of which CORTEX surface started it. */
 internal object CortexActionState {
-    data class Status(val phase: String, val message: String, val answer: String = "", val at: Long = android.os.SystemClock.uptimeMillis())
+    data class Status(val phase: String, val message: String, val answer: String = "",
+                      val at: Long = android.os.SystemClock.uptimeMillis(), val session: Long = CortexServerBridge.sessionRevision())
 
     private var cancel: (() -> Unit)? = null
     var firstCommand = true

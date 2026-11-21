@@ -1,6 +1,7 @@
 package app.cortex.assistant
 
 import android.graphics.PointF
+import java.util.concurrent.CopyOnWriteArraySet
 
 internal object CortexRuntime {
     var appVisible = false
@@ -12,6 +13,15 @@ internal object CortexRuntime {
     var shutdownListener: (() -> Unit)? = null
     var scheduleChanged: (() -> Unit)? = null
     var screenAccessChanged: (() -> Unit)? = null
+    private val sessionListeners = CopyOnWriteArraySet<() -> Unit>()
+
+    fun addSessionListener(listener: () -> Unit) { sessionListeners.add(listener) }
+    fun removeSessionListener(listener: () -> Unit) { sessionListeners.remove(listener) }
+    fun publishSessionChange() {
+        sessionListeners.forEach { listener ->
+            runCatching(listener).onFailure { android.util.Log.w("CortexRuntime", "Session listener failed: ${it.javaClass.simpleName}") }
+        }
+    }
     var reminder: ((String, String) -> Boolean)? = null
     var leaveForAction: (() -> Unit)? = null
     var firstExperienceActive = false

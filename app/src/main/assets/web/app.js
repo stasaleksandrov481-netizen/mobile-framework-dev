@@ -740,8 +740,9 @@
         window.CortexSetup?.autoStart();
       } else if (!S.account && !publicRoutes.has(route)) navigate("account", { replace: true });
       syncComposer();
-    } catch {
+    } catch (error) {
       if (epoch !== statusEpoch) return;
+      if (error.code === "session_changed") { void refreshConnection(); return; }
       connection.status = "offline";
     }
     if (["profile", "models"].includes(route)) render();
@@ -958,9 +959,10 @@
   function logout() {
     confirm("Выйти из аккаунта?", "Локальные чаты останутся на этом устройстве.", async () => {
       if (pending) stopAnswer(false);
-      ++statusEpoch;
+      const logoutEpoch = ++statusEpoch;
       try {
         await Api.request("logout");
+        if (logoutEpoch !== statusEpoch && S.account) return;
         setAccount(null);
         window.CortexControl?.refresh();
         render();
@@ -1601,6 +1603,16 @@
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
     if (Planner.handle(message)) return;
+    if (message.type === "session-changed") {
+      closeVoice();
+      if (pending) { stopAnswer(false); render(); }
+      if (S.account && S.account.id !== message.accountId) {
+        setAccount(null);
+        render();
+        if (message.accountId) void refreshConnection();
+      }
+      return;
+    }
     if (message.type === "voice" && voice?.recognition && message.id === voice.recognition) {
       recognitionEvent(voice, message);
     }
