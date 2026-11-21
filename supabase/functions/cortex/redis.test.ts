@@ -91,10 +91,10 @@ test("transient Vault failure is retried after 15 seconds instead of five minute
     const cache = createRedisCache({}, async () => {
       redisCalls++;
       return Response.json({ result: '["example/recovered:free"]' });
-    }, async () => {
+    }, () => {
       lookups++;
-      if (lookups === 1) throw new Error("temporary Vault outage");
-      return { url: "https://cortex-demo.upstash.io", token: "R".repeat(24) };
+      if (lookups === 1) throw new Error("temporary synchronous Vault outage");
+      return Promise.resolve({ url: "https://cortex-demo.upstash.io", token: "R".repeat(24) });
     });
     assert.equal(await cache.getFreeModels(model => model.endsWith(":free")), null);
     now += 14_999;
