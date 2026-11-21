@@ -63,7 +63,7 @@ function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
       ? nav("Личный кабинет", "👤", "account", options, options.account, "success")
       : open("Подключить аккаунт CORTEX", "🔗", site + "/account?tab=security", options, options.account, "primary")],
     [nav("Тарифы", "💎", "plans"), nav("Оплата", "⭐", "pay", options, options.payment)],
-    [open("Открыть CORTEX", "↗", site, options, options.brand)],
+    [open("Открыть CORTEX", "↗", site + "/", options, options.brand)],
     [nav("Помощь", "💬", "support", options, options.support), open("Новости", "📢", news)],
   ];
 }
@@ -248,7 +248,7 @@ export async function processCortexBotUpdate(
   } else if (!command) {
     await services.telegram("sendMessage", {chat_id: chatId, parse_mode: "HTML",
       text: "💬 <b>Здесь — управление CORTEX.</b>\nДля диалога с ИИ открой приложение. Для аккаунта, оплаты и помощи выбери действие ниже.",
-      reply_markup: {inline_keyboard: [[open("Открыть CORTEX", "↗", site, {}, undefined, "primary")],
+      reply_markup: {inline_keyboard: [[open("Открыть CORTEX", "↗", site + "/", {}, undefined, "primary")],
         [nav("Главное меню", "‹", "home")]]}});
   } else {
     await services.telegram("sendMessage", { chat_id: chatId, ...payload });

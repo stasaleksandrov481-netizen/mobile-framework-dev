@@ -48,7 +48,7 @@ test("Premium emoji require explicit safe IDs and an enabled flag", async () => 
   await processCortexBotUpdate(message("/menu"), h.services,
     { enabled: true, brand: "5368324170671202286", account: "5368324170671202286" });
   await processCortexBotUpdate(message("/account", 105), h.services, { enabled: true, brand: "5368324170671202286", account: "5368324170671202286" });
-  assert.match(h.calls[1].args.text, /tg-emoji/);
+  assert.match(h.calls[0].args.caption, /tg-emoji/);
   assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b => b.icon_custom_emoji_id));
 });
 test("Callbacks are acknowledged and menus edited, never charged", async () => {
