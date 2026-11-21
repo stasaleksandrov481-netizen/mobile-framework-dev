@@ -215,7 +215,7 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
   const table=all.map(p=>"<tr><td><b>"+planMeta[p.code][0]+"</b></td><td align=\"right\">"+fmt(p.daily_tokens)+"</td><td align=\"right\">"+priceLabel(catalog,p)+"</td></tr>").join("");
   const details=all.map(p=>"<details><summary>"+planMeta[p.code][0]+" · "+planMeta[p.code][1]+"</summary><p>"+fmt(p.daily_tokens)+" токенов в день"+(p.advanced_tokens>0 ? ", "+fmt(p.advanced_tokens)+" на продвинутые модели":"")+".</p></details>").join("");
   return wrap("💎 <b>Тарифы CORTEX</b>\n\nКоманды телефона бесплатны. Подписка увеличивает лимит облачного ИИ.\n\n"+lines.join("\n\n")+"\n\n<i>Цены подписок за месяц. Лимиты обновляются в 03:00 МСК.</i>",
-    [...rows.slice(0,2),...rows.slice(2),[nav("Токены","✦","tokens"),open("На сайте","↗",site+"/pricing")]],
+    [...rows,[nav("Токены","✦","tokens"),open("На сайте","↗",site+"/pricing")]],
     "<h3>Тарифы CORTEX</h3><p>Команды телефона бесплатны. Выбери подходящий лимит облачного ИИ.</p><table compact><tr><th>Тариф</th><th>Токенов/день</th><th>В месяц</th></tr>"+table+"</table>"+details+"<footer>Лимиты обновляются в 03:00 МСК. Подписка без автосписаний.</footer>");
 }
 function view(page:string,linked:boolean,options:EmojiOptions,name="",catalog:StoreCatalog|null=null):View {
@@ -390,7 +390,7 @@ export async function processCortexBotUpdate(
       reply_markup: {inline_keyboard: [[open("Открыть CORTEX", "↗", site + "/", {}, undefined, "primary")],
         [nav("Главное меню", "‹", "home")]]}});
   } else {
-    await services.telegram("sendMessage", { chat_id: chatId, ...payload });
+    await deliverScreen(services,chatId,payload);
   }
   return 200;
 }
