@@ -7,7 +7,7 @@
 
 - [PR #114](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/114) (draft), ветка `fix/cortex-visual-provider-fallback-20261121`. В последние 24 часа логов Edge были 11 ошибок `timeout` у визуальной модели `nvidia/nemotron-3.5-lightning:free`, 12 ограничений `provider_limit` у `inclusionai/ling-3.2-flash:free` и 4 ошибки `model` у `cohere/north-mini-code:free`.
 - Визуальная команда теперь может последовательно использовать до трёх резервных моделей (одна tool, две schema), третьей предпочтительно `nvidia/nemotron-3.5-super-vl:free`. Никаких параллельных генераций и повторной отправки удачного запроса; прежний общий 20-секундный лимит сохранён. Добавлен регрессионный сценарий отказов HTTP 504 + HTTP 429, заканчивающийся валидным планом.
-- **Не опубликовано**: Edge v50, APK, Vercel и БД не менялись. `handler.ts`, `provider.ts`, `audio.ts`, `singleflight.ts` в `main` отличаются от live v50 — для будущего Edge-деплоя нужно сохранить живые изменения. Далее проверить CI и фактическое время/поведение на Android.
+- **Опубликовано** узкое исправление Supabase Edge `cortex` **v51 ACTIVE** (2026-11-21 UTC), deployment fingerprint `313bf1f4969d35b61353a3361d70ee188cc459ec18023f83c85baa6be15db72f`. Сборка основана на всех 11 файлах проверенной v50: только три участка `handler.ts` изменены, остальные 10 файлов совпали побайтно. `verify_jwt=false` сохранён. Откат: исходники v50 по GitHub-коммиту `6a6a9dc` (11/11 подтверждено). БД, Vercel и APK не менялись. Тесты Edge 57/57, биллинг, handoff, security scan и UI прошли; реальную команду Android и отдельный HTTP smoke до завершения не подтвердили.
 
 ## 2026-11-21 UTC · Восстановление расписания Android
 
