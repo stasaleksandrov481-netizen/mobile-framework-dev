@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { deviceTools, planGuide } from "./device.ts";
-import { chatInput, completion, relay, SELECTABLE_MODELS } from "./provider.ts";
+import { chatInput, completion, Failure, relay, SELECTABLE_MODELS } from "./provider.ts";
 import { visualFormat } from "./visual.ts";
 
 test("Haiku 5.5 receives no incompatible sampling or disabled-thinking settings", async () => {
@@ -136,6 +136,79 @@ test("paid settlement prefers OpenRouter generation cost over estimates or strea
   while (!(await reader.read()).done) { /* Drain stream and settle. */ }
   assert.equal(metadataReads, 1);
   assert.deepEqual(charged, { input: 77, output: 21, costMicros: 3412 });
+});
+
+async function rejectedOpenRouter(status: number, data: Record<string, unknown>, headers: HeadersInit = {}): Promise<Failure> {
+  try {
+    await completion(async () => Response.json({ error: data }, { status, headers }),
+      "test-free-key", ["example/model:free"], [{ role: "user", content: "Привет" }],
+      false, 740, new AbortController().signal);
+    assert.fail("OpenRouter error should reject");
+  } catch (error) {
+    if (!(error instanceof Failure)) throw error;
+    return error;
+  }
+}
+
+test("embedded rate headers identify global minute limits without exhausting every fallback", async () => {
+  const now = Date.now();
+  const reset = now + 45_000;
+  const failure = await rejectedOpenRouter(429, {
+    code: 429, message: "Rate limit exceeded: free-models-per-min.",
+    metadata: { headers: { "X-RateLimit-Limit": "20", "X-RateLimit-Remaining": "0",
+      "X-RateLimit-Reset": String(reset) }, error_type: "rate_limit_exceeded" },
+  });
+  assert.equal(failure.code, "provider_quota");
+  assert.equal(failure.status, 429);
+  assert.ok(failure.retryAfter >= 43 && failure.retryAfter <= 46);
+});
+
+test("embedded daily reset blocks only the exhausted free-model budget", async () => {
+  const reset = Date.now() + 2 * 60 * 60_000;
+  const failure = await rejectedOpenRouter(429, {
+    code: 429, message: "Rate limit exceeded: free-models-per-day",
+    metadata: { headers: { "x-ratelimit-limit": 1000, "x-ratelimit-reset": String(reset) } },
+  });
+  assert.equal(failure.code, "provider_quota_daily");
+  assert.ok(failure.retryAfter >= 7198);
+});
+
+test("real HTTP headers take precedence over stale embedded provider hints", async () => {
+  const response = await rejectedOpenRouter(429, {
+    code: 429, message: "Rate limit exceeded: free-models-per-min.",
+    metadata: { headers: { "X-RateLimit-Limit": 20, "X-RateLimit-Reset": String(Date.now() + 7200000) } },
+  }, { "X-RateLimit-Limit": "20", "X-RateLimit-Reset": String(Date.now() + 30000) });
+  assert.equal(response.code, "provider_quota");
+  assert.ok(response.retryAfter >= 28 && response.retryAfter <= 31);
+});
+
+test("an upstream model 429 never blocks the entire OpenRouter account", async () => {
+  const failure = await rejectedOpenRouter(429, {
+    code: 429, message: "Provider returned error",
+    metadata: { provider_name: "Upstream", provider_code: "rate_limited",
+      headers: { "X-RateLimit-Limit": "20", "X-RateLimit-Reset": String(Date.now() + 60000) } },
+  });
+  assert.equal(failure.code, "provider_limit");
+  assert.equal(failure.status, 429);
+});
+
+test("in-stream OpenRouter 429 is classified consistently with pre-stream failures", async () => {
+  const reset = Date.now() + 30_000;
+  const event = { error: { code: 429, message: "free-models-per-min",
+    metadata: { error_type: "rate_limit_exceeded", headers: {
+      "X-RateLimit-Limit": "20", "X-RateLimit-Reset": String(reset),
+    } } }, choices: [{ delta: { content: "" }, finish_reason: "error" }] };
+  const model = await completion(async () => new Response(
+    "data: " + JSON.stringify(event) + "\\n\\ndata: [DONE]\\n\\n",
+    { headers: { "content-type": "text/event-stream" } }),
+  "test-free-key", ["example/model:free"], [{ role: "user", content: "Привет" }],
+  true, 740, new AbortController().signal);
+  let observed: Failure | undefined;
+  const stream = relay(model, async (failure) => { observed = failure; return undefined; });
+  const text = await new Response(stream).text();
+  assert.equal(observed?.code, "provider_quota");
+  assert.match(text, /"error":"provider_quota"/);
+  assert.doesNotMatch(text, /"delta":/);
 });
 
 test("explicit model IDs use an audited server-side allowlist", () => {
