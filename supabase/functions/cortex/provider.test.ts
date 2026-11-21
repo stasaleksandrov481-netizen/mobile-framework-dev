@@ -199,7 +199,7 @@ test("in-stream OpenRouter 429 is classified consistently with pre-stream failur
       "X-RateLimit-Limit": "20", "X-RateLimit-Reset": String(reset),
     } } }, choices: [{ delta: { content: "" }, finish_reason: "error" }] };
   const model = await completion(async () => new Response(
-    "data: " + JSON.stringify(event) + "\\n\\ndata: [DONE]\\n\\n",
+    "data: " + JSON.stringify(event) + "\n\ndata: [DONE]\n\n",
     { headers: { "content-type": "text/event-stream" } }),
   "test-free-key", ["example/model:free"], [{ role: "user", content: "Привет" }],
   true, 740, new AbortController().signal);
