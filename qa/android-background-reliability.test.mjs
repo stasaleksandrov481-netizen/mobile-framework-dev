@@ -11,7 +11,7 @@ test("reminders do not report success if Android rejects the alarm", () => {
   assert.match(schedule, /runCatching \{ manager\.setAndAllowWhileIdle\(/);
   assert.match(schedule, /when \(val result = install\(context, task, old\)\)/);
   assert.match(schedule, /Installation\.AlarmFailed -> return failure\(ALARM_UNAVAILABLE\)/);
-  assert.match(schedule, /status = "unarmed", detail = ALARM_UNAVAILABLE/);
+  assert.match(schedule, /status = "unarmed", detail = ALARM_HINT/);
 });
 
 test("snooze retains the previous reminder if rescheduling fails", () => {

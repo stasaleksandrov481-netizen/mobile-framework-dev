@@ -34,7 +34,8 @@ internal object CortexSchedule {
     private const val DAY = 86_400_000L
     private val repeats = setOf("none", "daily", "weekly")
     private val activeStates = setOf("scheduled", "unarmed", "due", "blocked", "running")
-    private const val ALARM_UNAVAILABLE = "Android не установил будильник. Измените время или проверьте ограничения фоновой работы."
+    private const val ALARM_HINT = "Измените время или проверьте ограничения фоновой работы."
+    private const val ALARM_UNAVAILABLE = "Android не установил будильник. $ALARM_HINT"
     private const val INTERRUPTED = "Предыдущий запуск прервался. Проверьте результат перед созданием нового поручения."
     private val format = DateTimeFormatter.ofPattern("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
     private val drafts = linkedMapOf<String, Draft>()
@@ -280,7 +281,7 @@ internal object CortexSchedule {
     )
 
     private fun markUnarmed(context: Context, previous: Task, desired: Task) {
-        val failed = desired.copy(status = "unarmed", detail = ALARM_UNAVAILABLE,
+        val failed = desired.copy(status = "unarmed", detail = ALARM_HINT,
             occurrence = if (desired.at == previous.at) previous.occurrence else desired.occurrence)
         if (failed != previous && replace(context, failed)) {
             cancelAlarm(context, previous)
@@ -327,7 +328,7 @@ internal object CortexSchedule {
         val following = next(task, Instant.ofEpochMilli(now))?.let { successor ->
             if (alarm(context, successor) != Alarm.UNAVAILABLE) successor else {
                 cancelAlarm(context, successor)
-                successor.copy(status = "unarmed", detail = ALARM_UNAVAILABLE)
+                successor.copy(status = "unarmed", detail = ALARM_HINT)
             }
         }
         val reminder = task.kind == "reminder"
