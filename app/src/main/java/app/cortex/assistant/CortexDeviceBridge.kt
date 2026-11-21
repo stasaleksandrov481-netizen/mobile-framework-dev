@@ -35,8 +35,10 @@ internal class CortexDeviceBridge(
     private var pointRecorder: CortexPointRecorder? = null
     private val scheduleListener: () -> Unit = ::scheduleList
     private val experienceListener: (JSONObject) -> Unit = { emit(it) }
+    private val screenAccessListener: () -> Unit = { refreshPermissions() }
     init {
         CortexRuntime.scheduleChanged = scheduleListener
+        CortexRuntime.screenAccessChanged = screenAccessListener
         CortexFirstExperience.listener = experienceListener
     }
 
@@ -135,6 +137,7 @@ internal class CortexDeviceBridge(
                 val source = body.optString("source").take(100)
                 CortexSchedule.clearDraft(source)
                 CortexActionEngine.clearPaused(source)
+                if (engineDelegate.isInitialized()) engine.forgetConversation(source)
             }
             "action-clarification-dismiss" -> CortexActionEngine.dismissClarification(
                 body.optString("source").take(100), body.optString("clarificationId").take(36))
@@ -250,6 +253,7 @@ internal class CortexDeviceBridge(
         pointRecorder = null
         recorder?.cancel()
         if (CortexRuntime.scheduleChanged === scheduleListener) CortexRuntime.scheduleChanged = null
+        if (CortexRuntime.screenAccessChanged === screenAccessListener) CortexRuntime.screenAccessChanged = null
         if (CortexFirstExperience.listener === experienceListener) CortexFirstExperience.listener = null
         if (engineDelegate.isInitialized()) engine.close()
         activeVoice = null
@@ -310,26 +314,14 @@ internal class CortexDeviceBridge(
         } else refreshPermissions()
     }
     fun refreshPermissions() {
-        val obj = JSONObject().put("type", "permissions")
-            .put("assistantSupported", CortexAssistActivity.available(context))
-            .put("assistant", CortexAssistActivity.selected(context))
+        val obj = CortexDeviceContext.permissions(context).put("type", "permissions")
             .put("versionName", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("manufacturer", Build.MANUFACTURER)
             .put("phoneModel", Build.MODEL)
             .put("androidRelease", Build.VERSION.RELEASE)
-            .put("microphone", Build.VERSION.SDK_INT < 23 || activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
-            .put("camera", activity.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
-            .put("notifications", Build.VERSION.SDK_INT < 33 || activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
-            .put("notificationAccess", CortexNotificationJournal.accessGranted(context))
             .put("deviceSnapshot", runCatching { CortexDeviceSnapshot.info(context) }.getOrNull())
             .put("compatibility", CortexAndroidCompatibility.report(context))
-            .put("screenLock", Build.VERSION.SDK_INT >= 28 && CortexScreenService.connected != null)
-            .put("screenLockSupported", Build.VERSION.SDK_INT >= 28)
-            .put("screenAutomation", CortexScreenService.connected != null)
-            .put("verifyApps", CortexScreenService.connected != null)
-            .put("overlay", Settings.canDrawOverlays(context))
-            .put("brightness", Settings.System.canWrite(context))
         emit(obj)
         emit(CortexFirstExperience.snapshot(context))
     }

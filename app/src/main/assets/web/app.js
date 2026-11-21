@@ -36,7 +36,9 @@
   let phoneInfo = {};
   let deviceSnapshot = null;
   let androidCompatibility = null;
-  const permissions = { microphone: false, camera: false, notifications: false, notificationAccess: false, overlay: false, screenLock: false, screenLockSupported: false, brightness: false, verifyApps: false, screenAutomation: false, assistant: false, assistantSupported: false };
+  const permissions = { microphone: null, camera: null, notifications: null, notificationAccess: null, overlay: null,
+    screenLock: null, screenLockSupported: null, brightness: null, verifyApps: null, screenAutomation: null,
+    assistant: null, assistantSupported: null, screenAccess: null };
   let route = "home", chatId = "";
   let accountMode = "password", accountEmail = "";
   let pending, voice, activeSheet, pageMotion, composerMotion, headingMotion, clearMorph, screenContext, drawerExit, sheetExit, inlineToast, toastTimer;
@@ -317,8 +319,7 @@
     if (!routes.has(next)) return;
     if (!S.account && !publicRoutes.has(next)) next = "account";
     const previous = route;
-    const previousId = chatId;
-    if (next === "chat") id = id && M.chat(id) ? id : current()?.id || M.createChat().id;
+    if (next === "chat") id = id && M.chat(id) ? id : current()?.id || homeChat().id;
     if (previous === next && (next !== "chat" || id === chatId)) return;
     closeVoice();
     closeSheet();
@@ -336,7 +337,6 @@
     const switchesTab = rootTab(previous) !== rootTab(next, id);
     route = next;
     if (next === "chat") chatId = id;
-    if (previous === "chat" && (next !== "chat" || chatId !== previousId)) discardTemporary(previousId);
     const hash = "#" + next + (next === "chat" ? "/" + encodeURIComponent(chatId) : "");
     history[replace ? "replaceState" : "pushState"](null, "", hash);
     render({ bottom: next === "chat", messageEnter });
@@ -366,7 +366,6 @@
 
   function readRoute() {
     const previous = route;
-    const previousId = chatId;
     closeVoice();
     clearVisuals();
     const [name, id] = location.hash.slice(1).split("/");
@@ -378,9 +377,8 @@
     if (route === "chat") {
       let decoded;
       try { decoded = decodeURIComponent(id || ""); } catch {}
-      chatId = M.chat(decoded)?.id || current()?.id || M.createChat().id;
+      chatId = M.chat(decoded)?.id || (!decoded && current()?.id) || homeChat().id;
     }
-    if (previous === "chat" && (route !== "chat" || chatId !== previousId)) discardTemporary(previousId);
     render({ bottom: route === "chat" });
     if (previous !== route && !reduced() && splash.hidden && typeof screen.animate === "function") {
       const switchesTab = rootTab(previous) !== rootTab(route);
@@ -1054,14 +1052,21 @@
     const deviceContext = {
       ...phoneInfo, surface: "chat", foreground: appVisible() ? "CORTEX" : "unknown",
       version: U.version, version_code: androidVersionCode || undefined,
-      screen_control: Boolean(device && S.preferences.visualAutomation && permissions.screenAutomation),
-      microphone: Boolean(device && permissions.microphone), island: Boolean(device && permissions.overlay),
+      ...(device && { phone_actions_enabled: S.preferences.phoneActions, visual_mode_enabled: S.preferences.visualAutomation }),
+      ...(device && permissions.screenAutomation !== null && {
+        system_screen_access: permissions.screenAutomation, screen_access_state: permissions.screenAccess || undefined,
+        screen_control: S.preferences.visualAutomation && (permissions.screenAccess
+          ? permissions.screenAccess === "ready" : permissions.screenAutomation)
+      }),
+      ...(device && permissions.microphone !== null && { microphone: permissions.microphone }),
+      ...(device && permissions.overlay !== null && { island: permissions.overlay }),
       ...(/телефон|устройств|интернет|сеть|памят|заряд|батаре|уведомлен|wifi|wi-fi/iu.test(request) &&
         deviceSnapshot ? { state: deviceSnapshot } : {})
     };
     const policy = "Встроенный движок Android уже проверил этот запрос на локальные действия. " +
       "Если задача требует уточнения, спроси, что именно нужно сделать и в каком приложении. " +
       "Опирайся на доступы и реальные результаты Android. " +
+      "Если данных о разрешении нет, его статус неизвестен. Выданный доступ Android и режим визуального управления CORTEX отвечают за разные вещи. " +
       "Контекст устройства: " + JSON.stringify(deviceContext) + ". Дата: " + clock.format(new Date()) + "." + screenPolicy;
     const sharedQuestion = !job.screen && M.canSharePublicQuestion(chat, request);
     const result = await Api.request("chat", {
@@ -1205,7 +1210,7 @@
   }
 
   function homeChat() {
-    const chat = M.createChat();
+    const chat = S.chats.find(item => !item.saved) || M.createChat();
     if (drafts.get("home")) drafts.set(chat.id, drafts.get("home"));
     drafts.delete("home");
     return chat;
@@ -1259,7 +1264,7 @@
   function submitExample(text, control, explain = false) {
     if (pending) { flash("Сначала дождитесь текущего ответа."); return; }
     const here = route === "chat" && !current()?.messages.length;
-    const chat = here ? current() : M.createChat();
+    const chat = here ? current() : homeChat();
     if (!chat) return;
     haptic();
     void answer(chat, text, { from: here ? null : control, explain, includeScreen: false });
@@ -1291,7 +1296,7 @@
     if (pending && !M.chat(pending.chatId)) stopAnswer(false);
     for (const chat of before) if (!M.chat(chat.id)) { drafts.delete(chat.id); errors.delete(chat.id); }
     if (!current()) {
-      chatId = route === "chat" ? M.createChat().id : "";
+      chatId = route === "chat" ? homeChat().id : "";
       if (route === "chat") history.replaceState(null, "", "#chat/" + encodeURIComponent(chatId));
     }
     render();
@@ -1611,7 +1616,7 @@
     if (message.type === "wake-command") {
       const text = typeof message.text === "string" ? message.text.trim().slice(0, 2400) : "";
       if (text && !pending && !app.classList.contains("in-onboarding")) {
-        const chat = route === "chat" ? current() : M.createChat();
+        const chat = route === "chat" ? current() : homeChat();
         if (chat) void answer(chat, text, { from: route === "chat" ? null : nav });
       }
     }
@@ -1652,7 +1657,8 @@
         androidCompatibility = message.compatibility;
       }
       if (["drop", "punch", "left", "right", "none"].includes(message.islandCamera)) islandCamera = message.islandCamera;
-      for (const key of Object.keys(permissions)) if (Object.hasOwn(message,key)) permissions[key] = Boolean(message[key]);
+      for (const key of Object.keys(permissions)) if (key !== "screenAccess" && typeof message[key] === "boolean") permissions[key] = message[key];
+      if (["off", "connecting", "locked", "ready"].includes(message.screenAccess)) permissions.screenAccess = message.screenAccess;
       window.CortexSetup?.updatePermissions(permissions);
       if (permissionsPage()) render();
     }
@@ -1788,7 +1794,9 @@
     },
     "new-chat": (_, control) => newChat(control),
     "clear-temporary": () => confirm("Очистить временный чат?", "Сообщения текущего сеанса будут удалены.", () => {
-      navigate("chat", { id: M.createChat().id, replace: true });
+      const id = current()?.id;
+      if (id) discardTemporary(id);
+      navigate("chat", { id: homeChat().id, replace: true });
     }),
     "address-name": () => editor("Как к вам обращаться", field("name", "Имя или обращение", S.preferences.addressName, { max: 60, optional: true }),
       ({ name }) => { S.preferences.addressName = name.slice(0, 60); saved("Обращение сохранено."); syncIslandOptions(); closeSheet(); render(); }),

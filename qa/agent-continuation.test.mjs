@@ -7,10 +7,12 @@ const kotlin = name => readFileSync(
 
 test("accessibility feedback interruptions cannot silently cancel multi-step automation", () => {
   const screen = kotlin("CortexScreenService");
-  const interrupt = screen.split("override fun onInterrupt()")[1].split("override fun onDestroy()")[0];
+  const interrupt = screen.split("override fun onInterrupt()")[1].split("private fun disconnect()")[0];
   assert.doesNotMatch(interrupt, /CortexActionState\.stop\(/);
   assert.match(screen, /override fun onInterrupt\(\) = Unit/);
-  assert.match(screen, /override fun onDestroy\(\) \{[\s\S]*?CortexActionState\.stop\(\)/);
+  assert.match(screen, /private fun disconnect\(\) \{[\s\S]*?CortexActionState\.stop\(\)/);
+  assert.match(screen, /override fun onUnbind\(intent: Intent\?\): Boolean \{\s*disconnect\(\)/);
+  assert.match(screen, /override fun onDestroy\(\) \{\s*disconnect\(\)/);
   assert.match(kotlin("CortexActionState"), /fun stop\(\) \{ cancel\?\.invoke\(\) \}/);
 });
 

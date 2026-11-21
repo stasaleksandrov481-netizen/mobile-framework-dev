@@ -48,6 +48,7 @@ class CortexScreenService : AccessibilityService() {
         connected = this
         if (!CortexRuntime.firstExperienceActive) FirstExperienceBrightness.restorePending(this)
         CortexFirstExperience.availabilityChanged(this)
+        CortexRuntime.screenAccessChanged?.invoke()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -84,11 +85,21 @@ class CortexScreenService : AccessibilityService() {
     // genuine service disconnect (onDestroy), or the explicit Stop action, does so.
     override fun onInterrupt() = Unit
 
-    override fun onDestroy() {
+    private fun disconnect() {
         if (connected === this) {
             connected = null
             CortexActionState.stop()
+            CortexRuntime.screenAccessChanged?.invoke()
         }
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        disconnect()
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        disconnect()
         touch?.close()
         cachedFrame = null
         cachedOcr = null

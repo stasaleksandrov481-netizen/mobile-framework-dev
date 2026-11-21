@@ -359,15 +359,18 @@ const CortexUI = (() => {
     const native = Boolean(window.CortexIslandControl);
     const perm = (ctx && ctx.permissions) || {};
     let status = "Островок и обращение «Кортекс» работают только в Android-приложении CORTEX.", fix = "";
-    if (native && !perm.overlay) {
+    if (native && perm.overlay == null) {
+      status = "Проверяю доступ поверх приложений…";
+    } else if (native && !perm.overlay) {
       status = "Разрешите показ поверх приложений — тогда островок появится у камеры.";
       fix = tile("Показ поверх приложений", "Откроется системная настройка Android", "focus", "overlay-permission");
     } else if (native) {
       status = p.overlayMode === "off" ? "Выберите режим ниже, чтобы включить островок." : "Нажмите на островок, чтобы написать Кортексу и получить ответ.";
     }
     const voiceRow = native
-      ? switchRow("Обращение «Кортекс»", perm.microphone ? (p.hotwordEnabled && ctx?.wakeState || "Скажите «Кортекс», затем команду. Ответ появится в островке.") : "Сначала выдайте доступ к микрофону.", p.hotwordEnabled, "hotwordEnabled") +
-        (perm.microphone ? "" : tile("Доступ к микрофону", "Нужен для обращения «Кортекс»", "mic", "microphone-permission"))
+      ? switchRow("Обращение «Кортекс»", perm.microphone ? (p.hotwordEnabled && ctx?.wakeState || "Скажите «Кортекс», затем команду. Ответ появится в островке.") :
+        perm.microphone === false ? "Сначала выдайте доступ к микрофону." : "Проверяю доступ к микрофону…", p.hotwordEnabled, "hotwordEnabled") +
+        (perm.microphone === false ? tile("Доступ к микрофону", "Нужен для обращения «Кортекс»", "mic", "microphone-permission") : "")
       : `<div class="feature-detail"><strong>Голосовое обращение</strong><small>Доступно в Android-приложении CORTEX.</small></div>`;
     const options = [
       ["always", "Постоянный островок", "Кортекс виден поверх приложений. В горизонтальном режиме его можно скрывать."],
@@ -501,9 +504,9 @@ const CortexUI = (() => {
         <small>${available ? "Доступно на устройстве" : "Нет системной поддержки или компонента"}</small></div></div>`).join("")}</div>
       <p class="quiet-copy">Без локального распознавания можно использовать текстовый чат и доступный голосовой ввод в приложении.
       Некоторые оболочки дополнительно ограничивают фоновые службы: «Работа в фоне» открывает нужный системный экран, если он есть на этом телефоне.</p></details>` : "";
-    const item = (glyph, title, desc, enabled, action, required = false) =>
+    const item = (glyph, title, desc, enabled, action, status) =>
       `<div class="access-row"><span class="access-symbol">${icon(glyph, 21)}</span><div class="tile-copy"><strong>${esc(title)}</strong>
-        <small>${esc(desc)}</small><span class="access-state${enabled ? " is-on" : required ? " is-needed" : ""}">${enabled ? "Разрешено" : required ? "Требуется разрешение" : "Необязательно"}</span></div>
+        <small>${esc(desc)}</small><span class="access-state${enabled ? " is-on" : ""}">${esc(status || (enabled ? "Разрешено" : enabled === false ? "Доступ не выдан" : "Проверяю разрешение…"))}</span></div>
         <button class="access-open" type="button" ${attributes(action)}>${enabled ? "Проверить" : "Настроить"}</button></div>`;
     return detail("Доступы Android", "Давайте только те разрешения, которые нужны вам", `<section class="access-list">
       ${item("mic", "Микрофон", "Речь и активация по имени. Фоновое прослушивание отдельно включается в настройках.", a.microphone, "microphone-permission")}
@@ -511,7 +514,8 @@ const CortexUI = (() => {
       ${item("focus", "Фонарик", "Доступ к вспышке через Android. CORTEX только переключает вспышку.", a.camera, "camera-permission")}
       ${item("bell", "Уведомления", "Статус задач, кнопка остановки и новые ответы поддержки.", a.notifications, "notification-permission")}
       ${item("bell", "Чтение уведомлений", "По вашему разрешению считает новые события. Содержимое не сохраняет и не отправляет ИИ.", a.notificationAccess, "notification-listener-permission")}
-      ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission")}
+      ${item("check", "Управление экраном", "Системная шторка, нажатия и свайпы. Для визуальных команд отдельно включите БЕТА в разделе «Вызов».", a.screenAutomation, "verification-permission",
+        a.screenAccess === "connecting" ? "Разрешено, Android подключает службу…" : a.screenAccess === "locked" ? "Разрешено, экран заблокирован" : "")}
       ${compatibility ? item("refresh", "Работа в фоне", "Чтобы оболочка телефона не закрывала островок, вызов по имени и напоминания.", compatibility.batteryUnrestricted, "background-permission") : ""}
       ${item("sliders", "Изменение яркости", "Для изменения и восстановления яркости в интерактивном знакомстве.", a.brightness, "brightness-permission")}
       ${a.assistantSupported ? item("focus", "Цифровой помощник", "Выбрать CORTEX для системного жеста вызова помощника.", a.assistant, "assistant-permission") : ""}
