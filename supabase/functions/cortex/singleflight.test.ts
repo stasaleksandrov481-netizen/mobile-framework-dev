@@ -38,8 +38,10 @@ test("simultaneous followers receive text only, never another user's quota", asy
       start(controller) {
         const encoder = new TextEncoder();
         controller.enqueue(encoder.encode('data: {"status":"quota","quota":{"id":"SECRET-USER-ID"}}\n\n'));
+        // A premature ready event must not be mirrored before any actual text.
+        controller.enqueue(encoder.encode('data: {"status":"text_ready"}\n\n'));
         setTimeout(() => {
-          controller.enqueue(encoder.encode('data: {"delta":"Привет"}\n\ndata: [DONE]\n\n'));
+          controller.enqueue(encoder.encode('data: {"delta":"Привет"}\n\ndata: {"status":"text_ready"}\n\ndata: [DONE]\n\n'));
           controller.close();
         }, 5);
       },
@@ -54,7 +56,7 @@ test("simultaneous followers receive text only, never another user's quota", asy
   const [original, replay1, replay2] = await Promise.all([leader.text(), follower1.text(), follower2.text()]);
   assert.match(original, /SECRET-USER-ID/);
   for (const result of [replay1, replay2]) {
-    assert.equal(result, 'data: {"delta":"Привет"}\n\ndata: [DONE]\n\n');
+    assert.equal(result, 'data: {"delta":"Привет"}\n\ndata: {"status":"text_ready"}\n\ndata: [DONE]\n\n');
     assert.doesNotMatch(result, /SECRET|quota/i);
   }
   assert.equal(follower1.headers.has("x-cortex-quota"), false);
