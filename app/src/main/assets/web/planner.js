@@ -18,7 +18,7 @@ const CortexPlanner = (() => {
     pause: "stop", if: "layers", repeat: "refresh", run: "bolt", variable: "file" };
   const draftKey = () => "cortex:scenario:draft:v1:" + (M.state.account?.id || "guest");
   const statuses = {
-    scheduled: "Запланировано", due: "Ожидает отметки", blocked: "Ожидает запуска", running: "Выполняется",
+    scheduled: "Запланировано", unarmed: "Будильник не установлен", due: "Ожидает отметки", blocked: "Ожидает запуска", running: "Выполняется",
     done: "Готово", failed: "Ошибка", cancelled: "Отменено"
   };
   const directions = { down: "Вниз", up: "Вверх", left: "Влево", right: "Вправо" };
@@ -67,8 +67,8 @@ const CortexPlanner = (() => {
     const permissions = (!notifications ? action("Разрешить уведомления", "native", "notification-permission") : "") +
       (!exact ? action("Включить точные напоминания", "native", "schedule-exact") : "");
     const taskCard = task => {
-      const active = ["scheduled", "due", "blocked"].includes(task.status);
-      const actions = task.status === "scheduled" ? action("Изменить", "schedule-edit", task.id) :
+      const active = ["scheduled", "unarmed", "due", "blocked"].includes(task.status);
+      const actions = ["scheduled", "unarmed"].includes(task.status) ? action("Изменить", "schedule-edit", task.id) :
         task.status === "due" ? action("Готово", "schedule-done", task.id) + action("Отложить на 5 мин", "schedule-snooze", task.id) :
         task.status === "blocked" ? action("Выполнить", "schedule-run", task.id) : "";
       return `<article class="panel plan-card${task.id === selectedTask ? " plan-selected" : ""}" data-task-card="${esc(task.id)}">
@@ -93,7 +93,7 @@ const CortexPlanner = (() => {
     }
     // Previously scheduled actions remain accessible from their notifications.
     const visible = tasks.filter(task => task.kind === "reminder" || task.id === selectedTask);
-    const active = visible.filter(task => ["scheduled", "due", "blocked", "running"].includes(task.status));
+    const active = visible.filter(task => ["scheduled", "unarmed", "due", "blocked", "running"].includes(task.status));
     const history = visible.filter(task => !active.includes(task));
     return detail("Напоминания", "", `<div class="actions">${action("Добавить напоминание", "schedule-edit", "", "primary")}</div>` +
       (scheduleReady && permissions ? `<section class="panel stack"><p class="muted">${!notifications ?

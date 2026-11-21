@@ -6,21 +6,22 @@ const kotlin = name => readFileSync(new URL(`../app/src/main/java/app/cortex/ass
 
 test("reminders do not report success if Android rejects the alarm", () => {
   const schedule = kotlin("CortexSchedule");
-  assert.match(schedule, /private fun alarm\(context: Context, task: Task\): Boolean/);
-  assert.match(schedule, /runCatching \{ manager\.setExactAndAllowWhileIdle\(/);
+  assert.match(schedule, /private fun alarm\(context: Context, task: Task\): Alarm/);
+  assert.match(schedule, /runCatching \{\s*manager\.setExactAndAllowWhileIdle\(/);
   assert.match(schedule, /runCatching \{ manager\.setAndAllowWhileIdle\(/);
-  assert.match(schedule, /if \(!alarm\(context, task\)\) \{/);
-  assert.match(schedule, /if \(old == null\) write\(context, all\(context\)\.filterNot \{ it\.id == task\.id \}\)/);
-  assert.match(schedule, /else if \(!alarm\(context, it\)\) block\(context, it/);
-  assert.match(schedule, /if \(!alarm\(context, it\)\) block\(context, it/);
+  assert.match(schedule, /when \(val result = install\(context, task, old\)\)/);
+  assert.match(schedule, /Installation\.AlarmFailed -> return failure\(ALARM_UNAVAILABLE\)/);
+  assert.match(schedule, /status = "unarmed", detail = ALARM_HINT/);
 });
 
 test("snooze retains the previous reminder if rescheduling fails", () => {
   const handle = kotlin("CortexSchedule").split("fun handle(context:")[1].split("private fun run(context:")[0];
-  const setAlarm = handle.indexOf('updated.status == "scheduled" && !alarm(context, updated)');
-  const cancelNotification = handle.indexOf("NotificationManager::class.java).cancel(id, NOTIFICATION)");
+  const setAlarm = handle.indexOf('install(context, updated, task)');
+  const cancelNotification = handle.indexOf("dismissNotification(context, id)");
   assert.ok(setAlarm >= 0 && cancelNotification > setAlarm);
-  assert.match(handle, /replace\(context, task\)/);
+  assert.match(handle, /Installation\.AlarmFailed -> return failure/);
+  const policy = kotlin("CortexSchedulePolicy");
+  assert.ok(policy.indexOf("if (!save())") < policy.indexOf("cancelPrevious()"));
 });
 
 test("foreground islands and support jobs stop cleanly if an OEM denies them", () => {
