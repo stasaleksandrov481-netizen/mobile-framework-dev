@@ -1,3 +1,9 @@
+## 2026-11-21 UTC · Backend: восстановление визуальных команд при сбоях моделей
+
+- Ветка `fix/cortex-visual-provider-fallback-20261121` от `eeae28e`, draft [PR #114](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/114). Сверена Supabase Edge v50, 11 файлов (4 отличаются от `main`), журналы function_logs за последние сутки.
+- `handler.ts`: визуальный route теперь допускает до трёх последовательных кандидатов, с `nvidia/nemotron-3.5-super-vl:free` перед экспериментальным `baidu/ernie-5.5-flash-preview:free`. Сценарий 504 → 429 → успешный план проверяется в `handler.test.ts`; отрицательные ответы не добавляют модельные токены.
+- Общий timeout визуальной команды остаётся 20 секунд. Тарифы, контроль спама, учёт токенов, биллинг и другие обработчики не менялись. CI: 57/57 тестов Edge, биллинг, handoff, security scan и UI успешно. **Выпущен Supabase Edge v51 ACTIVE** (SHA256 `313bf1f4969d35b61353a3361d70ee188cc459ec18023f83c85baa6be15db72f`) из точных исходников live v50 с тремя узкими правками `handler.ts`. Повторная сверка: 10 файлов без изменений, новый handler = проверенная дельта. `verify_jwt=false` как в v50. Откат: все 11 файлов GitHub коммита `6a6a9dc`, побайтно сверены с v50. Отдельный HTTP smoke недоступен из инструмента; в Supabase журнале сразу после деплоя не было новых вызовов v51. Следующий шаг: проверить актуальный HTTP `/v1/status` и визуальную задачу на Android; следить за 429/504. Сайт и APK не деплоились.
+
 ## 2026-11-21 UTC · Восстановление расписания Android
 
 - Ветка `fix/cortex-scheduler-reliability-20261121` от `5df0a16`. Проверены публичный APK beta.11, статус сайта и Edge Cortex ACTIVE v50.

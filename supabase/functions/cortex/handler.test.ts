@@ -16,7 +16,7 @@ const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50,
   emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
   enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4]), streamedGemini = false,
-  guestEnabled = true, oldGuestFlag = false) {
+  guestEnabled = true, oldGuestFlag = false, visualFailures: { toolTimeout?: boolean; schema429?: boolean } = {}) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -98,11 +98,15 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       if (body.tools?.[0]?.function?.name === "plan_android_screen") {
         assert.equal(body.tool_choice, "required");
         assert.equal(body.stream, false);
+        if (visualFailures.toolTimeout) return Response.json({ error: { message: "Timed out" } }, { status: 504 });
         return Response.json({ choices: [{ message: { tool_calls: [{
           function: { name: "plan_android_screen", arguments: '{"steps":[{"action":"unknown"}]}' },
         }] } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
       }
       if (body.response_format?.type === "json_schema") {
+        if (visualFailures.schema429 && body.model === "inclusionai/ling-3.2-flash:free") {
+          return Response.json({ error: { metadata: { provider_name: "upstream" } } }, { status: 429 });
+        }
         assert.equal(body.provider.require_parameters, true);
         assert.equal(body.provider.sort, "latency");
         return Response.json({ choices: [{ message: { content: JSON.stringify({
@@ -868,6 +872,25 @@ test("a malformed visual tool response is replaced by a validated plan and both 
   assert.deepEqual(JSON.parse(text).steps.map((step: { action: string }) => step.action), ["open", "tap"]);
   assert.equal(quota.used, 200);
   assert.equal(models.length, 2);
+});
+
+test("visual command recovers from a timed-out tool model and a provider 429", async () => {
+  const { call, models } = fixture(false, undefined, 15000, 50, true, false, 0, "", false, false,
+    undefined, false, true, false, { toolTimeout: true, schema429: true });
+  const response = await call("chat", {
+    messages: [{ role: "user", content: "Открой настройки и раздел Дисплей" }],
+    visual_plan: true, profile: "fast",
+  });
+  assert.equal(response.status, 200, "the third candidate should serve a validated plan");
+  const result = await response.json();
+  assert.deepEqual(JSON.parse(result.text).steps.map((step: { action: string }) => step.action),
+    ["open", "tap"]);
+  assert.deepEqual(models, [
+    "nvidia/nemotron-3.5-lightning:free",
+    "inclusionai/ling-3.2-flash:free",
+    "nvidia/nemotron-3.5-super-vl:free",
+  ]);
+  assert.equal(result.quota.used, 100, "failed candidates must not consume model tokens");
 });
 
 test("verified password login is available during SMTP configuration", async () => {
