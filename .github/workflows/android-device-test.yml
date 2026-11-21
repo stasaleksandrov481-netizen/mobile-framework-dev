@@ -60,7 +60,7 @@ jobs:
             adb logcat -d > device-logcat.txt
             adb pull /sdcard/Android/data/app.cortex.assistant/files/device-tests device-screenshots || true
             test -s device-results.txt
-            grep -q 'OK (15 tests)' device-results.txt
+            grep -q 'OK (18 tests)' device-results.txt
             ! grep -E 'FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed' device-results.txt
       - name: Capture emulator logs
         if: always()

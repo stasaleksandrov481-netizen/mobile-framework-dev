@@ -295,6 +295,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume()
+        CortexSchedule.recoverPending(applicationContext)
         CortexRuntime.setAppVisible(true)
         notifyVisibility(true)
         if (!rendererFailed && ::device.isInitialized) device.refreshPermissions()

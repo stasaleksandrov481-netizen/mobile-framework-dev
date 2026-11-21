@@ -154,12 +154,14 @@ test("reminders view displays saved reminders and excludes scheduled actions fro
   assert.deepEqual(requests, ["schedule-list"]);
   planner.handle({ type: "schedule-list", exact: true, notifications: true, tasks: [
     { id: "r", kind: "reminder", status: "scheduled", text: "Позвонить бабушке", at: 1795000000000 },
+    { id: "u", kind: "reminder", status: "unarmed", text: "Проверить будильник", at: 1795000000000, repeat: "none" },
     { id: "a", kind: "action", status: "scheduled", text: "Старое поручение", at: 1795000000000 }
   ] });
   const page = planner.page("schedule");
   assert.equal(updated, 1);
   assert.match(page, /Позвонить бабушке/);
   assert.match(page, /Добавить напоминание/);
+  assert.match(page, /Проверить будильник[\s\S]*?Будильник не установлен[\s\S]*?data-plan="schedule-edit" data-value="u"/);
   assert.doesNotMatch(page, /Старое поручение/);
 });
 
