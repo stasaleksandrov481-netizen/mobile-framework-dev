@@ -1,3 +1,4 @@
+import { createBotStarsCheckout } from "@/lib/telegram-bot-checkout";
 import { loadPublicPlans, loadPublicStarsPrices } from "@/lib/public-catalog";
 import { readBoundedJson } from "@/lib/bounded-json";
 import { createClient } from "@supabase/supabase-js";
@@ -60,6 +61,10 @@ export async function POST(request: NextRequest) {
     }
     const status = await processCortexBotUpdate(update as CortexTelegramUpdate, {
       richUi: true,
+      checkout: starsEnabled ? (telegramId,plan)=>createBotStarsCheckout(telegramId,plan,{
+        rpc: (name,params)=>admin.rpc(name,params),
+        telegram: (name,params)=>telegramBotApi(token,name,params),
+      }) : undefined,
       catalog: async () => {
         const [plans,stars]=await Promise.all([loadPublicPlans(),loadPublicStarsPrices()]);
         return plans ? {plans,stars:stars??[],starsEnabled} : null;

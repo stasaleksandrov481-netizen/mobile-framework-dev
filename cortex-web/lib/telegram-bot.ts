@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { BotCheckoutResult } from "./telegram-bot-checkout.ts";
+import { starsPlan, starsInvoiceUrl, type StarsPlan } from "./telegram-stars.ts";
 
 type TelegramPerson = { id?: unknown; username?: unknown; first_name?: unknown };
 type TelegramMessage = {
@@ -22,6 +24,7 @@ type StoreStars = {plan:"start"|"pro"|"ultra"; stars:number; enabled:boolean};
 type StoreCatalog = {plans:StorePlan[]; stars:StoreStars[]; starsEnabled:boolean};
 export type BotServices = {
   richUi?: boolean;
+  checkout?(telegramId:number,plan:StarsPlan):Promise<BotCheckoutResult>;
   catalog?(): Promise<StoreCatalog | null>;
   claim(updateId: number, chatId: number): Promise<boolean>;
   linked(telegramId: number): Promise<boolean>;
@@ -180,7 +183,7 @@ function priceLabel(catalog:StoreCatalog,p:StorePlan):string {
   const price=starPrice(catalog,p);
   return price===0 ? "Бесплатно" : price===null ? "Недоступно" : fmt(price)+" ⭐";
 }
-function storeView(page:string,catalog:StoreCatalog|null):View {
+function storeView(page:string,catalog:StoreCatalog|null,linked:boolean):View {
   const back = [nav("Назад","‹",page.startsWith("plan_") ? "plans" : "home")];
   const wrap=(text:string,rows:Button[][],rich?:string):View=>({text,parse_mode:"HTML",disable_web_page_preview:true,
     reply_markup:{inline_keyboard:[...rows,back]},...(rich ? {rich} : {})});
@@ -196,8 +199,8 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
     const limit=fmt(p.daily_tokens)+" токенов в день";
     const advanced=p.advanced_tokens>0 ? "\n"+fmt(p.advanced_tokens)+" на продвинутые модели" : "";
     const buy=cost===0 ? open("Открыть аккаунт","👤",site+"/account",{},undefined,"primary")
-      : cost!==null ? open("Подключить за "+fmt(cost)+" ⭐","⭐",site+"/payment?plan="+p.code,{},undefined,"success")
-      : open("Проверить доступность","↗",site+"/payment?plan="+p.code);
+      : cost!==null ? nav("Оплатить "+fmt(cost)+" ⭐","⭐","buy_"+p.code,{},undefined,"success")
+      : nav("Обновить доступность","↻","plan_"+p.code);
     return wrap("💎 <b>CORTEX "+name+"</b>\n"+desc+"\n\n<b>"+priceLabel(catalog,p)+(cost ? " / месяц":"")+"</b>\n\n<b>"+limit+"</b>"+advanced+
       "\n\n<i>Лимиты обновляются в 03:00 МСК."+(cost ? " Автосписаний нет.":"")+"</i>",
       [[buy],[nav("Сравнить тарифы","💎","plans")]]);
@@ -206,9 +209,9 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
     const paid=all.filter(p=>p.code!=="free");
     const lines=paid.map(p=>"<b>"+planMeta[p.code][0]+"</b> · "+priceLabel(catalog,p));
     const rows=paid.map(p=>[starPrice(catalog,p)!==null
-      ? open(planMeta[p.code][0]+" · "+priceLabel(catalog,p),"⭐",site+"/payment?plan="+p.code,{},undefined,"success")
+      ? nav(planMeta[p.code][0]+" · "+priceLabel(catalog,p),"⭐","buy_"+p.code,{},undefined,"success")
       : nav(planMeta[p.code][0]+" · Подробнее","💎","plan_"+p.code)]);
-    return wrap("⭐ <b>Оплата подписки</b>\n\n"+lines.join("\n")+"\n\nОдин месяц доступа. Без автоматических списаний.\n<i>Покупка проходит на сайте через официальный счёт Telegram.</i>",
+    return wrap("⭐ <b>Оплата подписки</b>\n\n"+lines.join("\n")+"\n\nОдин месяц доступа. Без автоматических списаний.\n<i>Оплата откроется прямо в Telegram.</i>",
       [...rows,[nav("Возникла проблема","💬","paysupport"),nav("Все тарифы","💎","plans")]]);
   }
   const rows=all.map(p=>[nav(planMeta[p.code][0]+" · "+priceLabel(catalog,p),"💎","plan_"+p.code,{},undefined,p.code==="pro"?"primary":undefined)]);
@@ -220,7 +223,7 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
     "<h3>Тарифы CORTEX</h3><p>Команды телефона бесплатны. Выбери подходящий лимит облачного ИИ.</p><table compact><tr><th>Тариф</th><th>Токенов/день</th><th>В месяц</th></tr>"+table+"</table>"+details+"<footer>Лимиты обновляются в 03:00 МСК. Подписка без автосписаний.</footer>");
 }
 function view(page:string,linked:boolean,options:EmojiOptions,name="",catalog:StoreCatalog|null=null):View {
-  if(page==="plans"||page==="pay"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog);
+  if(page==="plans"||page==="pay"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog,linked);
   const mark = premium(options.enabled ? "✨" : "✦", options.brand, options);
   let head="",body="",extra:Button[][]=[];
   let rich:string|undefined;
@@ -310,9 +313,9 @@ function richMarkdown(page:string,payload:View,options:EmojiOptions,catalog:Stor
   if(page==="pay"&&catalog&&catalog.plans.some(isVisible)) {
     const paid=catalog.plans.filter(p=>isVisible(p)&&p.code!=="free");
     return "## Оплата подписки\n\nОдин месяц доступа, без автосписаний.\n\n"+
-      paid.map(p=>{const b=find(b=>b.url===site+"/payment?plan="+p.code||b.callback_data==="cortex:plan_"+p.code);
+      paid.map(p=>{const b=find(b=>b.callback_data==="cortex:buy_"+p.code||b.callback_data==="cortex:plan_"+p.code);
         return "<p><b>"+planMeta[p.code as VisibleCode][0]+"</b> · "+priceLabel(catalog,p)+" "+(b?btn(b,starPrice(catalog,p)===null?"link":"success"):"")+"</p>";}).join("\n\n")+
-      "\n\n<footer>Оплата через официальный счёт Telegram. Перед покупкой войди в CORTEX.</footer>\n\n"+footer(rows.slice(-2).flat());
+      "\n\n<footer>Оплата прямо в Telegram. Аккаунт CORTEX нужно привязать один раз.</footer>\n\n"+footer(rows.slice(-2).flat());
   }
   if(page.startsWith("plan_")&&catalog) {
     const p=catalog.plans.find(p=>isVisible(p)&&p.code===page.slice(5));
@@ -459,10 +462,39 @@ export async function processCortexBotUpdate(
   }
   const rawPage = callback?.data;
   const page = callback
-    ? (typeof rawPage === "string" && /^cortex:(home|account|status|plans|pay|tokens|plan_(?:free|start|pro|ultra)|support|paysupport|help)$/.test(rawPage)
+    ? (typeof rawPage === "string" && /^cortex:(home|account|status|plans|pay|tokens|plan_(?:free|start|pro|ultra)|buy_(?:start|pro|ultra)|support|paysupport|help)$/.test(rawPage)
       ? rawPage.slice("cortex:".length) : "home")
     : command?.page || "home";
   if (callback) await services.telegram("answerCallbackQuery", {callback_query_id:callback.id});
+  if(page.startsWith("buy_")&&callback){
+    const plan=page.slice(4);
+    if(!starsPlan(plan))return 200;
+    const linked=await services.linked(userId);
+    if(!linked){
+      await services.telegram("sendMessage",{chat_id:chatId,parse_mode:"HTML",text:"🔗 <b>Сначала подключи аккаунт</b>\n\nЭто нужно один раз, чтобы подписка начислилась именно тебе. После привязки вернись к оплате в Telegram.",
+        reply_markup:{inline_keyboard:[[open("Привязать Telegram","🔗",site+"/account?tab=security",{},undefined,"primary")],[nav("Проверить подключение","↻",page)]]}});
+      return 200;
+    }
+    const result:BotCheckoutResult=services.checkout?await services.checkout(userId,plan as StarsPlan):{ok:false,error:"stars_disabled"};
+    const invoice=result.ok?starsInvoiceUrl(result.url):null;
+    if(result.ok&&invoice){
+      // createInvoiceLink opens Telegram's native XTR payment sheet, not our website.
+      await services.telegram("sendMessage",{chat_id:chatId,parse_mode:"HTML",
+        text:"⭐ <b>Счёт CORTEX "+plan.toUpperCase()+"</b>\n\n<b>"+fmt(result.stars)+" Stars</b> за один месяц.\nАвтоматических списаний нет.\n\n<i>Подписка активируется после подтверждения платежа.</i>",
+        reply_markup:{inline_keyboard:[[open("Оплатить "+fmt(result.stars)+" ⭐","⭐",invoice,{},undefined,"success")],[nav("К тарифам","‹","plans"),nav("Помощь","💬","paysupport")]]}});
+    }else{
+      const code=result.ok?"invoice_unavailable":result.error;
+      const message=code==="link_required"?"Привязка аккаунта изменилась. Подключи Telegram заново."
+        :code==="payment_pending"||code==="other_checkout_pending"?"У тебя уже есть незавершённая покупка. Заверши её или дождись истечения счёта."
+        :code==="payment_processing"?"Предыдущий платёж обрабатывается. Не оплачивай повторно."
+        :code==="rate_limited"?"Слишком много попыток. Попробуй через 15 минут."
+        :code==="stars_disabled"||code==="payments_disabled"||code==="funding_unavailable"?"Этот тариф сейчас недоступен для покупки."
+        :"Не удалось создать счёт. Деньги не списаны. Попробуй снова.";
+      await services.telegram("sendMessage",{chat_id:chatId,parse_mode:"HTML",text:"<b>Оплата подписки</b>\n\n"+message,
+        reply_markup:{inline_keyboard:[[nav("К тарифам","‹","plans")],[nav("Помощь с оплатой","💬","paysupport")]]}});
+    }
+    return 200;
+  }
   const storePage=page==="plans"||page==="pay"||page.startsWith("plan_");
   const [linked,catalog]=await Promise.all([services.linked(userId),
     storePage&&services.catalog ? services.catalog().catch(()=>null) : Promise.resolve(null)]);

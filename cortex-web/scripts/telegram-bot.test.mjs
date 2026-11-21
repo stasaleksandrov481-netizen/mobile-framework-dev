@@ -165,10 +165,10 @@ test("Catalog is real-data-driven, excludes guest, and uses rich comparison",asy
  assert.match(html,/<table compact>/);assert.match(html,/Ultra/);assert.match(html,/250/);assert.match(html,/Недоступно/);assert.doesNotMatch(html,/guest/i);
  assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="cortex:plan_pro"));
 });
-test("Plan selection has exact plan checkout, without invoice creation",async()=>{
+test("Plan selection has exact in-bot checkout action, without invoice creation",async()=>{
  const h=harness();await processCortexBotUpdate({update_id:150,callback_query:{id:"plan",data:"cortex:plan_pro",from:{id:user},message:{chat,message_id:27}}},h.services);
  assert.equal(h.calls[1].method,"editMessageText");
- assert.match(h.calls[1].args.text,/CORTEX Pro/);assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().some(b=>b.url==="https://cortexapp.ru/payment?plan=pro"));
+ assert.match(h.calls[1].args.text,/CORTEX Pro/);assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().some(b=>b.callback_data==="cortex:buy_pro"));
  assert.ok(h.calls.every(c=>c.method!=="sendInvoice"&&c.method!=="createInvoiceLink"));
 });
 test("Unavailable catalog shows no invented numbers or checkout",async()=>{
@@ -206,7 +206,7 @@ test("Rich callbacks edit one existing screen without an attached keyboard",asyn
  const h=harness();h.services.richUi=true;await processCortexBotUpdate({update_id:159,callback_query:{id:"rich",data:"cortex:plan_pro",from:{id:user},message:{chat,message_id:25}}},h.services);
  assert.deepEqual(h.calls.map(c=>c.method),["answerCallbackQuery","editMessageText"]);
  const a=h.calls[1].args;assert.deepEqual(a.reply_markup.inline_keyboard,[]);
- assert.match(a.rich_message.markdown,/url="https:\/\/cortexapp\.ru\/payment\?plan=pro"/);
+ assert.match(a.rich_message.markdown,/data="cortex:buy_pro"/);
 });
 test("Rich support provides inline email copy and links",async()=>{
  const h=harness();h.services.richUi=true;await processCortexBotUpdate(message("/support"),h.services);
@@ -229,4 +229,28 @@ test("Rich premium rejection retries without premium, not with an external keybo
 test("Rich mode preserves escaped greeting names without markdown injection",async()=>{
  const h=harness();h.services.richUi=true;const m=message("/start");m.message.from.first_name="<tg-button>Injected</tg-button>";
  await processCortexBotUpdate(m,h.services);assert.match(h.calls[0].args.rich_message.markdown,/&lt;tg-button&gt;Injected&lt;\/tg-button&gt;/);
+});
+
+test("Unlinked user must connect once, no checkout occurs",async()=>{
+ const h=harness();h.services.checkout=async()=>{throw Error("must not call");};
+ await processCortexBotUpdate({update_id:160,callback_query:{id:"buy",data:"cortex:buy_pro",from:{id:user},message:{chat,message_id:1}}},h.services);
+ assert.match(h.calls[1].args.text,/Сначала подключи аккаунт/);
+ assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().some(b=>b.url==="https://cortexapp.ru/account?tab=security"));
+});
+test("Linked buyer opens a native invoice URL and never website checkout",async()=>{
+ const h=harness();h.setLinked(true);h.services.checkout=async(id,plan)=>{assert.equal(id,user);assert.equal(plan,"pro");return {ok:true,id:"11111111-1111-1111-1111-111111111111",stars:250,url:"https://t.me/$invoice"};};
+ await processCortexBotUpdate({update_id:161,callback_query:{id:"buy",data:"cortex:buy_pro",from:{id:user},message:{chat,message_id:1}}},h.services);
+ assert.match(h.calls[1].args.text,/250 Stars/);assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().some(b=>b.url==="https://t.me/$invoice"));
+ assert.doesNotMatch(JSON.stringify(h.calls),/cortexapp\.ru\/payment/);
+});
+test("Forged or group checkout never calls payment service",async()=>{
+ const h=harness();h.setLinked(true);h.services.checkout=async()=>{throw Error("must not call");};
+ await processCortexBotUpdate({update_id:162,callback_query:{id:"buy",data:"cortex:buy_pro",from:{id:user+1},message:{chat,message_id:1}}},h.services);
+ assert.equal(h.calls.length,0);
+});
+test("Pending order never shows a second pay action",async()=>{
+ const h=harness();h.setLinked(true);h.services.checkout=async()=>({ok:false,error:"payment_processing"});
+ await processCortexBotUpdate({update_id:163,callback_query:{id:"buy",data:"cortex:buy_start",from:{id:user},message:{chat,message_id:1}}},h.services);
+ assert.match(h.calls[1].args.text,/Не оплачивай повторно/);
+ assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().every(b=>!b.url));
 });
