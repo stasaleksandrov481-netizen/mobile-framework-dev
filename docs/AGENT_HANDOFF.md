@@ -1,3 +1,11 @@
+## 2026-11-21 UTC · Production: кабинет без карточного оформления
+
+- По прямому запросу владельца убран карточный / стеклянный стиль личного кабинета CORTEX. PR #121 объединён в рабочую веб-ветку `fix/cortex-web-tap-highlights-20261121`, squash SHA `a8ac38bd0937410c8fd152744fb70cf0b4db1fe0`. Функции аккаунта, лимитов, оплат, Telegram, Android, Supabase/Edge и основная главная страница не менялись.
+- Изменения `cortex-web/app/account/account.css` и `account-forms.css`: плоские секции с разделителями, строки вместо карточек, нейтральные кнопки, подчёркивание мобильной вкладки, без декоративных теней и градиентов.
+- Design-only Preview `dpl_HPf4WfZbQd99QZjXkMqjWfgGmQik` READY (`7c18640a`); 16 из 16 статических проверок визуального контракта и сохранности действий прошли, Vercel TypeScript/Next.js build успешен. GitHub Actions для данного PR не запускались. Физическая визуальная проверка на реальном мобильном браузере не проводилась.
+- Production `dpl_Fjk8X98XwdVsnu94CnhbWthfLgJs` READY, SHA `a8ac38bd0937410c8fd152744fb70cf0b4db1fe0`, обе алиасные записи `cortexapp.ru` и `www.cortexapp.ru` подтверждены на этом deployment. В выборке production runtime logs по уровню error/fatal/warning для нового deployment записей не найдено; это не гарантирует отсутствие клиентских ошибок.
+- Rollback: прежний READY production deployment `dpl_HzUoDkmwEkk5Js98RQwSbuv4Zn3C`, SHA `62b439f5adb23782bee27ecd4b7f3c28663c0fc0`. Новой SQL-миграции нет, Telegram-link PR #120 остаётся отдельной незавершённой задачей.
+- Прямой внешний HTTP smoke по сайту в веб-инструменте недоступен; browser screenshots/interactive login не проверены. Следующий шаг: фактический просмотр кабинета владельцем на мобильном и десктопе, при необходимости точечная корректировка CSS.
 ## 2026-11-21 UTC · Дизайн кабинета: плоские системные настройки
 
 - Ветка `style/cortex-account-flat-settings-20261121`, основа `fix/cortex-web-tap-highlights-20261121` (последний production-веб-источник, включая исправления tap-highlight и страницы главной). Изменены только CSS кабинета и проверочный тест, функциональность, платежи, Telegram webhook и авторизация не затронуты.
