@@ -21,7 +21,9 @@ export async function POST(request: NextRequest) {
   const token = process.env.CORTEX_TELEGRAM_BOT_TOKEN;
   const secret = process.env.CORTEX_TELEGRAM_WEBHOOK_SECRET;
   const serviceRole = process.env.CORTEX_SUPABASE_SERVICE_ROLE_KEY;
-  if (process.env.CORTEX_TELEGRAM_STARS_ENABLED !== "true" ||
+  const starsEnabled = process.env.CORTEX_TELEGRAM_STARS_ENABLED === "true";
+  const botEnabled = process.env.CORTEX_TELEGRAM_BOT_ENABLED === "true";
+  if ((!starsEnabled && !botEnabled) ||
       !telegramConfigurationValid(token, secret) || !serviceRole) {
     return respond(503);
   }
@@ -46,7 +48,8 @@ export async function POST(request: NextRequest) {
     const isPayment = Boolean(update.pre_checkout_query || update.message?.successful_payment ||
       update.message?.refunded_payment);
     // Stage bot features separately; payment processing retains its original path.
-    if (isPayment || process.env.CORTEX_TELEGRAM_BOT_ENABLED !== "true") {
+    if (isPayment || !botEnabled) {
+      if (isPayment && !starsEnabled) return respond(503);
       const status = await processTelegramStarsUpdate(update, {
         rpc: async (name, params) => admin.rpc(name, params),
         telegram: (name, params) => telegramBotApi(token, name, params),
