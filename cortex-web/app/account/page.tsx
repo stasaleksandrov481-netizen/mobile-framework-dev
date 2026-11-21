@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { AccountDashboard } from "@/components/AccountDashboard";
 import "./account.css";
 import "./account-forms.css";
+import "./telegram-security.css";
 
 export const metadata: Metadata = {
   title: "Личный кабинет — CORTEX",
