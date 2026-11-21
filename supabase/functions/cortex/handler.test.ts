@@ -686,6 +686,7 @@ test("platform-wide OpenRouter minute 429 stops before wasting a free-model fall
   assert.ok(Number(response.headers.get("retry-after")) >= 25);
   assert.deepEqual(models, ["example/unavailable:free"], "the fallback must not hit the exhausted key");
   assert.ok(requests.includes("POST /api/v1/chat/completions"));
+  assert.ok(!requests.includes("GET /api/v1/key"), "known reset must not require a slow quota probe");
 });
 
 test("support submission persists its owner and only that installation can read replies", async () => {
