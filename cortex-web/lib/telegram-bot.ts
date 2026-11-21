@@ -313,7 +313,11 @@ export async function processCortexBotUpdate(
   const payload = view(page, linked, emoji, displayName(from));
   if (callback) {
     await services.telegram("answerCallbackQuery", { callback_query_id: callback.id });
-    if (page === "help") {\n      await sendGuide(services, chatId, payload);\n      return 200;\n    }\n    if (validId(message?.message_id)) {
+    if (page === "help") {
+      await sendGuide(services, chatId, payload);
+      return 200;
+    }
+    if (validId(message?.message_id)) {
       if (Array.isArray(message.photo) && message.photo.length > 0) {
         const { text, disable_web_page_preview: _preview, ...rest } = payload;
         await services.telegram("editMessageCaption", { chat_id: chatId, message_id: message.message_id, caption: text, ...rest });
