@@ -191,7 +191,7 @@ test("Rich production menu embeds controls and welcome media with no external ke
  const h=harness();h.services.richUi=true;await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
  assert.equal(h.calls[0].method,"sendRichMessage");const a=h.calls[0].args;
  assert.equal(a.reply_markup,undefined);assert.match(a.rich_message.markdown,/!\[\]\(https:\/\/cortexapp\.ru\/telegram\/welcome\.jpg\)/);
- assert.match(a.rich_message.markdown,/<tg-button type="callback_data" data="cortex:plans" style="link">/);
+ assert.match(a.rich_message.markdown,/<tg-button type="callback_data" data="cortex:plans" style="primary">/);
  assert.match(a.rich_message.markdown,/<tg-emoji emoji-id="/);
  assert.match(a.rich_message.markdown,/<tg-button-row align="left">/);
 });
