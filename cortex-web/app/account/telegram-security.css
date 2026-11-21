@@ -1,0 +1,97 @@
+.account-telegram-panel {
+  margin-bottom: 16px;
+  padding: clamp(20px, 3vw, 30px);
+}
+.account-telegram-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 17px;
+}
+.account-telegram-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  border: 1px solid rgb(255 255 255 / .14);
+  background: rgb(255 255 255 / .045);
+}
+.account-telegram-heading h2 {
+  margin: 8px 0 4px;
+  color: #f7f7f7;
+  font-size: clamp(20px, 2.4vw, 26px);
+  letter-spacing: -.04em;
+}
+.account-telegram-heading p,
+.account-telegram-hint {
+  max-width: 650px;
+  color: var(--muted, #aaa);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.account-telegram-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  margin: 24px 0 12px;
+  padding: 10px 13px;
+  border: 1px solid rgb(255 255 255 / .13);
+  border-radius: 12px;
+  background: rgb(255 255 255 / .04);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.account-telegram-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #777;
+}
+.account-telegram-dot.is-connected { background: #e9e9e9; }
+.account-telegram-hint { margin: 4px 0 18px; }
+.account-telegram-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.account-telegram-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.account-telegram-confirm {
+  padding: 16px 0 0;
+  border-top: 1px solid rgb(255 255 255 / .1);
+}
+.account-telegram-confirm p {
+  font-size: 13px;
+  color: #ddd;
+  line-height: 1.6;
+}
+.account-telegram-danger {
+  min-height: 44px;
+  border: 1px solid #bdbdbd;
+  border-radius: 12px;
+  padding: 10px 16px;
+  background: #fff;
+  color: #080808;
+  font-size: 13px;
+  font-weight: 670;
+}
+.account-telegram-danger:disabled { opacity: .5; cursor: not-allowed; }
+.account-telegram-panel .account-save-button,
+.account-telegram-panel .account-outline-button {
+  min-height: 44px;
+}
+.account-telegram-panel .account-form-error { margin-top: 14px; }
+@media (max-width: 480px) {
+  .account-telegram-heading { gap: 12px; }
+  .account-telegram-mark { width: 44px; height: 44px; border-radius: 12px; }
+  .account-telegram-panel .account-telegram-actions > * { flex: 1 1 100%; }
+}

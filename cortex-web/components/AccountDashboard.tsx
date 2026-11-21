@@ -10,6 +10,7 @@ import { createLatestRequest } from "@/lib/latest-request";
 import { validQuota, validReservation, resetLabel } from "@/lib/account-data";
 import type { Quota, Reservation } from "@/lib/account-data";
 import UiIcon from "@/components/UiIcon";
+import { TelegramSecurityLink } from "@/components/TelegramSecurityLink";
 
 type Panel = "overview" | "profile" | "security";
 const tones = ["graphite", "silver", "stone", "olive", "clay", "plum"] as const;
@@ -44,6 +45,11 @@ export function AccountDashboard() {
   const [authCheckError, setAuthCheckError] = useState("");
   const [authRetry, setAuthRetry] = useState(0);
   const [panel, setPanel] = useState<Panel>("overview");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "security") {
+      setPanel("security");
+    }
+  }, []);
   const [reservation, setReservation] = useState<Reservation | null>(null);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [loadingData, setLoadingData] = useState(true);
@@ -356,6 +362,7 @@ export function AccountDashboard() {
           </> : <>
             <div className="account-eyebrow">CORTEX / БЕЗОПАСНОСТЬ</div>
             <div className="account-title-row"><div><h1>Безопасность.</h1><p>Управляй доступом к аккаунту и активными входами.</p></div></div>
+            <TelegramSecurityLink active={panel === "security"} />
             <section className="account-panel account-security-panel" aria-labelledby="account-session-heading">
               <div className="account-small-label">УЧЁТНАЯ ЗАПИСЬ</div>
               <h2 id="account-session-heading">Доступ к аккаунту</h2>
