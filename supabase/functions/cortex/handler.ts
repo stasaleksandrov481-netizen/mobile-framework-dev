@@ -249,7 +249,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
       await redis.putFreeModels(models).catch(() => {});
       return models;
     })().catch(() => []);
-    catalog = { value, until: Date.now() + 600_000 };
+    // A temporary catalog outage or an empty result must not be cached for
+    // ten minutes: the next exhausted chat needs a chance to recover quickly.
+    // Successful discoveries retain the existing ten-minute local TTL.
+    catalog = { value, until: Date.now() + 15_000 };
+    void value.then(found => {
+      if (found.length && catalog?.value === value) catalog.until = Date.now() + 600_000;
+    });
     return value;
   }
 
@@ -1013,7 +1019,13 @@ export function createHandler(env: Env, network: Network = fetch): (request: Req
         const routeModels = chosenPaid ? paidCandidates : chosenFree
           ? [{ model: chosenFree, advanced: false }]
           : [...paidCandidates, ...ordered.map(model => ({ model, advanced: false }))];
-        const maxAttempts = chosen ? 1 : paidCandidates.length + (input.settings ? 2 : 3);
+        // One last-resort *free* candidate is allowed only for ordinary
+        // automatic chat/check routes. Without this slot, exhausting the
+        // three defaults exits the loop before freeCatalog() can ever run.
+        // Explicit model selections and visual/settings plans keep their
+        // strict, existing attempt caps.
+        const maxAttempts = chosen ? 1 : paidCandidates.length +
+          (input.settings ? 2 : input.visual ? 3 : 4);
         const messages = [...input.messages];
         if (access?.context_chars) {
           let chars = messages.reduce((total, turn) => total + turn.content.length, 0);

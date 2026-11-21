@@ -17,7 +17,7 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
   emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
   enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4]), streamedGemini = false,
   guestEnabled = true, oldGuestFlag = false, visualFailures: { toolTimeout?: boolean; schema429?: boolean } = {},
-  providerKeyRateLimited = false) {
+  providerKeyRateLimited = false, catalogRecovery: "off" | "working" | "empty" = "off") {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -78,6 +78,13 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
       return new Response(speechPcm, { headers: { "content-type": "application/octet-stream" } });
     }
 
+    if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/models") {
+      assert.notEqual(catalogRecovery, "off", "catalog is only needed for exhausted routes");
+      return Response.json({ data: catalogRecovery === "working" ? [{
+        id: "example/discovered:free", pricing: { prompt: "0", completion: "0" },
+        architecture: { output_modalities: ["text"] }, supported_parameters: ["tools"],
+      }] : [] });
+    }
     if (url.hostname === "openrouter.ai" && url.pathname === "/api/v1/chat/completions") {
       assert.equal(body.usage.include, true);
       if (MODEL_PRICE_CEILINGS[body.model]) {
@@ -96,6 +103,10 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         assert.match(body.model, /:free$/);
       }
       models.push(body.model);
+      if (catalogRecovery !== "off" && body.model !== "example/discovered:free") {
+        return Response.json({ error: { message: "provider temporarily unavailable",
+          metadata: { provider_name: "model-upstream" } } }, { status: 502 });
+      }
       if (body.tools?.[0]?.function?.name === "plan_android_screen") {
         assert.equal(body.tool_choice, "required");
         assert.equal(body.stream, false);
@@ -687,6 +698,37 @@ test("platform-wide OpenRouter minute 429 stops before wasting a free-model fall
   assert.deepEqual(models, ["example/unavailable:free"], "the fallback must not hit the exhausted key");
   assert.ok(requests.includes("POST /api/v1/chat/completions"));
   assert.ok(!requests.includes("GET /api/v1/key"), "known reset must not require a slow quota probe");
+});
+
+test("an exhausted static route discovers one free alternative without extra user quota charges", async () => {
+  const { call, models, requests, aiRequests } = fixture(false, undefined, 15_000, 50,
+    true, false, 0, "", false, false, undefined, false, true, false, {}, false, "working");
+  const response = await call("check", {});
+  assert.equal(response.status, 200, "a fourth, validated free model should recover the request");
+  assert.deepEqual(models, [
+    "example/unavailable:free", "example/working:free",
+    "cohere/north-mini-code:free", "example/discovered:free",
+  ]);
+  assert.equal(requests.filter(path => path === "GET /api/v1/models").length, 1);
+  assert.equal(aiRequests.length, 1, "one logical request must be counted once");
+  assert.equal((await response.json()).quota.used, 100, "failed attempts must not charge model tokens");
+});
+
+test("an empty free model catalog is retried after a short negative cache TTL", async t => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const { call, requests } = fixture(false, undefined, 15_000, 50,
+    true, false, 0, "", false, false, undefined, false, true, false, {}, false, "empty");
+  assert.equal((await call("check", {})).status, 502);
+  assert.equal(requests.filter(path => path === "GET /api/v1/models").length, 1);
+  now += 14_000;
+  assert.equal((await call("check", {})).status, 502);
+  assert.equal(requests.filter(path => path === "GET /api/v1/models").length, 1,
+    "short repeated failures reuse the cached empty result");
+  now += 2_000;
+  assert.equal((await call("check", {})).status, 502);
+  assert.equal(requests.filter(path => path === "GET /api/v1/models").length, 2,
+    "catalog lookup recovers without a ten-minute negative cache lockout");
 });
 
 test("support submission persists its owner and only that installation can read replies", async () => {
