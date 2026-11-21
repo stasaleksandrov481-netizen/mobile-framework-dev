@@ -141,7 +141,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
         </div>
       </div> : <button className="account-outline-button" type="button"
         onClick={() => setConfirmUnlink(true)}>Отвязать Telegram</button>}
-    /> : pending && linkUrl ? <>
+    </> : pending && linkUrl ? <>
       <p className="account-telegram-hint">Ссылка действует 5 минут. Нажми Start в боте — связь с аккаунтом CORTEX будет установлена автоматически.</p>
       <div className="account-telegram-actions">
         <a href={linkUrl} className="account-save-button account-telegram-cta" target="_blank" rel="noopener noreferrer">
