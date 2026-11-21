@@ -183,7 +183,7 @@ function priceLabel(catalog:StoreCatalog,p:StorePlan):string {
   const price=starPrice(catalog,p);
   return price===0 ? "Бесплатно" : price===null ? "Недоступно" : fmt(price)+" ⭐";
 }
-function storeView(page:string,catalog:StoreCatalog|null,linked:boolean):View {
+function storeView(page:string,catalog:StoreCatalog|null):View {
   const back = [nav("Назад","‹",page.startsWith("plan_") ? "plans" : "home")];
   const wrap=(text:string,rows:Button[][],rich?:string):View=>({text,parse_mode:"HTML",disable_web_page_preview:true,
     reply_markup:{inline_keyboard:[...rows,back]},...(rich ? {rich} : {})});
@@ -223,7 +223,7 @@ function storeView(page:string,catalog:StoreCatalog|null,linked:boolean):View {
     "<h3>Тарифы CORTEX</h3><p>Команды телефона бесплатны. Выбери подходящий лимит облачного ИИ.</p><table compact><tr><th>Тариф</th><th>Токенов/день</th><th>В месяц</th></tr>"+table+"</table>"+details+"<footer>Лимиты обновляются в 03:00 МСК. Подписка без автосписаний.</footer>");
 }
 function view(page:string,linked:boolean,options:EmojiOptions,name="",catalog:StoreCatalog|null=null):View {
-  if(page==="plans"||page==="pay"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog,linked);
+  if(page==="plans"||page==="pay"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog);
   const mark = premium(options.enabled ? "✨" : "✦", options.brand, options);
   let head="",body="",extra:Button[][]=[];
   let rich:string|undefined;

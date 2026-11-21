@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     const status = await processCortexBotUpdate(update as CortexTelegramUpdate, {
       richUi: true,
       checkout: starsEnabled ? (telegramId,plan)=>createBotStarsCheckout(telegramId,plan,{
-        rpc: (name,params)=>admin.rpc(name,params),
+        rpc: async (name,params)=>admin.rpc(name,params),
         telegram: (name,params)=>telegramBotApi(token,name,params),
       }) : undefined,
       catalog: async () => {
