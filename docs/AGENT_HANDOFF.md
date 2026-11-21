@@ -1,3 +1,9 @@
+## 2026-11-21 UTC · OpenRouter: разделение общего лимита и отказа модели
+
+- Проверены журналы Supabase Edge, production **v52 ACTIVE** и официальная документация OpenRouter. В доступных function_edge_logs пока нет подтверждённых реальных запросов к v52; последний 502 пришёл от v51. Отдельные 429 предыдущих релизов нельзя автоматически приписывать текущей версии.
+- Ветка `fix/cortex-openrouter-429-classification-20261121`: расширен разбор OpenRouter HTTP/SSE 429 с учётом `error.metadata.headers`; сохранён приоритет настоящих HTTP-заголовков и различие между upstream 429 и лимитом бесплатной платформенной квоты. Добавлены тесты без реальных вызовов ИИ, оплаты или пользовательских данных.
+- До релиза сохранить live v52 (11 файлов, SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`) и применить точечный patch `provider.ts`, не копируя `main` целиком: он отличается от production voice/stream. После CI возможен безопасный деплой и readback 11/11. Android физический тест не проводился; GitHub CI не заменяет его.
+
 ## 2026-11-21 UTC · Верификация live Edge v52 и следующий шаг
 
 - Исправление Redis и тест безопасного `text_ready` объединены в `main` через [PR #115](https://github.com/stasaleksandrov481-netizen/mobile-framework-dev/pull/115), squash `4eddc60`. 77/77 Edge тестов, billing, handoff и security scan успешны; Android workflow не использовался для выпуска APK.

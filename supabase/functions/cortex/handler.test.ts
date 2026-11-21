@@ -16,7 +16,8 @@ const replyId = "1f8188b2-9176-4be1-b0cf-8d9ef890eaa0";
 function fixture(maintenance = false, streamedReply?: () => Response, remaining = 15000, globalLimit = 50,
   emailReady = true, paid = false, speechLiteStatus = 0, rejectRateBucket = "", expiredSession = false,
   enforceRateLimits = false, speechPcm = new Uint8Array([1, 2, 3, 4]), streamedGemini = false,
-  guestEnabled = true, oldGuestFlag = false, visualFailures: { toolTimeout?: boolean; schema429?: boolean } = {}) {
+  guestEnabled = true, oldGuestFlag = false, visualFailures: { toolTimeout?: boolean; schema429?: boolean } = {},
+  providerKeyRateLimited = false) {
   let ticket: Record<string, unknown> | null = null;
   let login: Record<string, unknown> | null = null;
   const models: string[] = [];
@@ -114,6 +115,12 @@ function fixture(maintenance = false, streamedReply?: () => Response, remaining 
         }) } }], usage: { prompt_tokens: 82, completion_tokens: 18 } });
       }
       if (body.model === "example/unavailable:free") {
+        if (providerKeyRateLimited) return Response.json({ error: {
+          code: 429, message: "Rate limit exceeded: free-models-per-min.",
+          metadata: { error_type: "rate_limit_exceeded", headers: {
+            "X-RateLimit-Limit": "20", "X-RateLimit-Reset": String(Date.now() + 30_000),
+          } },
+        } }, { status: 429 });
         return Response.json({ error: { metadata: { provider_name: "upstream" } } }, { status: 429 });
       }
       if (body.stream) {
@@ -668,6 +675,18 @@ test("retries a rate-limited provider with a different :free model", async () =>
   assert.equal(result.connected, true);
   assert.equal(result.quota.used, 100);
   assert.deepEqual(models, ["example/unavailable:free", "example/working:free"]);
+});
+
+test("platform-wide OpenRouter minute 429 stops before wasting a free-model fallback", async () => {
+  const { call, models, requests } = fixture(false, undefined, 15_000, 50,
+    true, false, 0, "", false, false, undefined, false, true, false, {}, true);
+  const response = await call("check", {});
+  assert.equal(response.status, 429);
+  assert.equal((await response.json()).error, "provider_quota");
+  assert.ok(Number(response.headers.get("retry-after")) >= 25);
+  assert.deepEqual(models, ["example/unavailable:free"], "the fallback must not hit the exhausted key");
+  assert.ok(requests.includes("POST /api/v1/chat/completions"));
+  assert.ok(!requests.includes("GET /api/v1/key"), "known reset must not require a slow quota probe");
 });
 
 test("support submission persists its owner and only that installation can read replies", async () => {

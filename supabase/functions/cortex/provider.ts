@@ -134,19 +134,43 @@ function retrySeconds(headers: Headers): number {
 }
 
 type ProviderError = { code?: unknown; message?: string; metadata?: Record<string, unknown> };
+
+// OpenRouter normally sends X-RateLimit-* as HTTP headers, but some
+// error envelopes carry the same headers in error.metadata.headers.
+// Only read known rate-limit fields; never copy arbitrary upstream headers.
+function rateHeaders(headers: Headers, metadata?: Record<string, unknown>): Headers {
+  const merged = new Headers(headers);
+  const embedded = metadata?.headers;
+  if (!embedded || typeof embedded !== "object" || Array.isArray(embedded)) return merged;
+  for (const [name, value] of Object.entries(embedded)) {
+    const field = name.toLowerCase();
+    if (!["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"].includes(field) ||
+      merged.has(field) || !(typeof value === "string" || typeof value === "number")) continue;
+    const text = String(value);
+    if (text.length > 80) continue;
+    try { merged.set(field, text); } catch { /* Ignore malformed upstream values. */ }
+  }
+  return merged;
+}
 function providerFailure(status: number, error?: ProviderError, headers = new Headers()): Failure {
   const metadata = error?.metadata;
   const type = String(metadata?.error_type ?? "");
   const message = typeof error?.message === "string" ? error.message : "";
-  const retry = retrySeconds(headers);
+  const limits = rateHeaders(headers, metadata);
+  const retry = retrySeconds(limits);
   if (status === 429) {
+    // Do not freeze the entire key when only one upstream model is saturated.
     if (metadata?.provider_name || metadata?.provider_code || /upstream rate.limit|temporarily rate.limited upstream/i.test(message)) {
       return new Failure("provider_limit", 429, retry);
     }
-    if (/free.model.{0,50}(?:per.day|daily)|(?:daily|per.day).{0,50}free.model/i.test(message)) {
+    const daily = /free[\s._-]*models?[\s._-]*per[\s._-]*(?:day|daily)|(?:daily|per[\s._-]*day).{0,50}free[\s._-]*model/iu;
+    const minute = /free[\s._-]*models?[\s._-]*per[\s._-]*(?:min(?:ute)?|rpm)/iu;
+    // If platform rate-limit headers describe a reset more than one hour
+    // away, do not retry all models as though this were a per-model error.
+    if (daily.test(message) || (limits.has("x-ratelimit-limit") && retry > 3600)) {
       return new Failure("provider_quota_daily", 429, retry);
     }
-    if (headers.has("x-ratelimit-limit") || /free.model.{0,50}(?:per.minute|minute)/i.test(message)) {
+    if (limits.has("x-ratelimit-limit") || minute.test(message)) {
       return new Failure("provider_quota", 429, retry);
     }
     return new Failure("provider_limit_unknown", 429, retry);
@@ -163,6 +187,9 @@ function providerFailure(status: number, error?: ProviderError, headers = new He
 
 export async function confirmedQuota(network: Network, key: string, signal: AbortSignal, failure: Failure): Promise<Failure> {
   if (failure.code !== "provider_quota" && failure.code !== "provider_limit_unknown") return failure;
+  // OpenRouter already supplied a definite minute reset. Do not add an
+  // unnecessary /key probe (up to 3 seconds) on this known 429 path.
+  if (failure.code === "provider_quota" && failure.retryAfter > 0) return failure;
   try {
     const response = await network("https://openrouter.ai/api/v1/key", {
       headers: { Authorization: "Bearer " + key }, redirect: "error",
