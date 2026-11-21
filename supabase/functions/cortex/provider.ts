@@ -187,6 +187,9 @@ function providerFailure(status: number, error?: ProviderError, headers = new He
 
 export async function confirmedQuota(network: Network, key: string, signal: AbortSignal, failure: Failure): Promise<Failure> {
   if (failure.code !== "provider_quota" && failure.code !== "provider_limit_unknown") return failure;
+  // OpenRouter already supplied a definite minute reset. Do not add an
+  // unnecessary /key probe (up to 3 seconds) on this known 429 path.
+  if (failure.code === "provider_quota" && failure.retryAfter > 0) return failure;
   try {
     const response = await network("https://openrouter.ai/api/v1/key", {
       headers: { Authorization: "Bearer " + key }, redirect: "error",
