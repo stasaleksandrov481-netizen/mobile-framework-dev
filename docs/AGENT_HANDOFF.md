@@ -1,3 +1,9 @@
+## 2026-11-21 UTC · Production v54: каталоговый fallback восстановлен
+
+- PR #117 squash merged to GitHub `main` as `814595009290a1124b703498ccf72e8024306f47`. Edge regression tests 85/85 passed, billing, handoff, UI, CodeQL passed. В GitHub изменения сосредоточены в `handler.ts`, `handler.test.ts` и документации; Edge release выполнен отдельно из live v53.
+- Supabase Edge `cortex` **ACTIVE v54**, `verify_jwt=false`, fingerprint `f0ab7f7b2585a7ca125fec29d2a719ad97d3bc100d0344b3d00be44e1d358c9a`. Два точечных изменения `handler.ts` поверх exact-live 11 modules v53. После деплоя всех 11/11 исходников readback совпал с реконструированным эталоном. Добавлен один запасной *бесплатный* кандидат после трёх отказов, когда модель не выбрана явно. Отрицательный результат каталога теперь кэшируется 15 с, положительный 600 с.
+- **Rollback**: вернуть только `handler.ts` v53, остальные 10 модулей v54 = v53. Fingerprint v53 `0c5cd5ef884a6496683c82ec185295c21ffc9264b4b12b60c7166a1fe9882d18`. Никаких изменений SQL, токеновых лимитов, оплаты, Android/Vercel. Попытка реального `GET /v1/status` из среды завершилась DNS-ошибкой; веб-инструмент тоже не открыл URL. После появления живых запросов просмотреть `function_edge_logs` по `version='54'` и проверить TTFT/визуальное управление на Android. Не считать mock tests доказательством реального качества.
+
 ## 2026-11-21 UTC · Обнаружена недостижимость fallback каталога после трёх отказов
 
 - Проверены GitHub `main` и live Supabase Edge v53 ACTIVE (11 файлов), серверные логи: на v53 пока нет новых `/v1/chat`, реальное снижение частоты ошибок после предыдущих патчей ещё не доказано. В коде `maxAttempts = 3` для обычного бесплатного чата при ровно трёх статических `routeModels` приводил к выходу из цикла до ветки `freeCatalog()`.
