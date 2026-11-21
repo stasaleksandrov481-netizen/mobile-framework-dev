@@ -6,13 +6,12 @@ create table public.cortex_telegram_account_links (
   telegram_username text check (telegram_username is null or length(telegram_username) <= 32),
   telegram_name text check (telegram_name is null or length(telegram_name) <= 100),
   token_sha256 text unique check (token_sha256 ~ '^[0-9a-f]{64}$'),
-  state text not null check (state in ('pending','verified','linked')),
+  state text not null check (state in ('pending','linked')),
   expires_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint cortex_telegram_link_state_valid check (
     (state = 'pending' and telegram_id is null and token_sha256 is not null and expires_at is not null)
-    or (state = 'verified' and telegram_id is not null and token_sha256 is not null and expires_at is not null)
     or (state = 'linked' and telegram_id is not null and token_sha256 is null and expires_at is null)
   )
 );

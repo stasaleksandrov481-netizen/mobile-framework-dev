@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { cortexAuth } from "@/lib/cortex-auth";
 
-type LinkState = "loading" | "none" | "pending" | "verified" | "linked" | "expired";
+type LinkState = "loading" | "none" | "pending" | "linked" | "expired";
 type LinkStatus = {
   state: LinkState; username?: string | null; name?: string | null;
   expires_at?: string | null; url?: string; error?: string;
@@ -36,7 +36,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
   const [error, setError] = useState("");
   const [confirmUnlink, setConfirmUnlink] = useState(false);
 
-  const request = useCallback(async (method: "GET" | "POST" | "DELETE", action?: "create" | "confirm") => {
+  const request = useCallback(async (method: "GET" | "POST" | "DELETE", action?: "create") => {
     const { data: { session } } = await cortexAuth.auth.getSession();
     if (!session?.access_token) throw new Error("login_required");
     const response = await fetch(linkEndpoint, {
@@ -77,22 +77,26 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
     return () => window.clearInterval(poll);
   }, [active, state.state, refresh]);
 
-  async function mutate(action: "create" | "confirm" | "unlink") {
+  async function mutate(action: "create" | "unlink") {
     if (busy) return;
     setBusy(true);
     setError("");
     try {
       const next = await request(action === "unlink" ? "DELETE" : "POST",
-        action === "unlink" ? undefined : action);
+        action === "unlink" ? undefined : "create");
       if (action === "create") {
         const destination = safeTelegramUrl(next.url);
         if (!destination) throw new Error("invalid_link");
         setLinkUrl(destination);
+        setState(next);
+        // Open Telegram immediately after the authenticated server generated the one-time link.
+        // The bot finishes the connection on /start; no second confirmation on the site.
+        window.location.assign(destination);
       } else {
         setLinkUrl(null);
+        setState(next);
+        setConfirmUnlink(false);
       }
-      setState(next);
-      setConfirmUnlink(false);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -101,7 +105,6 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
   }
 
   const connected = state.state === "linked";
-  const verified = state.state === "verified";
   const pending = state.state === "pending";
   const person = state.username ? "@" + state.username : state.name || "Аккаунт Telegram";
 
@@ -121,7 +124,6 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
       <span className={"account-telegram-dot" + (connected ? " is-connected" : "")} />
       {state.state === "loading" ? "Проверяем подключение…" :
         connected ? "Подключено · " + person :
-        verified ? "Telegram подтверждён · " + person :
         pending ? "Ожидаем подтверждения в Telegram" :
         state.state === "expired" ? "Срок ссылки истёк" : "Не подключено"}
     </div>
@@ -139,16 +141,8 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
         </div>
       </div> : <button className="account-outline-button" type="button"
         onClick={() => setConfirmUnlink(true)}>Отвязать Telegram</button>}
-    </> : verified ? <>
-      <p className="account-telegram-hint">Убедись, что это твой аккаунт Telegram. Подключение завершится только после нажатия кнопки ниже.</p>
-      <div className="account-telegram-actions">
-        <button className="account-save-button" type="button" disabled={busy} onClick={() => void mutate("confirm")}>
-          {busy ? "Подключаем…" : "Подтвердить привязку"}
-        </button>
-        <button className="account-outline-button" type="button" disabled={busy} onClick={() => void mutate("unlink")}>Отмена</button>
-      </div>
-    </> : pending && linkUrl ? <>
-      <p className="account-telegram-hint">Ссылка действует 5 минут. Открой её только в своём Telegram, затем вернись на эту страницу.</p>
+    /> : pending && linkUrl ? <>
+      <p className="account-telegram-hint">Ссылка действует 5 минут. Нажми Start в боте — связь с аккаунтом CORTEX будет установлена автоматически.</p>
       <div className="account-telegram-actions">
         <a href={linkUrl} className="account-save-button account-telegram-cta" target="_blank" rel="noopener noreferrer">
           Открыть Telegram
@@ -159,7 +153,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
           onClick={() => void mutate("unlink")}>Отменить</button>
       </div>
     </> : pending ? <>
-      <p className="account-telegram-hint">Запрос уже создан. Если ссылка потерялась, можно создать новую через 20 секунд.</p>
+      <p className="account-telegram-hint">Привязка ожидает запуска бота. Если ссылка потерялась, можно создать новую через 20 секунд.</p>
       <div className="account-telegram-actions">
         <button className="account-outline-button" type="button" disabled={busy}
           onClick={() => void mutate("create")}>Создать новую ссылку</button>
@@ -167,7 +161,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
           onClick={() => void mutate("unlink")}>Отмена</button>
       </div>
     </> : <>
-      <p className="account-telegram-hint">Связывание выполняется по одноразовой ссылке. Бот не получит твой пароль или код входа.</p>
+      <p className="account-telegram-hint">Нажми кнопку — откроется Telegram. После нажатия Start в боте аккаунты будут связаны. Бот не получит пароль или код входа.</p>
       <button className="account-save-button" type="button" disabled={busy || state.state === "loading"}
         onClick={() => void mutate("create")}>
         {busy ? "Создаём ссылку…" : "Привязать Telegram"}

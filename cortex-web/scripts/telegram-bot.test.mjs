@@ -26,7 +26,7 @@ test("A link code is bounded, random-shaped and never reflected in bot response"
   assert.equal(h.confirmations[0].person.username, "cortexuser");
   assert.equal(h.calls[0].method, "sendMessage");
   assert.doesNotMatch(JSON.stringify(h.calls), new RegExp(secret));
-  assert.match(h.calls[0].args.text, /подтверждён/);
+  assert.match(h.calls[0].args.text, /успешно привязан/);
 });
 test("Main menu uses official colored button styles, no fake premium IDs", async () => {
   const h = harness();

@@ -159,11 +159,11 @@ export async function processCortexBotUpdate(
     await services.telegram("sendMessage", {
       chat_id: chatId, parse_mode: "HTML", disable_web_page_preview: true,
       text: ok
-        ? "<b>✅ Telegram подтверждён</b>\n\nВернись в раздел «Безопасность» на сайте CORTEX и заверши привязку. Ссылка действует 5 минут."
+        ? "<b>✅ Telegram подтверждён</b>\n\nТвой Telegram успешно привязан к CORTEX. Аккаунт готов к использованию в боте."
         : "<b>Ссылка недействительна или истекла.</b>\nСоздай новую в разделе «Безопасность» аккаунта CORTEX.",
       reply_markup: { inline_keyboard: [[{
-        text: "Завершить на сайте", url: site + "/account?tab=security",
-        style: ok ? "success" : "primary",
+        text: ok ? "Управлять аккаунтом" : "Создать новую ссылку",
+        url: site + "/account?tab=security", style: ok ? "success" : "primary",
       }]] },
     });
     return 200;

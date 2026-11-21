@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
       verifyLink: async (hash, person) => {
         const now = new Date().toISOString();
         const { data, error } = await admin.from("cortex_telegram_account_links").update({
-          state: "verified", telegram_id: person.id, telegram_username: person.username,
-          telegram_name: person.name, updated_at: now,
+          state: "linked", telegram_id: person.id, telegram_username: person.username,
+          telegram_name: person.name, token_sha256: null, expires_at: null, updated_at: now,
         }).eq("token_sha256", hash).eq("state", "pending").gt("expires_at", now)
           .select("account_id").maybeSingle();
         // An already linked Telegram account also fails the DB unique constraint.

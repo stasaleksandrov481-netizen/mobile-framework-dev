@@ -94,24 +94,13 @@ export async function POST(request: NextRequest) {
     const payload: unknown = JSON.parse(raw);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) return response(400, { error: "invalid" });
     const action = (payload as { action?: unknown }).action;
-    if (Object.keys(payload).length !== 1 || (action !== "create" && action !== "confirm")) {
+    if (Object.keys(payload).length !== 1 || action !== "create") {
       return response(400, { error: "invalid" });
     }
     const context = await authenticated(request);
     if (!context) return response(401, { error: "login_required" });
     const { admin, user } = context;
     const current = await rowFor(admin, user.id);
-    if (action === "confirm") {
-      if (current?.state === "linked") return response(200, safeState(current));
-      if (current?.state !== "verified" || !current.expires_at ||
-          Date.parse(current.expires_at) <= Date.now()) return response(409, { error: "not_verified" });
-      const { data, error } = await admin.from(table).update({
-        state: "linked", token_sha256: null, expires_at: null, updated_at: date(),
-      }).eq("account_id", user.id).eq("state", "verified").gt("expires_at", date())
-        .select("account_id,telegram_id,telegram_username,telegram_name,state,token_sha256,expires_at,updated_at").maybeSingle();
-      if (error || !data) return response(409, { error: "confirm_failed" });
-      return response(200, safeState(data as LinkRow));
-    }
     if (current?.state === "linked") return response(409, { error: "already_linked" });
     if (current?.updated_at && Date.now() - Date.parse(current.updated_at) < 20_000) {
       return response(429, { error: "retry_later" });
