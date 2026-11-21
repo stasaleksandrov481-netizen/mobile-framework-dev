@@ -72,7 +72,7 @@ export function TelegramSecurityLink({ active }: { active: boolean }) {
   }, [active, refresh]);
 
   useEffect(() => {
-    if (!active || (state.state !== "pending" && state.state !== "verified")) return;
+    if (!active || state.state !== "pending") return;
     const poll = window.setInterval(() => { if (!document.hidden) void refresh(); }, 4_000);
     return () => window.clearInterval(poll);
   }, [active, state.state, refresh]);
