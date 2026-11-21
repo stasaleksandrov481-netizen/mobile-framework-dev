@@ -228,9 +228,11 @@ internal class CortexServerBridge(private val context: Context) : AutoCloseable 
     }
 
     fun cancel(id: String) {
-        jobs.remove(id)?.let { task ->
-            task.cancel(true)
-            executor.remove(task)
+        synchronized(lifecycle) {
+            jobs.remove(id)?.let { task ->
+                task.cancel(true)
+                executor.remove(task)
+            }
         }
         connections.remove(id)?.let { socket -> Thread(socket::disconnect, "cortex-cancel").start() }
     }
