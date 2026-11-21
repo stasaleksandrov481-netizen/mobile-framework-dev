@@ -36,7 +36,7 @@ export function createRedisCache(env: Record<string, string | undefined>, networ
     if (enabled) return { url, token };
     if (!vault) return null;
     if (loaded && loaded.until > Date.now()) return loaded.value;
-    const value = bounded(vault(), REDIS_TIMEOUT_MS).then(config => {
+    const value = bounded(Promise.resolve().then(vault), REDIS_TIMEOUT_MS).then(config => {
       const address = String(config?.url || "").trim().replace(/\/$/, "");
       const secret = String(config?.token || "").trim();
       return UPSTASH_ENDPOINT.test(address) && secret.length >= 24 ? { url: address, token: secret } : null;
@@ -104,7 +104,8 @@ export function createRedisCache(env: Record<string, string | undefined>, networ
       if (!pendingGet) {
         const request = readRedis();
         pendingGet = request;
-        void request.finally(() => { if (pendingGet === request) pendingGet = undefined; });
+        void request.then(() => { if (pendingGet === request) pendingGet = undefined; },
+          () => { if (pendingGet === request) pendingGet = undefined; });
       }
       const models = await pendingGet;
       return models?.every(validate) ? [...models] : localFallback(validate, true);
