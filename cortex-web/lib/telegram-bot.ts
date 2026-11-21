@@ -27,6 +27,7 @@ export type BotServices = {
   checkout?(telegramId:number,plan:StarsPlan):Promise<BotCheckoutResult>;
   catalog?(): Promise<StoreCatalog | null>;
   claim(updateId: number, chatId: number): Promise<boolean>;
+  claimNavigation?(updateId:number,chatId:number):Promise<boolean>;
   linked(telegramId: number): Promise<boolean>;
   verifyLink(hash: string, person: { id: number; username: string | null; name: string | null }): Promise<boolean>;
   telegram(method: string, args: Record<string, unknown>): Promise<unknown>;
@@ -39,7 +40,6 @@ export const botCommands = [
   { command: "status", description: "Статус подключения" },
   { command: "plans", description: "Тарифы CORTEX" },
   { command: "tokens", description: "Пакеты токенов" },
-  { command: "pay", description: "Оплата через Telegram Stars" },
   { command: "support", description: "Поддержка" },
   { command: "paysupport", description: "Поддержка платежей" },
   { command: "help", description: "Помощь и команды" },
@@ -73,7 +73,7 @@ function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
     [hasLink
       ? nav("Мой аккаунт", "👤", "account", options, options.account, "success")
       : open("Подключить аккаунт", "🔗", site + "/account?tab=security", options, options.account, "primary")],
-    [nav("Тарифы", "💎", "plans"), nav("Оплата Stars", "⭐", "pay", options, options.payment)],
+    [nav("Тарифы и подписки", "💎", "plans")],
     [nav("Поддержка", "💬", "support", options, options.support), open("Новости", "📢", news)],
     [open("Перейти на сайт", "↗", site + "/", options, options.brand)],
   ];
@@ -205,15 +205,6 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
       "\n\n<i>Лимиты обновляются в 03:00 МСК."+(cost ? " Автосписаний нет.":"")+"</i>",
       [[buy],[nav("Сравнить тарифы","💎","plans")]]);
   }
-  if(page==="pay") {
-    const paid=all.filter(p=>p.code!=="free");
-    const lines=paid.map(p=>"<b>"+planMeta[p.code][0]+"</b> · "+priceLabel(catalog,p));
-    const rows=paid.map(p=>[starPrice(catalog,p)!==null
-      ? nav(planMeta[p.code][0]+" · "+priceLabel(catalog,p),"⭐","buy_"+p.code,{},undefined,"success")
-      : nav(planMeta[p.code][0]+" · Подробнее","💎","plan_"+p.code)]);
-    return wrap("⭐ <b>Оплата подписки</b>\n\n"+lines.join("\n")+"\n\nОдин месяц доступа. Без автоматических списаний.\n<i>Оплата откроется прямо в Telegram.</i>",
-      [...rows,[nav("Возникла проблема","💬","paysupport"),nav("Все тарифы","💎","plans")]]);
-  }
   const rows=all.map(p=>[nav(planMeta[p.code][0]+" · "+priceLabel(catalog,p),"💎","plan_"+p.code,{},undefined,p.code==="pro"?"primary":undefined)]);
   const lines=all.map(p=>"<b>"+planMeta[p.code][0]+"</b> · "+priceLabel(catalog,p)+"\n"+fmt(p.daily_tokens)+" токенов в день");
   const table=all.map(p=>"<tr><td><b>"+planMeta[p.code][0]+"</b></td><td align=\"right\">"+fmt(p.daily_tokens)+"</td><td align=\"right\">"+priceLabel(catalog,p)+"</td></tr>").join("");
@@ -223,7 +214,7 @@ function storeView(page:string,catalog:StoreCatalog|null):View {
     "<h3>Тарифы CORTEX</h3><p>Команды телефона бесплатны. Выбери подходящий лимит облачного ИИ.</p><table compact><tr><th>Тариф</th><th>Токенов/день</th><th>В месяц</th></tr>"+table+"</table>"+details+"<footer>Лимиты обновляются в 03:00 МСК. Подписка без автосписаний.</footer>");
 }
 function view(page:string,linked:boolean,options:EmojiOptions,name="",catalog:StoreCatalog|null=null):View {
-  if(page==="plans"||page==="pay"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog);
+  if(page==="plans"||page==="tokens"||page.startsWith("plan_"))return storeView(page,catalog);
   const mark = premium(options.enabled ? "✨" : "✦", options.brand, options);
   let head="",body="",extra:Button[][]=[];
   let rich:string|undefined;
@@ -298,7 +289,7 @@ function richMarkdown(page:string,payload:View,options:EmojiOptions,catalog:Stor
     const main=rows[0][0];
     return (withPhoto?'![]('+welcomePhoto+')\n\n':"")+title+"\n\n"+textBlocks+
       "\n\n<tg-button-row align=\"left\">"+btn(main,main.style||"primary")+"</tg-button-row>"+
-      "\n\n---\n\n**Подписки и покупки**\n\nВыбрать тариф "+action("plans")+"  ·  "+action("pay")+
+      "\n\n---\n\n**Подписки и покупки**\n\nВыбрать подписку "+action("plans","primary")+
       "\n\n**Помощь и новости**\n\n"+line(rows[2],"link")+
       "\n\n"+line(rows[3],"link");
   }
@@ -309,13 +300,6 @@ function richMarkdown(page:string,payload:View,options:EmojiOptions,catalog:Stor
     return "## Тарифы CORTEX\n\nКоманды телефона бесплатны. Выбери дневной лимит облачного ИИ.\n\n"+
       "| Тариф | Токенов/день | Цена |\n|:---|---:|---:|\n"+all.map(p=>"| **"+planMeta[p.code][0]+"** | "+fmt(p.daily_tokens)+" | "+priceLabel(catalog,p)+" |").join("\n")+
       "\n\n"+details+"\n\n<footer>Цены за месяц. Лимиты обновляются в 03:00 МСК. Без автосписаний.</footer>\n\n"+footer(rows.slice(-2).flat());
-  }
-  if(page==="pay"&&catalog&&catalog.plans.some(isVisible)) {
-    const paid=catalog.plans.filter(p=>isVisible(p)&&p.code!=="free");
-    return "## Оплата подписки\n\nОдин месяц доступа, без автосписаний.\n\n"+
-      paid.map(p=>{const b=find(b=>b.callback_data==="cortex:buy_"+p.code||b.callback_data==="cortex:plan_"+p.code);
-        return "<p><b>"+planMeta[p.code as VisibleCode][0]+"</b> · "+priceLabel(catalog,p)+" "+(b?btn(b,starPrice(catalog,p)===null?"link":"success"):"")+"</p>";}).join("\n\n")+
-      "\n\n<footer>Оплата прямо в Telegram. Аккаунт CORTEX нужно привязать один раз.</footer>\n\n"+footer(rows.slice(-2).flat());
   }
   if(page.startsWith("plan_")&&catalog) {
     const p=catalog.plans.find(p=>isVisible(p)&&p.code===page.slice(5));
@@ -386,8 +370,9 @@ async function sendWelcome(services: BotServices, chatId: number, payload: View)
 function normalizePage(value: string): string {
   const command = value.toLowerCase();
   if (command === "start" || command === "menu" || command === "home") return "home";
+  if (command === "pay") return "plans"; // Legacy command, no separate payment screen.
   if (command === "account" || command === "status" || command === "plans" ||
-      command === "pay" || command === "tokens" || command === "support" || command === "paysupport" || command === "help") return command;
+      command === "tokens" || command === "support" || command === "paysupport" || command === "help") return command;
   return "home";
 }
 export function parseBotCommand(raw: unknown): { page: string; linkCode?: string } | null {
@@ -424,12 +409,25 @@ export async function processCortexBotUpdate(
   if (!validId(update.update_id) || !validId(chatId) || !validId(userId) ||
       chatId !== userId || message?.chat?.type !== "private") return 200;
   if (callback && (typeof callback.id !== "string" || !callback.id || callback.id.length > 256)) return 200;
-  const claimed = await services.claim(update.update_id, chatId);
+  const command = !callback ? parseBotCommand(update.message?.text) : null;
+  const rawPage = callback?.data;
+  const requestedPage = callback
+    ? (typeof rawPage === "string" && /^cortex:(home|account|status|plans|pay|tokens|plan_(?:free|start|pro|ultra)|buy_(?:start|pro|ultra)|support|paysupport|help)$/.test(rawPage)
+      ? rawPage.slice("cortex:".length) : "home")
+    : command?.page || "home";
+  const page = requestedPage === "pay" ? "plans" : requestedPage;
+  // Public informational navigation can use a fast expiring Redis gate.
+  // Linking, purchasing, personal status, /start and unknown inputs retain durable SQL claims.
+  const publicNavigation = /^(plans|tokens|support|paysupport|help|plan_(?:free|start|pro|ultra))$/.test(page);
+  const claimed = publicNavigation && services.claimNavigation
+    ? await services.claimNavigation(update.update_id,chatId)
+    : await services.claim(update.update_id,chatId);
   if (!claimed) {
-    if (callback) await services.telegram("answerCallbackQuery", { callback_query_id: callback.id });
+    if (callback) await services.telegram("answerCallbackQuery", {callback_query_id:callback.id}).catch(()=>undefined);
     return 200;
   }
-  const command = !callback ? parseBotCommand(update.message?.text) : null;
+  // Clear the Telegram button spinner concurrently with independent data reads.
+  const acknowledged=callback?services.telegram("answerCallbackQuery",{callback_query_id:callback.id}).catch(()=>undefined):Promise.resolve();
   if (command?.page === "link" && command.linkCode) {
     const hashed = createHash("sha256").update(command.linkCode).digest("hex");
     const ok = await services.verifyLink(hashed, safePerson(from, userId));
@@ -460,16 +458,10 @@ export async function processCortexBotUpdate(
     });
     return 200;
   }
-  const rawPage = callback?.data;
-  const page = callback
-    ? (typeof rawPage === "string" && /^cortex:(home|account|status|plans|pay|tokens|plan_(?:free|start|pro|ultra)|buy_(?:start|pro|ultra)|support|paysupport|help)$/.test(rawPage)
-      ? rawPage.slice("cortex:".length) : "home")
-    : command?.page || "home";
-  if (callback) await services.telegram("answerCallbackQuery", {callback_query_id:callback.id});
   if(page.startsWith("buy_")&&callback){
     const plan=page.slice(4);
     if(!starsPlan(plan))return 200;
-    const linked=await services.linked(userId);
+    const [,linked]=await Promise.all([acknowledged,services.linked(userId)]);
     if(!linked){
       await services.telegram("sendMessage",{chat_id:chatId,parse_mode:"HTML",text:"🔗 <b>Сначала подключи аккаунт</b>\n\nЭто нужно один раз, чтобы подписка начислилась именно тебе. После привязки вернись к оплате в Telegram.",
         reply_markup:{inline_keyboard:[[open("Привязать Telegram","🔗",site+"/account?tab=security",{},undefined,"primary")],[nav("Проверить подключение","↻",page)]]}});
@@ -495,9 +487,10 @@ export async function processCortexBotUpdate(
     }
     return 200;
   }
-  const storePage=page==="plans"||page==="pay"||page.startsWith("plan_");
-  const [linked,catalog]=await Promise.all([services.linked(userId),
-    storePage&&services.catalog ? services.catalog().catch(()=>null) : Promise.resolve(null)]);
+  const storePage=page==="plans"||page.startsWith("plan_");
+  const needsIdentity=page==="home"&&(Boolean(callback)||Boolean(command))||page==="account"||page==="status";
+  const [linked,catalog]=await Promise.all([needsIdentity?services.linked(userId):Promise.resolve(false),
+    storePage&&services.catalog ? services.catalog().catch(()=>null) : Promise.resolve(null),acknowledged]);
   let payload=view(page,linked,rawServices.richUi?{}:emoji,displayName(from),catalog);
   if(rawServices.richUi && (callback || command)) {
     const messageId=message?.message_id;

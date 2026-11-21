@@ -40,7 +40,7 @@ test("Main menu uses official colored button styles, no fake premium IDs", async
   assert.equal(payload.parse_mode, "HTML");
   assert.ok(payload.reply_markup.inline_keyboard.flat().some(b => b.style === "primary"));
   assert.equal(payload.reply_markup.inline_keyboard[0].length, 1);
-  assert.deepEqual(payload.reply_markup.inline_keyboard.map(r => r.length), [1,2,2,1]);
+  assert.deepEqual(payload.reply_markup.inline_keyboard.map(r => r.length), [1,1,2,1]);
   assert.match(payload.reply_markup.inline_keyboard[0][0].text, /🔗/);
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.icon_custom_emoji_id));
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.url || /^https:\/\/(?:cortexapp\.ru|t\.me)\//.test(b.url)));
@@ -59,7 +59,7 @@ test("Callbacks are acknowledged and menus edited, never charged", async () => {
     from: { id: user }, message: { chat, message_id: 91 } } };
   assert.equal(await processCortexBotUpdate(update, h.services), 200);
   assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "editMessageText"]);
-  assert.match(h.calls[1].args.text, /Оплата подписки/);
+  assert.match(h.calls[1].args.rich_message.html, /Тарифы CORTEX/);
 });
 test("Groups, forged chat senders and duplicate events have no private effects", async () => {
   const h = harness();
@@ -85,8 +85,8 @@ test("Photo menu opens a dedicated text screen and removes old controls", async 
   const h = harness();
   await processCortexBotUpdate({ update_id: 113, callback_query: { id: "photo-callback", data: "cortex:pay",
     from: { id: user }, message: { chat, message_id: 99, photo: [{ file_id: "photo" }] } } }, h.services);
-  assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "sendMessage", "editMessageReplyMarkup"]);
-  assert.match(h.calls[1].args.text, /Оплата подписки/);
+  assert.deepEqual(h.calls.map(c => c.method), ["answerCallbackQuery", "sendRichMessage", "editMessageReplyMarkup"]);
+  assert.match(h.calls[1].args.rich_message.html, /Тарифы CORTEX/);
   assert.deepEqual(h.calls[2].args.reply_markup.inline_keyboard,[]);
 });
 test("Photo failure leaves a fully functional text menu", async () => {
@@ -102,7 +102,7 @@ test("Linked home promotes dashboard and keeps payment neutral", async () => {
  const h=harness(); h.setLinked(true); await processCortexBotUpdate(message("/start"), h.services);
  const rows=h.calls[0].args.reply_markup.inline_keyboard;
  assert.equal(rows[0][0].style,"success"); assert.equal(rows[0][0].callback_data,"cortex:account");
- assert.equal(rows[1][1].style,undefined); assert.match(h.calls[0].args.caption,/Аккаунт подключён/);
+ assert.equal(rows[1][0].callback_data,"cortex:plans"); assert.match(h.calls[0].args.caption,/Аккаунт подключён/);
 });
 test("Personal greetings escape hostile HTML", async () => {
  const h=harness(); const m=message("/start"); m.message.from.first_name='<b>A&B</b>';
@@ -127,7 +127,7 @@ test("Unrecognized plain text does not pretend to be an AI chat", async () => {
 test("iOS custom emoji cover all home buttons when enabled", async () => {
  const h=harness(); await processCortexBotUpdate(message("/start"),h.services,{enabled:true});
  const args=h.calls[0].args,rows=args.reply_markup.inline_keyboard.flat();
- assert.equal(rows.length,6);
+ assert.equal(rows.length,5);
  assert.ok(rows.every(b=>typeof b.icon_custom_emoji_id==="string" && /^\d{19}$/.test(b.icon_custom_emoji_id)));
  assert.equal(rows[0].icon_custom_emoji_id,"6028171274939797252");
  assert.match(args.caption,/tg-emoji emoji-id="5890925363067886150"/);
@@ -253,4 +253,44 @@ test("Pending order never shows a second pay action",async()=>{
  await processCortexBotUpdate({update_id:163,callback_query:{id:"buy",data:"cortex:buy_start",from:{id:user},message:{chat,message_id:1}}},h.services);
  assert.match(h.calls[1].args.text,/Не оплачивай повторно/);
  assert.ok(h.calls[1].args.reply_markup.inline_keyboard.flat().every(b=>!b.url));
+});
+
+test("Home has one shop entry and legacy /pay opens catalog",async()=>{
+ const h=harness();await processCortexBotUpdate(message("/start"),h.services);
+ const rows=h.calls[0].args.reply_markup.inline_keyboard.flat();
+ assert.equal(rows.filter(b=>b.callback_data==="cortex:plans").length,1);
+ assert.ok(rows.every(b=>b.callback_data!=="cortex:pay"));assert.equal(parseBotCommand("/pay").page,"plans");
+ assert.ok(botCommands.every(c=>c.command!=="pay"));
+});
+test("Public navigation uses fast claim and avoids account lookup",async()=>{
+ const h=harness();let calls=0;
+ h.services.claimNavigation=async()=>{calls++;return true};
+ h.services.claim=async()=>{throw Error("no SQL claim for public navigation")};
+ h.services.linked=async()=>{throw Error("no personal lookup for public navigation")};
+ await processCortexBotUpdate(message("/plans"),h.services);
+ assert.equal(calls,1);assert.equal(h.calls[0].method,"sendRichMessage");
+});
+test("Account and purchase stay on durable claim",async()=>{
+ const h=harness();h.setLinked(true);let claims=0;
+ h.services.claimNavigation=async()=>{throw Error("sensitive action must not use Redis gate")};
+ h.services.claim=async()=>{claims++;return true};
+ h.services.checkout=async()=>({ok:false,error:"payment_pending"});
+ await processCortexBotUpdate(message("/account"),h.services);
+ await processCortexBotUpdate({update_id:170,callback_query:{id:"buy",data:"cortex:buy_pro",from:{id:user},message:{chat,message_id:1}}},h.services);
+ assert.equal(claims,2);
+});
+test("Rejected navigation does not load prices or identity",async()=>{
+ const h=harness();h.services.claimNavigation=async()=>false;
+ h.services.catalog=async()=>{throw Error("must not query")};
+ h.services.linked=async()=>{throw Error("must not query")};
+ await processCortexBotUpdate(message("/plans"),h.services);
+ assert.equal(h.calls.length,0);
+});
+test("Callback acknowledgment and catalog read start without waiting for each other",async()=>{
+ const h=harness();let release;const pending=new Promise(resolve=>{release=resolve});
+ const call=h.services.telegram,cat=h.services.catalog;let catalogStarted=false;
+ h.services.telegram=async(m,a)=>{if(m==="answerCallbackQuery"){await call(m,a);await pending;return true;}return call(m,a)};
+ h.services.catalog=async()=>{catalogStarted=true;release();return cat()};
+ await processCortexBotUpdate({update_id:171,callback_query:{id:"parallel",data:"cortex:plans",from:{id:user},message:{chat,message_id:1}}},h.services);
+ assert.equal(catalogStarted,true);
 });

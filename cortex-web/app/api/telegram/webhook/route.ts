@@ -1,3 +1,5 @@
+import { getRedis } from "@/lib/redis";
+import { createNavigationClaim } from "@/lib/telegram-navigation-cache";
 import { createBotStarsCheckout } from "@/lib/telegram-bot-checkout";
 import { loadPublicPlans, loadPublicStarsPrices } from "@/lib/public-catalog";
 import { readBoundedJson } from "@/lib/bounded-json";
@@ -10,6 +12,7 @@ import { processTelegramStarsUpdate, type TelegramStarsUpdate } from "@/lib/tele
 import { processCortexBotUpdate, type CortexTelegramUpdate } from "@/lib/telegram-bot";
 
 export const runtime = "nodejs";
+const claimPublicNavigation=createNavigationClaim((script,keys,args)=>getRedis().eval(script,keys,args),()=>process.env.CORTEX_TELEGRAM_WEBHOOK_SECRET);
 
 const respond = (status: number) => NextResponse.json({ ok: status === 200 }, {
   status, headers: { "Cache-Control": "no-store" },
@@ -59,6 +62,11 @@ export async function POST(request: NextRequest) {
       });
       return respond(status);
     }
+    const durableClaim=async(updateId:number,chatId:number)=>{
+      const result=await admin.rpc("cortex_telegram_claim_update",{p_update:updateId,p_chat:chatId});
+      if(result.error)throw new Error("bot_update_unavailable");
+      return result.data===true;
+    };
     const status = await processCortexBotUpdate(update as CortexTelegramUpdate, {
       richUi: true,
       checkout: starsEnabled ? (telegramId,plan)=>createBotStarsCheckout(telegramId,plan,{
@@ -69,13 +77,8 @@ export async function POST(request: NextRequest) {
         const [plans,stars]=await Promise.all([loadPublicPlans(),loadPublicStarsPrices()]);
         return plans ? {plans,stars:stars??[],starsEnabled} : null;
       },
-      claim: async (updateId, chatId) => {
-        const result = await admin.rpc("cortex_telegram_claim_update", {
-          p_update: updateId, p_chat: chatId,
-        });
-        if (result.error) throw new Error("bot_update_unavailable");
-        return result.data === true;
-      },
+      claim: durableClaim,
+      claimNavigation:(updateId,chatId)=>claimPublicNavigation(updateId,chatId,()=>durableClaim(updateId,chatId)),
       linked: async telegramId => {
         const { data, error } = await admin.from("cortex_telegram_account_links")
           .select("account_id").eq("telegram_id", telegramId).eq("state", "linked").maybeSingle();
