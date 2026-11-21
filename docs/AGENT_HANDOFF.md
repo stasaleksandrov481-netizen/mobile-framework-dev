@@ -1,3 +1,12 @@
+## 2026-11-21 UTC · Убрана синяя подсветка элементов управления на опубликованном сайте CORTEX
+
+- Запрос владельца: убрать синюю подсветку кнопок при нажатии, не менять одобренный интерфейс.
+- Исходный production: `cortexapp.ru` и `www.cortexapp.ru` → Vercel `dpl_36XPKRb61PuhJe1YRccoLa5r4xRj`, GitHub SHA `4556e124582256ace749e29f3d7cce0e897d0763`, ветка `feat/cortex-landing-below-hero-20261120`.
+- Исправление в отдельной ветке `fix/cortex-web-tap-highlights-20261121`, commit `62b439f5adb23782bee27ecd4b7f3c28663c0fc0`: только `cortex-web/app/globals.css`. Для интерактивных элементов подавлены браузерный tap highlight и случайное выделение текста; `:focus-visible` оставлен для клавиатуры. Контент и поля ввода продолжают поддерживать выделение текста.
+- Проверка: GitHub Preview Vercel `dpl_9EjfBPLdbE39VPrNY5cW5r7QtMBr` READY. Production Vercel `dpl_HzUoDkmwEkk5Js98RQwSbuv4Zn3C` READY, SHA совпадает с исходным исправлением. После явного назначения алиасов Vercel API подтвердил `cortexapp.ru` и `www.cortexapp.ru` на `dpl_HzUoDkmwEkk5Js98RQwSbuv4Zn3C`. Доступ к публичному домену через внешний web-инструмент не получен; реальный браузерный click/touch smoke не проводился.
+- Rollback: прежняя READY production `dpl_36XPKRb61PuhJe1YRccoLa5r4xRj`, SHA `4556e12`. Android, Supabase, Edge, платежи, API и БД не менялись. Документирующий коммит не требует нового production-деплоя, поскольку код сайта совпадает с опубликованным.
+- Следующий шаг: проверить клики на физических Android/iOS и в desktop Chrome; перенести минимальную CSS-правку в актуальную веб-ветку при последующей синхронизации, не деплоить устаревший `main` поверх утверждённого сайта.
+
 ## 2026-11-20 UTC · Удалены декоративные линии из кандидата сайта
 
 - По указанию владельца с фонов обоих телефонов и блока запуска убраны кольца и сетка. В `AGENTS.md` закреплён запрет на дальнейшую работу над дизайном и добавление таких полос.
