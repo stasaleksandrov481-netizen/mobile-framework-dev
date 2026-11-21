@@ -34,10 +34,24 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     private val phone = CortexPhoneActions(this.context)
     private val preferences = context.getSharedPreferences("cortex-display", Context.MODE_PRIVATE)
     private var job: Job? = null
-    private val turnContext = CortexTurnContext()
+    private val turnContexts = LinkedHashMap<String, CortexTurnContext>(16, .75f, true)
+    private var contextOwner = ""
+
+    private fun turnContext(owner: String, source: String): CortexTurnContext {
+        if (contextOwner != owner) {
+            contextOwner = owner
+            turnContexts.clear()
+        }
+        turnContexts[source]?.let { return it }
+        if (turnContexts.size >= 16) turnContexts.remove(turnContexts.keys.first())
+        return CortexTurnContext().also { turnContexts[source] = it }
+    }
+
+    fun forgetConversation(source: String) { turnContexts.remove(source) }
 
     fun observeAssistantAnswer(answer: String) {
-        turnContext.observeAnswer(answer, CortexScenarios.currentOwner(context).ifBlank { "guest" }, SystemClock.uptimeMillis())
+        val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
+        turnContext(owner, "island").observeAnswer(answer, owner, SystemClock.uptimeMillis())
     }
 
     data class Result(
@@ -61,6 +75,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
     ): Boolean {
         val owner = CortexScenarios.currentOwner(context).ifBlank { "guest" }
         val now = SystemClock.uptimeMillis()
+        val turnContext = turnContext(owner, source)
         val clarification = clarificationId?.let { id ->
             saved?.takeIf { it.clarificationId == id && it.owner == owner && it.source == source &&
                 now - it.pausedAt < CLARIFICATION_TIMEOUT_MS }
@@ -84,8 +99,10 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
             }
         }
         if (clarification == null && !scheduled && !force && explicitScenario == null) {
-            val screen = CortexScreenService.connected
-            CortexDeviceContext.capabilities(text, allowPhone, screen != null && !screen.locked())?.let {
+            val visual = preferences.getBoolean("visualAutomation", false)
+            val description = CortexDeviceContext.permissionAnswer(context, text, visual)
+                ?: CortexDeviceContext.capabilities(text, allowPhone, CortexDeviceContext.screenAccess(context), visual)
+            description?.let {
                 finished(Result(it, true))
                 return true
             }
@@ -202,7 +219,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                             else Result(VISUAL_DISABLED, false, state != null)
                         }
                         service == null -> Result(
-                            "Включите «CORTEX — управление экраном» в специальных возможностях Android и повторите запрос.",
+                            CortexDeviceContext.screenAccess(context, null).describe(),
                             false, state != null)
                         else -> {
                             execute(task, service, beforeScreen, ::report)
@@ -292,7 +309,7 @@ internal class CortexActionEngine(context: Context) : AutoCloseable {
                     kind == "open" && (visualLaunch || input.optString("expect").isNotBlank())
                 if (needsScreen) {
                     if (!visualAllowed) return "Шаг $processed. $VISUAL_DISABLED"
-                    if (screen == null) return "Шаг $processed требует доступа CORTEX в специальных возможностях Android."
+                    if (screen == null) return "Шаг $processed. " + CortexDeviceContext.screenAccess(context, null).describe()
                     if (!preparedScreen) {
                         beforeScreen()
                         preparedScreen = true

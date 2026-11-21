@@ -74,12 +74,24 @@ class LocalIntentTest {
     }
 
     @Test fun cortexExplainsRealCapabilitiesWithoutSendingACloudRequest() {
-        val enabled = requireNotNull(CortexDeviceContext.capabilities("Кортекс, что ты умеешь?", true, true))
+        val enabled = requireNotNull(CortexDeviceContext.capabilities("Кортекс, что ты умеешь?", true,
+            CortexDeviceContext.ScreenAccess.READY, true))
         assertTrue(enabled.startsWith("Я CORTEX"))
         assertTrue(enabled.contains("запускать сценарии"))
-        assertTrue(requireNotNull(CortexDeviceContext.capabilities("Кто ты?", false, false))
+        assertTrue(requireNotNull(CortexDeviceContext.capabilities("Кто ты?", false, CortexDeviceContext.ScreenAccess.OFF, false))
             .contains("можно включить"))
-        assertNull(CortexDeviceContext.capabilities("Кортекс, открой Telegram", true, true))
+        assertNull(CortexDeviceContext.capabilities("Кортекс, открой Telegram", true, CortexDeviceContext.ScreenAccess.READY, true))
+    }
+
+    @Test fun screenAccessSeparatesPermissionFromReadinessAndVisualMode() {
+        val connecting = requireNotNull(CortexDeviceContext.capabilities("Ты можешь управлять телефоном?", true,
+            CortexDeviceContext.ScreenAccess.CONNECTING, true))
+        assertTrue(connecting.contains("Доступ к экрану выдан"))
+        assertTrue(connecting.contains("подключает службу"))
+        val disabled = requireNotNull(CortexDeviceContext.capabilities("Что ты умеешь?", true,
+            CortexDeviceContext.ScreenAccess.READY, false))
+        assertTrue(disabled.contains("Android разрешает"))
+        assertTrue(disabled.contains("Визуальное управление"))
     }
 
     @Test fun localSettingsBrightnessAndLaunchUnderstandSynonyms() {

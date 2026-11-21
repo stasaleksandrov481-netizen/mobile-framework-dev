@@ -50,11 +50,14 @@ window.CortexSetup = (() => {
 
   function access(item) {
     const granted = Boolean(permissions[item.id]);
+    const status = item.id === "screenAutomation" && permissions.screenAccess === "connecting"
+      ? "Доступ выдан, Android подключает службу" : "Доступ выдан";
     return '<div class="intro-stage permits-intro"><span class="intro-access-art">' + icon(item.icon, 44) +
       '</span><h1>' + item.name + '</h1><p>' + item.description + '</p>' +
       (item.steps ? '<ol class="intro-checklist">' + item.steps.map(step => '<li>' + step + '</li>').join("") + '</ol>' : "") +
       (item.note ? '<p class="intro-mini">' + item.note + '</p>' : "") +
-      '<div class="intro-access-state" role="status">' + (granted ? icon("check", 16) + " Доступ активен" : esc(notice || "Доступ можно выдать позже")) + '</div>' +
+      '<div class="intro-access-state" role="status">' + (granted ? icon("check", 16) + " " + status :
+        esc(notice || (permissions[item.id] == null && window.CortexDevice ? "Проверяю разрешение…" : "Доступ можно выдать позже"))) + '</div>' +
       '<div class="actions"><button type="button" class="action outline" data-intro-action="permission">' +
       (granted ? "Открыть настройки" : item.steps ? "Перейти к настройкам" : "Разрешить") + '</button>' +
       (item.settings ? '<button type="button" class="action quiet" data-intro-action="details">Открыть карточку приложения</button>' : "") + '</div></div>';
@@ -191,8 +194,9 @@ window.CortexSetup = (() => {
     updatePermissions(value) {
       const id = pages[page];
       const before = permissions[id];
+      const screenBefore = permissions.screenAccess;
       permissions = { ...permissions, ...value };
-      if (view && before !== permissions[id]) { notice = ""; draw(); }
+      if (view && (before !== permissions[id] || id === "screenAutomation" && screenBefore !== permissions.screenAccess)) { notice = ""; draw(); }
     },
     back
   };

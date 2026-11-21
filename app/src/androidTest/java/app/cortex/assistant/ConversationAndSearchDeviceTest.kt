@@ -65,6 +65,13 @@ class ConversationAndSearchDeviceTest {
 
     @Test fun visibleRecentConversationIsOpenedWithoutCloudAndDraftVerified() = runBlocking(Dispatchers.Main) {
         val screen = launch("chat")
+        // Android has granted the service; the same grant is present even when
+        // the consumer is still waiting for a bound instance.
+        val access = CortexDeviceContext.screenAccess(context, null)
+        assertTrue(access == CortexDeviceContext.ScreenAccess.CONNECTING && access.granted)
+        assertTrue(CortexDeviceContext.permissions(context).optString("screenAccess") == "ready")
+        assertTrue(CortexDeviceContext.permissionAnswer(context, "У тебя есть доступ к экрану?", false)
+            ?.contains("Визуальное управление БЕТА отдельно выключено") == true)
         val request = ConversationRequest(fixtureLabel, "рыбке", "Привет!", send = false)
         val result = ConversationNavigation(screen, VisualNavigation(context, screen), { _, _, _ -> false })
             .run(request, {})

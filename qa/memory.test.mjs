@@ -66,3 +66,26 @@ test("sensitive local notification answers never persist or enter model context"
   const restarted = fixture.start();
   assert.equal(restarted.state.chats[0].messages.length, 2);
 });
+
+test("a long answer keeps the previous exchange in the follow-up context", () => {
+  const cortex = model().start();
+  const chat = cortex.createChat();
+  const append = (role, text) => chat.messages.push({ role, text });
+  append("user", "Назовём план «Вектор».");
+  append("assistant", "Начало плана «Вектор». " + "Подробность. ".repeat(1_400) + " Итог: два этапа.");
+  append("user", "Какой у него первый этап?");
+  const turns = cortex.turns(chat, "Данные Android");
+  assert.equal(turns.at(-3)?.content, "Назовём план «Вектор».");
+  assert.match(turns.at(-2)?.content, /^Начало плана «Вектор»[\s\S]+Итог: два этапа\.$/);
+  assert.equal(turns.at(-1)?.content, "Какой у него первый этап?");
+  assert.ok(turns.reduce((length, turn) => length + turn.content.length, 0) <= 12_000);
+});
+
+test("a follow-up after a local exchange never enters public question sharing", () => {
+  const cortex = model().start();
+  const chat = cortex.createChat();
+  const text = "Почему батарея так быстро садится?";
+  chat.messages.push({ role: "user", text: "Сколько заряда", local: true }, { role: "assistant", text: "Заряд 50%", local: true }, { role: "user", text });
+  assert.equal(cortex.canSharePublicQuestion(chat, text), false);
+  assert.doesNotMatch(JSON.stringify(cortex.turns(chat, "")), /Заряд 50%/);
+});

@@ -11,6 +11,7 @@ internal object CortexRuntime {
     var wakeCommand: ((String) -> Boolean)? = null
     var shutdownListener: (() -> Unit)? = null
     var scheduleChanged: (() -> Unit)? = null
+    var screenAccessChanged: (() -> Unit)? = null
     var reminder: ((String, String) -> Boolean)? = null
     var leaveForAction: (() -> Unit)? = null
     var firstExperienceActive = false

@@ -7,10 +7,12 @@ const source = file => readFileSync(new URL(`../${file}`, import.meta.url), "utf
 test("Android explicitly requests notification-listener access", () => {
   const manifest = source("app/src/main/AndroidManifest.xml");
   const bridge = source("app/src/main/java/app/cortex/assistant/CortexDeviceBridge.kt");
+  const permissions = source("app/src/main/java/app/cortex/assistant/CortexDeviceContext.kt");
   assert.match(manifest, /CortexNotificationListener/);
   assert.match(manifest, /BIND_NOTIFICATION_LISTENER_SERVICE/);
   assert.match(bridge, /ACTION_NOTIFICATION_LISTENER_SETTINGS/);
-  assert.match(bridge, /notificationAccess.*CortexNotificationJournal\.accessGranted/);
+  assert.match(bridge, /CortexDeviceContext\.permissions\(context\)/);
+  assert.match(permissions, /notificationAccess.*CortexNotificationJournal\.accessGranted/);
 });
 
 test("notification events are handled before cloud AI and respect lockscreen privacy", () => {
