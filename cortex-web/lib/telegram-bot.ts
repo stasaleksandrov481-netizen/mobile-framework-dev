@@ -13,7 +13,7 @@ export type CortexTelegramUpdate = {
 };
 type Button = {
   text: string; style?: "primary" | "success" | "danger";
-  callback_data?: string; url?: string; icon_custom_emoji_id?: string;
+  callback_data?: string; url?: string; icon_custom_emoji_id?: string; copy_text?: { text: string };
 };
 type View = { text: string; parse_mode: "HTML"; disable_web_page_preview: true;
   reply_markup: { inline_keyboard: Button[][] } };
@@ -57,14 +57,16 @@ const nav = (label: string, symbol: string, page: string, options: EmojiOptions 
   button(label, symbol, {callback_data: "cortex:" + page}, options, id, style);
 const open = (label: string, symbol: string, url: string, options: EmojiOptions = {}, id?: string, style?: Button["style"]) =>
   button(label, symbol, {url}, options, id, style);
+const email = "support@cortexapp.ru";
+const copyEmail = (): Button => ({text: "Скопировать email", copy_text:{text:email}});
 function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
   return [
     [hasLink
-      ? nav("Личный кабинет", "👤", "account", options, options.account, "success")
-      : open("Подключить аккаунт CORTEX", "🔗", site + "/account?tab=security", options, options.account, "primary")],
-    [nav("Тарифы", "💎", "plans"), nav("Оплата", "⭐", "pay", options, options.payment)],
-    [open("Открыть CORTEX", "↗", site + "/", options, options.brand)],
-    [nav("Помощь", "💬", "support", options, options.support), open("Новости", "📢", news)],
+      ? nav("Мой аккаунт", "👤", "account", options, options.account, "success")
+      : open("Подключить аккаунт", "🔗", site + "/account?tab=security", options, options.account, "primary")],
+    [nav("Тарифы", "💎", "plans"), nav("Оплата Stars", "⭐", "pay", options, options.payment)],
+    [nav("Поддержка", "💬", "support", options, options.support), open("Новости", "📢", news)],
+    [open("Перейти на сайт", "↗", site + "/", options, options.brand)],
   ];
 }
 
@@ -156,67 +158,66 @@ function view(page: string, linked: boolean, options: EmojiOptions, name = ""): 
   const mark = premium(options.enabled ? "✨" : "✦", options.brand, options);
   let head = "", body = "";
   let extra: Button[][] = [];
-  const back = [nav("В главное меню", "‹", "home")];
+  const back = [nav("Назад", "‹", "home")];
   switch (page) {
     case "account":
     case "status":
-      head = "👤 <b>Твой аккаунт</b>";
+      head = "👤 <b>Мой аккаунт</b>";
       body = linked
-        ? "🟢 <b>Подключение активно</b>\nTelegram связан с твоим профилем CORTEX.\n\n<blockquote>Тариф, баланс и настройки — в личном кабинете.</blockquote>"
-        : "⚪ <b>Аккаунт не подключён</b>\n\nОткрой раздел «Безопасность» в кабинете, нажми «Привязать Telegram» и вернись сюда по защищённой ссылке.\n\n<blockquote>Один аккаунт для сайта и Telegram. Пароль и коды входа боту не нужны.</blockquote>";
+        ? "✅ <b>Подключение активно</b>\nTelegram привязан к твоему аккаунту. Тариф и баланс можно проверить в личном кабинете."
+        : "⚪ <b>Аккаунт не подключён</b>\n\nВойди на сайт, открой «Безопасность» и нажми «Привязать Telegram».\n\n<i>Пароль и коды входа здесь не нужны.</i>";
       extra = linked
-        ? [[open("Открыть кабинет", "↗", site + "/account", {}, undefined, "primary")],
-           [open("Безопасность", "🔒", site + "/account?tab=security"), nav("Обновить статус", "↻", "status")]]
+        ? [[open("Личный кабинет", "↗", site + "/account", {}, undefined, "primary")],
+           [open("Безопасность", "🔒", site + "/account?tab=security"), nav("Обновить", "↻", "status")]]
         : [[open("Подключить аккаунт", "🔗", site + "/account?tab=security", options, options.account, "primary")]];
       break;
     case "plans":
-      head = "💎 <b>Выбери свой CORTEX</b>";
-      body = "Больше возможностей. Больше свободы.\n\nСравни доступные модели, лимиты и подписки в актуальном каталоге.\n\n<blockquote>Условия и цены всегда берутся с официального сайта.</blockquote>";
-      extra = [[open("Сравнить тарифы", "↗", site + "/pricing", {}, undefined, "primary")],
-        [nav("Способы оплаты", "⭐", "pay", options, options.payment)]];
+      head = "💎 <b>Тарифы CORTEX</b>";
+      body = "Нужно больше запросов к ИИ? Сравни подписки, модели и лимиты перед покупкой.\n\n<i>Все актуальные цены доступны на сайте.</i>";
+      extra = [[open("Посмотреть тарифы", "↗", site + "/pricing", {}, undefined, "primary")],
+        [nav("Оплата Stars", "⭐", "pay", options, options.payment)]];
       break;
     case "pay":
-      head = "⭐ <b>Telegram Stars</b>";
-      body = "Пополнение и подписки CORTEX — через официальный счёт Telegram.\n\n<blockquote>Выбери предложение на сайте. Доступ активируется после подтверждения платежа сервером.</blockquote>\n\n" +
-        (linked ? "🟢 Аккаунт подключён." : "Для управления покупками войди в свой аккаунт CORTEX.");
-      extra = [[open("Перейти к оплате", "⭐", site + "/payment", options, options.payment, "success")],
-        [nav("Помощь с платежом", "💬", "paysupport")]];
+      head = "⭐ <b>Оплата через Telegram Stars</b>";
+      body = "Выбери подписку или пополнение на сайте и оплати счёт звёздами Telegram.\n\n" +
+        (linked ? "✅ Аккаунт подключён." : "Перед покупкой войди в свой аккаунт CORTEX.") +
+        "\n<i>Доступ начисляется после подтверждения платежа.</i>";
+      extra = [[open("Выбрать предложение", "⭐", site + "/payment", options, options.payment, "success")],
+        [nav("Проблема с оплатой", "💬", "paysupport")]];
       break;
     case "support":
-      head = "💬 <b>Мы на связи</b>";
-      body = "Проблема с аккаунтом, оплатой или приложением? Поможем разобраться.\n\n<b>Почта поддержки</b>\n<code>support@cortexapp.ru</code>\n\n<blockquote>Не отправляй пароли, платёжные реквизиты или коды входа.</blockquote>";
+      head = "💬 <b>Поддержка CORTEX</b>";
+      body = "Что-то не работает? Напиши нам, расскажи, что произошло, и приложи скриншот, если он есть.\n\n<b>Почта</b>\n<code>" + email + "</code>\n\n<i>Не присылай пароли и коды входа.</i>";
       extra = [[open("Написать в поддержку", "↗", site + "/support", options, options.support, "primary")],
-        [nav("Платежи", "⭐", "paysupport"), nav("Как пользоваться", "📖", "help")]];
+        [copyEmail(), nav("Вопрос по оплате", "⭐", "paysupport")],
+        [nav("Частые вопросы", "📖", "help")]];
       break;
     case "paysupport":
-      head = "🧾 <b>Помощь с оплатой</b>";
-      body = "Платёж не появился или возник вопрос по подписке?\n\nНапиши на <code>support@cortexapp.ru</code> с почты аккаунта. Укажи дату и номер заказа, если он есть.\n\n<blockquote>Не отправляй коды входа или данные карты.</blockquote>";
-      extra = [[open("Открыть поддержку", "💬", site + "/support", {}, undefined, "primary")]];
+      head = "🧾 <b>Вопрос по оплате</b>";
+      body = "Не начислились токены или не активировалась подписка? Напиши на <code>" + email + "</code> с почты своего аккаунта.\n\nУкажи дату покупки и номер заказа, если он есть.\n<i>Данные карты и коды входа не нужны.</i>";
+      extra = [[open("Открыть поддержку", "💬", site + "/support", {}, undefined, "primary")],[copyEmail()]];
       break;
     case "help":
-      head = "📖 <b>Навигация по CORTEX</b>";
-      body = "<b>Управление</b>\n/account — аккаунт и безопасность\n/plans — тарифы\n/pay — Telegram Stars\n\n<b>Помощь</b>\n/support — поддержка\n/paysupport — вопросы оплаты\n/menu — главное меню";
+      head = "📖 <b>Частые вопросы</b>";
+      body = "<b>Как подключить аккаунт?</b>\nВойди на сайт и открой раздел «Безопасность».\n\n<b>Где общаться с ИИ?</b>\nВ приложении CORTEX. Здесь можно управлять аккаунтом и покупками.\n\n<b>Не получается оплатить?</b>\nОбратись в поддержку.";
+      extra = [[open("Подключить Telegram", "🔗", site + "/account?tab=security")],[nav("Поддержка", "💬", "support")]];
       break;
     default:
-      head = name ? mark + " <b>Привет, " + name + ".</b>" : mark + " <b>Добро пожаловать в CORTEX</b>";
-      body = "<i>Твой цифровой центр управления.</i>\n\n" +
+      head = name ? mark + " <b>Привет, " + name + "!</b>" : mark + " <b>Добро пожаловать в CORTEX</b>";
+      body = "Здесь можно управлять аккаунтом, выбирать подписку и оплачивать покупки через Telegram Stars.\n\n" +
         (linked
-          ? "🟢 <b>Аккаунт подключён</b>\nВсё под рукой: подписки, тарифы и поддержка."
-          : "⚪ <b>Начнём с подключения</b>\nСвяжи Telegram с аккаунтом CORTEX, чтобы управлять им прямо здесь.") +
-        "\n\n" + "Для общения с ИИ открой CORTEX.";
+          ? "✅ <b>Аккаунт подключён.</b>\nВыбирай нужный раздел."
+          : "<b>Уже пользуешься CORTEX?</b>\nПодключи аккаунт, чтобы всё было в одном месте.");
   }
   return { text: head + "\n\n" + body, parse_mode: "HTML", disable_web_page_preview: true,
     reply_markup: { inline_keyboard: page === "home" ? buttons(options, linked) : [...extra, back] } };
 }
-const guideHtml = '<h2>Твой путеводитель по CORTEX</h2><p>Всё, что нужно для управления аккаунтом.</p><hr><h3>Подключение</h3><ol><li>Войди на cortexapp.ru.</li><li>Открой раздел «Безопасность».</li><li>Нажми «Привязать Telegram», затем Start в боте.</li></ol><h3>Подписки и оплата</h3><p>Тарифы на сайте, покупка через Telegram Stars и поддержка платежей.</p><details><summary>Если ссылка истекла</summary><p>Создай новую в личном кабинете. Ссылка действует 5 минут, не передавай её другим.</p></details><hr><p>Поддержка: <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a></p>';
+const guideHtml = '<h3>Частые вопросы</h3><p>Всё о подключении, подписках и оплате.</p><details><summary>Как подключить Telegram?</summary><p>Войди на сайт CORTEX, открой «Безопасность» и нажми «Привязать Telegram». В боте нажми Start.</p><tg-button-row><tg-button type="url" url="https://cortexapp.ru/account?tab=security" style="primary">Подключить аккаунт</tg-button></tg-button-row></details><details><summary>Где общаться с ИИ?</summary><p>В приложении CORTEX. Здесь находятся аккаунт, покупки и поддержка.</p></details><details><summary>Что делать, если платёж не появился?</summary><p>Напиши в поддержку с почты аккаунта, укажи дату и номер заказа. Не присылай коды входа.</p></details><hr><p>Нужна помощь?</p><tg-button-row><tg-button type="url" url="https://cortexapp.ru/support" style="primary">Написать нам</tg-button></tg-button-row><tg-button-row><tg-button type="copy_text" style="link" text="support@cortexapp.ru">Скопировать email</tg-button><tg-button type="url" style="link" url="https://cortexapp.ru/pricing">Тарифы</tg-button></tg-button-row>';
 async function sendGuide(services: BotServices, chatId: number, payload: View) {
-  // Bot API 10.1+; keep the standard message as a compatibility fallback.
   try {
-    await services.telegram("sendRichMessage", {chat_id: chatId, rich_message: {html: guideHtml},
-      reply_markup: {inline_keyboard: [[open("Личный кабинет", "↗", site + "/account", {}, undefined, "primary")],
-        [open("Тарифы", "💎", site + "/pricing"), open("Поддержка", "💬", site + "/support")]]}});
+    await services.telegram("sendRichMessage", {chat_id:chatId, rich_message:{html:guideHtml}});
   } catch {
-    await services.telegram("sendMessage", {chat_id: chatId, ...payload});
+    await services.telegram("sendMessage", {chat_id:chatId, ...payload});
   }
 }
 async function sendWelcome(services: BotServices, chatId: number, payload: View) {
@@ -279,7 +280,7 @@ export async function processCortexBotUpdate(
     const ok = await services.verifyLink(hashed, safePerson(from, userId));
     if (ok) {
       const home = view("home", true, emoji, displayName(from));
-      await sendWelcome(services, chatId, { ...home, text: "✅ <b>Telegram успешно привязан</b>\n\n<i>Теперь CORTEX ещё ближе.</i>\n\n🟢 Аккаунт подключён. Твой кабинет, тарифы и поддержка — в меню ниже." });
+      await sendWelcome(services, chatId, { ...home, text: "✅ <b>Telegram успешно привязан</b>\n\nГотово! Теперь можно открыть свой кабинет, выбрать подписку или обратиться в поддержку." });
       return 200;
     }
     await services.telegram("sendMessage", {
@@ -312,7 +313,7 @@ export async function processCortexBotUpdate(
   const payload = view(page, linked, emoji, displayName(from));
   if (callback) {
     await services.telegram("answerCallbackQuery", { callback_query_id: callback.id });
-    if (validId(message?.message_id)) {
+    if (page === "help") {\n      await sendGuide(services, chatId, payload);\n      return 200;\n    }\n    if (validId(message?.message_id)) {
       if (Array.isArray(message.photo) && message.photo.length > 0) {
         const { text, disable_web_page_preview: _preview, ...rest } = payload;
         await services.telegram("editMessageCaption", { chat_id: chatId, message_id: message.message_id, caption: text, ...rest });
@@ -326,7 +327,7 @@ export async function processCortexBotUpdate(
     await sendWelcome(services, chatId, payload);
   } else if (!command) {
     await services.telegram("sendMessage", {chat_id: chatId, parse_mode: "HTML",
-      text: "💬 <b>Здесь — управление CORTEX.</b>\nДля диалога с ИИ открой приложение. Для аккаунта, оплаты и помощи выбери действие ниже.",
+      text: "💬 <b>Для диалога с ИИ открой приложение.</b>\nЗдесь я помогу с аккаунтом, оплатой и поддержкой.",
       reply_markup: {inline_keyboard: [[open("Открыть CORTEX", "↗", site + "/", {}, undefined, "primary")],
         [nav("Главное меню", "‹", "home")]]}});
   } else {

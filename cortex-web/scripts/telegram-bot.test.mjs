@@ -38,7 +38,7 @@ test("Main menu uses official colored button styles, no fake premium IDs", async
   assert.equal(payload.parse_mode, "HTML");
   assert.ok(payload.reply_markup.inline_keyboard.flat().some(b => b.style === "primary"));
   assert.equal(payload.reply_markup.inline_keyboard[0].length, 1);
-  assert.deepEqual(payload.reply_markup.inline_keyboard.map(r => r.length), [1,2,1,2]);
+  assert.deepEqual(payload.reply_markup.inline_keyboard.map(r => r.length), [1,2,2,1]);
   assert.match(payload.reply_markup.inline_keyboard[0][0].text, /🔗/);
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.icon_custom_emoji_id));
   assert.ok(payload.reply_markup.inline_keyboard.flat().every(b => !b.url || /^https:\/\/(?:cortexapp\.ru|t\.me)\//.test(b.url)));
@@ -108,7 +108,7 @@ test("Personal greetings escape hostile HTML", async () => {
 test("Rich guide uses supported HTML blocks and only safe direct URL actions", async () => {
  const h=harness(); await processCortexBotUpdate(message("/help"),h.services);
  assert.equal(h.calls[0].method,"sendRichMessage"); assert.match(h.calls[0].args.rich_message.html,/<details>/);
- assert.ok(h.calls[0].args.reply_markup.inline_keyboard.flat().every(b=>b.url.startsWith("https://cortexapp.ru/")));
+ assert.match(h.calls[0].args.rich_message.html, /<tg-button type="copy_text" style="link"/);\n assert.match(h.calls[0].args.rich_message.html, /<tg-button-row>/);\n assert.equal(h.calls[0].args.reply_markup, undefined);
 });
 test("Rich guide gracefully falls back", async () => {
  const h=harness(),call=h.services.telegram; h.services.telegram=async(m,a)=>{if(m==="sendRichMessage")throw Error("unavailable");return call(m,a)};
@@ -137,4 +137,18 @@ test("Premium rejected by provider: retry same method with safe ordinary icons",
  assert.equal(rejects,1); assert.equal(h.calls[0].method,"sendPhoto");
  assert.doesNotMatch(JSON.stringify(h.calls),/tg-emoji|icon_custom_emoji_id/);
  assert.match(h.calls[0].args.reply_markup.inline_keyboard[0][0].text,/🔗/);
+});
+
+test("Support includes a native copy button with no other action", async () => {
+ const h=harness(); await processCortexBotUpdate(message("/support"),h.services,{enabled:true});
+ const b=h.calls[0].args.reply_markup.inline_keyboard.flat().find(b=>b.copy_text);
+ assert.deepEqual(b.copy_text,{text:"support@cortexapp.ru"}); assert.equal(b.url,undefined); assert.equal(b.callback_data,undefined);
+});
+test("Commercial greeting has no filler or long dashes", async () => {
+ const h=harness(); await processCortexBotUpdate(message("/start"),h.services);
+ assert.match(h.calls[0].args.caption,/Уже пользуешься CORTEX/); assert.doesNotMatch(h.calls[0].args.caption,/—|цифровой центр|под рукой/);
+});
+test("FAQ opens rich content directly from support callback", async () => {
+ const h=harness(); await processCortexBotUpdate({update_id:145,callback_query:{id:"faq",data:"cortex:help",from:{id:user},message:{chat,message_id:99,photo:[{file_id:"photo"}]}}},h.services);
+ assert.deepEqual(h.calls.map(c=>c.method),["answerCallbackQuery","sendRichMessage"]);
 });
