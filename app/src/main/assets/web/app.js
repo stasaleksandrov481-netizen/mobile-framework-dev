@@ -1264,7 +1264,7 @@
   function submitExample(text, control, explain = false) {
     if (pending) { flash("Сначала дождитесь текущего ответа."); return; }
     const here = route === "chat" && !current()?.messages.length;
-    const chat = here ? current() : M.createChat();
+    const chat = here ? current() : homeChat();
     if (!chat) return;
     haptic();
     void answer(chat, text, { from: here ? null : control, explain, includeScreen: false });
@@ -1296,7 +1296,7 @@
     if (pending && !M.chat(pending.chatId)) stopAnswer(false);
     for (const chat of before) if (!M.chat(chat.id)) { drafts.delete(chat.id); errors.delete(chat.id); }
     if (!current()) {
-      chatId = route === "chat" ? M.createChat().id : "";
+      chatId = route === "chat" ? homeChat().id : "";
       if (route === "chat") history.replaceState(null, "", "#chat/" + encodeURIComponent(chatId));
     }
     render();
