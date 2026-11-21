@@ -8,7 +8,8 @@
     "start": "next start --hostname 0.0.0.0",
     "lint": "tsc --noEmit",
     "test": "node --test scripts/*.test.mjs",
-    "release:verify": "node scripts/verify-approved-source.mjs"
+    "release:verify": "node scripts/verify-approved-source.mjs",
+    "telegram:configure": "node scripts/configure-telegram-bot.mjs"
   },
   "dependencies": {
     "@fontsource-variable/onest": "5.3.1",
