@@ -32,7 +32,7 @@ jobs:
         with:
           node-version: "22"
       - name: Run Edge Function regression tests
-        run: node --experimental-transform-types --test supabase/functions/cortex/handler.test.ts
+        run: node --experimental-transform-types --test supabase/functions/cortex/*.test.ts
 
   billing-contract:
     name: Billing webhook and payment regression
