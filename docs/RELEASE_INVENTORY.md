@@ -1,5 +1,11 @@
 # Инвентаризация релизов CORTEX
 
+## 2026-11-21 UTC · Supabase CORTEX Edge v53 (production)
+
+- **ACTIVE v53**, `verify_jwt=false`, SHA256 `0c5cd5ef884a6496683c82ec185295c21ffc9264b4b12b60c7166a1fe9882d18`. Только `provider.ts` заменён на проверенную версию из GitHub PR #116 (squash `af523a3`); остальные 10 файлов взяты из live v52. Состав релиза после выкладки сверялся по 11/11 файлам: `handler.ts` = v50 `6a6a9dc` + fallback PR #114; `redis.ts` = `main` c PR #115; `singleflight.ts` = v50 + строгое включение `text_ready`; прочие файлы = проверенная v50; `provider.ts` = `af523a3`.
+- Пакет: обработка X-RateLimit-Reset и Retry-After из HTTP и ограниченных полей OpenRouter metadata, разделение upstream 429 и глобального лимита ключа, исключение повторного `/api/v1/key` при уже известном минутном сбросе. 83/83 Edge tests, billing, handoff, UI и CodeQL пройдены; на реальном Android, OpenRouter и после живой нагрузки улучшения пока не измерены.
+- **Rollback v52:** 10 неизменённых файлов v53 и `provider.ts` из коммита `4eddc60`. Исходная v52 SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. Нет миграций БД, веб- или APK-релиза. Не деплоить GitHub main целиком без сравнения с live.
+
 ## 2026-11-21 UTC · Кандидат обработки ошибок OpenRouter 429
 
 - База production: Supabase Edge `cortex` **ACTIVE v52**, `verify_jwt=false`, SHA256 `9fe00d8c8d91fa77942d7f492967fe4a8b5276097df7ba3a8eb2c70f3c5f7be6`. В `main` добавлен кандидат классификации HTTP/SSE 429: `metadata.headers` может содержать `X-RateLimit-*`, даже если эти поля отсутствуют в HTTP-заголовках. При наличии upstream provider name/code не блокировать глобально все модели.
