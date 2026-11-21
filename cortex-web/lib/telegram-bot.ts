@@ -47,68 +47,99 @@ export type EmojiOptions = { enabled?: boolean; brand?: string; account?: string
 function premium(emoji: string, id: string | undefined, options: EmojiOptions): string {
   return options.enabled && icon(id) ? '<tg-emoji emoji-id="' + id + '">' + emoji + '</tg-emoji>' : emoji;
 }
+function button(label: string, symbol: string, action: Pick<Button, "url" | "callback_data">,
+  options: EmojiOptions = {}, id?: string, style?: Button["style"]): Button {
+  const custom = options.enabled ? icon(id) : undefined;
+  return { text: custom ? label : symbol + " " + label, ...action,
+    ...(style ? {style} : {}), ...(custom ? {icon_custom_emoji_id: custom} : {}) };
+}
+const nav = (label: string, symbol: string, page: string, options: EmojiOptions = {}, id?: string, style?: Button["style"]) =>
+  button(label, symbol, {callback_data: "cortex:" + page}, options, id, style);
+const open = (label: string, symbol: string, url: string, options: EmojiOptions = {}, id?: string, style?: Button["style"]) =>
+  button(label, symbol, {url}, options, id, style);
 function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
-  const icons: EmojiOptions = options.enabled ? options : {};
   return [
-    [
-      { text: hasLink ? "Аккаунт" : "Привязать Telegram", style: hasLink ? "success" : "primary", ...(hasLink ? { callback_data: "cortex:account" } : { url: site + "/account?tab=security" }),
-        ...(icon(icons.account) ? { icon_custom_emoji_id: icon(icons.account) } : {}) },
-      { text: "Тарифы", callback_data: "cortex:plans" },
-    ],
-    [
-      { text: "Оплата Stars", style: "success", callback_data: "cortex:pay",
-        ...(icon(icons.payment) ? { icon_custom_emoji_id: icon(icons.payment) } : {}) },
-      { text: "Поддержка", callback_data: "cortex:support",
-        ...(icon(icons.support) ? { icon_custom_emoji_id: icon(icons.support) } : {}) },
-    ],
-    [
-      { text: "Открыть CORTEX", style: "primary", url: site },
-      { text: "Новости", url: news },
-    ],
+    [hasLink
+      ? nav("Личный кабинет", "👤", "account", options, options.account, "success")
+      : open("Подключить аккаунт CORTEX", "🔗", site + "/account?tab=security", options, options.account, "primary")],
+    [nav("Тарифы", "💎", "plans"), nav("Оплата", "⭐", "pay", options, options.payment)],
+    [open("Открыть CORTEX", "↗", site, options, options.brand)],
+    [nav("Помощь", "💬", "support", options, options.support), open("Новости", "📢", news)],
   ];
 }
-function view(page: string, linked: boolean, options: EmojiOptions): View {
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function displayName(person?: TelegramPerson): string {
+  if (typeof person?.first_name !== "string") return "";
+  return escapeHtml(person.first_name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, "").trim().slice(0, 60));
+}
+function view(page: string, linked: boolean, options: EmojiOptions, name = ""): View {
   const mark = premium("✦", options.brand, options);
-  const head = page === "home" ? "<b>Добро пожаловать в CORTEX</b>" : "<b>" + mark + " CORTEX</b>";
-  let body: string;
+  let head = "", body = "";
   let extra: Button[][] = [];
+  const back = [nav("В главное меню", "‹", "home")];
   switch (page) {
     case "account":
     case "status":
+      head = "👤 <b>Твой аккаунт</b>";
       body = linked
-        ? "✅ <b>Telegram привязан.</b>\nАккаунт CORTEX подтверждён. Баланс и настройки доступны на сайте."
-        : "🔒 <b>Telegram пока не привязан.</b>\nОткрой раздел «Безопасность» на сайте, создай ссылку и подтверди подключение.";
-      extra = [[{ text: linked ? "Отвязать в кабинете" : "Привязать Telegram",
-        style: linked ? "danger" : "primary",
-        url: site + "/account?tab=security" }]];
+        ? "🟢 <b>Подключение активно</b>\nTelegram связан с твоим профилем CORTEX.\n\n<blockquote>Тариф, баланс и настройки — в личном кабинете.</blockquote>"
+        : "⚪ <b>Аккаунт не подключён</b>\n\nОткрой раздел «Безопасность» в кабинете, нажми «Привязать Telegram» и вернись сюда по защищённой ссылке.\n\n<blockquote>Один аккаунт для сайта и Telegram. Пароль и коды входа боту не нужны.</blockquote>";
+      extra = linked
+        ? [[open("Открыть кабинет", "↗", site + "/account", {}, undefined, "primary")],
+           [open("Безопасность", "🔒", site + "/account?tab=security"), nav("Обновить статус", "↻", "status")]]
+        : [[open("Подключить аккаунт", "🔗", site + "/account?tab=security", options, options.account, "primary")]];
       break;
     case "plans":
-      body = "💎 <b>Тарифы CORTEX</b>\nУзнай актуальные лимиты и стоимость подписок. Цены берутся из общего каталога CORTEX.";
-      extra = [[{ text: "Смотреть тарифы", style: "primary", url: site + "/pricing" }]];
+      head = "💎 <b>Выбери свой CORTEX</b>";
+      body = "Больше возможностей. Больше свободы.\n\nСравни доступные модели, лимиты и подписки в актуальном каталоге.\n\n<blockquote>Условия и цены всегда берутся с официального сайта.</blockquote>";
+      extra = [[open("Сравнить тарифы", "↗", site + "/pricing", {}, undefined, "primary")],
+        [nav("Способы оплаты", "⭐", "pay", options, options.payment)]];
       break;
     case "pay":
-      body = "⭐ <b>Telegram Stars</b>\nПокупка проходит через официальный счёт Telegram. Доступ выдаётся только после подтверждения платежа сервером CORTEX.";
-      extra = [[{ text: "Перейти к оплате", style: "success", url: site + "/payment" },
-        { text: "Помощь с оплатой", callback_data: "cortex:paysupport" }]];
+      head = "⭐ <b>Telegram Stars</b>";
+      body = "Пополнение и подписки CORTEX — через официальный счёт Telegram.\n\n<blockquote>Выбери предложение на сайте. Доступ активируется после подтверждения платежа сервером.</blockquote>\n\n" +
+        (linked ? "🟢 Аккаунт подключён." : "Для управления покупками войди в свой аккаунт CORTEX.");
+      extra = [[open("Перейти к оплате", "⭐", site + "/payment", options, options.payment, "success")],
+        [nav("Помощь с платежом", "💬", "paysupport")]];
       break;
     case "support":
-      body = "🛟 <b>Поддержка CORTEX</b>\nНапиши в поддержку из личного кабинета или на support@cortexapp.ru.\nНикому не сообщай коды входа и пароли.";
-      extra = [[{ text: "Открыть поддержку", style: "primary", url: site + "/support" }]];
+      head = "💬 <b>Мы на связи</b>";
+      body = "Проблема с аккаунтом, оплатой или приложением? Поможем разобраться.\n\n<b>Почта поддержки</b>\n<code>support@cortexapp.ru</code>\n\n<blockquote>Не отправляй пароли, платёжные реквизиты или коды входа.</blockquote>";
+      extra = [[open("Написать в поддержку", "↗", site + "/support", options, options.support, "primary")],
+        [nav("Платежи", "⭐", "paysupport"), nav("Как пользоваться", "📖", "help")]];
       break;
     case "paysupport":
-      body = "🧾 <b>Вопрос по оплате?</b>\nНапиши на support@cortexapp.ru с почты аккаунта. Укажи номер заказа и дату. Не отправляй коды входа или данные карты.";
-      extra = [[{ text: "Поддержка платежей", style: "primary", url: site + "/support" }]];
+      head = "🧾 <b>Помощь с оплатой</b>";
+      body = "Платёж не появился или возник вопрос по подписке?\n\nНапиши на <code>support@cortexapp.ru</code> с почты аккаунта. Укажи дату и номер заказа, если он есть.\n\n<blockquote>Не отправляй коды входа или данные карты.</blockquote>";
+      extra = [[open("Открыть поддержку", "💬", site + "/support", {}, undefined, "primary")]];
       break;
     case "help":
-      body = "ℹ️ <b>Команды</b>\n/start — начало\n/menu — меню\n/account — привязка\n/status — статус\n/plans — тарифы\n/pay — Stars\n/support — помощь\n/paysupport — вопросы об оплате.";
+      head = "📖 <b>Навигация по CORTEX</b>";
+      body = "<b>Управление</b>\n/account — аккаунт и безопасность\n/plans — тарифы\n/pay — Telegram Stars\n\n<b>Помощь</b>\n/support — поддержка\n/paysupport — вопросы оплаты\n/menu — главное меню";
       break;
     default:
-      body = "Твой CORTEX — всегда под рукой.\n\nУправляй аккаунтом, подпиской и оплатой прямо в Telegram. Для общения с ИИ открой приложение CORTEX.\n\n" + (linked ? "<b>Аккаунт подключён.</b> Связь с Telegram активна." : "<b>Начни с подключения аккаунта.</b> Открой «Безопасность» на сайте и привяжи Telegram.");
+      head = name ? mark + " <b>Привет, " + name + ".</b>" : mark + " <b>Добро пожаловать в CORTEX</b>";
+      body = "<i>Твой цифровой центр управления.</i>\n\n" +
+        (linked
+          ? "🟢 <b>Аккаунт подключён</b>\nВсё под рукой: подписки, тарифы и поддержка."
+          : "⚪ <b>Начнём с подключения</b>\nСвяжи Telegram с аккаунтом CORTEX, чтобы управлять им прямо здесь.") +
+        "\n\n" + "Для общения с ИИ открой CORTEX.";
   }
-  return {
-    text: head + "\n\n" + body, parse_mode: "HTML", disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: page === "home" ? buttons(options, linked) : [...extra, [{ text: "Главное меню", callback_data: "cortex:home" }]] },
-  };
+  return { text: head + "\n\n" + body, parse_mode: "HTML", disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: page === "home" ? buttons(options, linked) : [...extra, back] } };
+}
+const guideHtml = '<h2>Твой путеводитель по CORTEX</h2><p>Всё, что нужно для управления аккаунтом.</p><hr><h3>Подключение</h3><ol><li>Войди на cortexapp.ru.</li><li>Открой раздел «Безопасность».</li><li>Нажми «Привязать Telegram», затем Start в боте.</li></ol><h3>Подписки и оплата</h3><p>Тарифы на сайте, покупка через Telegram Stars и поддержка платежей.</p><details><summary>Если ссылка истекла</summary><p>Создай новую в личном кабинете. Ссылка действует 5 минут, не передавай её другим.</p></details><hr><p>Поддержка: <a href="mailto:support@cortexapp.ru">support@cortexapp.ru</a></p>';
+async function sendGuide(services: BotServices, chatId: number, payload: View) {
+  // Bot API 10.1+; keep the standard message as a compatibility fallback.
+  try {
+    await services.telegram("sendRichMessage", {chat_id: chatId, rich_message: {html: guideHtml},
+      reply_markup: {inline_keyboard: [[open("Личный кабинет", "↗", site + "/account", {}, undefined, "primary")],
+        [open("Тарифы", "💎", site + "/pricing"), open("Поддержка", "💬", site + "/support")]]}});
+  } catch {
+    await services.telegram("sendMessage", {chat_id: chatId, ...payload});
+  }
 }
 async function sendWelcome(services: BotServices, chatId: number, payload: View) {
   const { text, disable_web_page_preview: _preview, ...rest } = payload;
@@ -168,8 +199,8 @@ export async function processCortexBotUpdate(
     const hashed = createHash("sha256").update(command.linkCode).digest("hex");
     const ok = await services.verifyLink(hashed, safePerson(from, userId));
     if (ok) {
-      const home = view("home", true, emoji);
-      await sendWelcome(services, chatId, { ...home, text: "<b>Telegram успешно привязан</b>\n\nАккаунт CORTEX подключён. Теперь можно управлять подпиской, оплатой и поддержкой из бота." });
+      const home = view("home", true, emoji, displayName(from));
+      await sendWelcome(services, chatId, { ...home, text: "✅ <b>Telegram успешно привязан</b>\n\n<i>Теперь CORTEX ещё ближе.</i>\n\n🟢 Аккаунт подключён. Твой кабинет, тарифы и поддержка — в меню ниже." });
       return 200;
     }
     await services.telegram("sendMessage", {
@@ -199,7 +230,7 @@ export async function processCortexBotUpdate(
       ? rawPage.slice("cortex:".length) : "home")
     : command?.page || "home";
   const linked = await services.linked(userId);
-  const payload = view(page, linked, emoji);
+  const payload = view(page, linked, emoji, displayName(from));
   if (callback) {
     await services.telegram("answerCallbackQuery", { callback_query_id: callback.id });
     if (validId(message?.message_id)) {
@@ -210,8 +241,15 @@ export async function processCortexBotUpdate(
         await services.telegram("editMessageText", { chat_id: chatId, message_id: message.message_id, ...payload });
       }
     }
+  } else if (page === "help" && command) {
+    await sendGuide(services, chatId, payload);
   } else if (page === "home" && command) {
     await sendWelcome(services, chatId, payload);
+  } else if (!command) {
+    await services.telegram("sendMessage", {chat_id: chatId, parse_mode: "HTML",
+      text: "💬 <b>Здесь — управление CORTEX.</b>\nДля диалога с ИИ открой приложение. Для аккаунта, оплаты и помощи выбери действие ниже.",
+      reply_markup: {inline_keyboard: [[open("Открыть CORTEX", "↗", site, {}, undefined, "primary")],
+        [nav("Главное меню", "‹", "home")]]}});
   } else {
     await services.telegram("sendMessage", { chat_id: chatId, ...payload });
   }
