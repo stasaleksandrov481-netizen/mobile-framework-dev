@@ -246,3 +246,22 @@ img, svg { display: block; flex-shrink: 0; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+
+/* Shared avatar rendering; never apply a remote URL or persist provider credentials. */
+.account-avatar { display:grid;place-items:center;flex:none;overflow:hidden;position:relative;box-sizing:border-box;font-weight:680;color:#f6f6f6;letter-spacing:-.04em;border:1px solid rgb(255 255 255 / .12); }
+.account-avatar--small { width:25px;height:25px;border-radius:50%;font-size:10px; }
+.account-avatar--medium { width:40px;height:40px;border-radius:13px;font-size:13px; }
+.account-avatar--large { width:80px;height:80px;border-radius:24px;font-size:26px; }
+.account-avatar--graphite { background:linear-gradient(145deg,#6a6a6a,#1c1c1c 70%); }
+.account-avatar--silver { background:linear-gradient(135deg,#a3a3a3,#404040); }
+.account-avatar--stone { background:linear-gradient(135deg,#8c8074,#3f3831); }
+.account-avatar--olive { background:linear-gradient(135deg,#70745b,#2a3126); }
+.account-avatar--clay { background:linear-gradient(135deg,#a07663,#47312b); }
+.account-avatar--plum { background:linear-gradient(135deg,#857184,#3a3040); }
+.cortex-avatar-photo { display:block;width:100%;height:100%;object-fit:cover;object-position:center; }
+.account-telegram-mark .account-telegram-photo { width:100%;height:100%;border-radius:50%; }
+.account-mobile-profile-avatar { display:none; }
+@media(max-width:760px) {
+ .account-mobile-profile-avatar { display:grid;place-items:center;flex:none;border:0;padding:0;background:transparent;cursor:pointer; }
+}

@@ -1,0 +1,3 @@
+# Telegram profile photo
+
+Web cabinet (profile, sidebar, mobile header, security panel, signed-in website header) uses the same linked Telegram photo. Profile colours/initials remain fallback. The existing authenticated link endpoint serves small JPEG bytes only after live session and link verification; no Telegram ID is provided by the browser. Telegram file URL and token stay server-side. No schema change, public photo URL, Redis image storage or persistent copy. Short bounded process-memory and browser-memory caches; refresh on focus, every minute while visible, and on link-state change. Unlink clears local images. Existing links work on next page load. Android changes are not included in this web PR.

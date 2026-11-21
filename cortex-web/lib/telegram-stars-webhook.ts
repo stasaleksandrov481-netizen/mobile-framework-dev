@@ -48,7 +48,7 @@ export async function processTelegramStarsUpdate(
     }
     const answered = await services.telegram("answerPreCheckoutQuery", {
       pre_checkout_query_id: pre.id, ok: approved,
-      ...(!approved ? { error_message: "Счёт истёк или не прошёл проверку. Создайте новый на сайте CORTEX." } : {}),
+      ...(!approved ? { error_message: "Счёт истёк или не прошёл проверку. Откройте тарифы CORTEX и создайте новый счёт." } : {}),
     });
     return answered === true ? 200 : 503;
   }

@@ -10,16 +10,12 @@ import { createLatestRequest } from "@/lib/latest-request";
 import { validQuota, validReservation, resetLabel } from "@/lib/account-data";
 import type { Quota, Reservation } from "@/lib/account-data";
 import UiIcon from "@/components/UiIcon";
+import { AccountAvatar as Avatar, avatarTone, avatarTones as tones, type AvatarTone as Tone } from "@/components/AccountAvatar";
+import { useTelegramAvatar, invalidateTelegramAvatar } from "@/lib/use-telegram-avatar";
 import { TelegramSecurityLink } from "@/components/TelegramSecurityLink";
 
 type Panel = "overview" | "profile" | "security";
-const tones = ["graphite", "silver", "stone", "olive", "clay", "plum"] as const;
-type Tone = typeof tones[number];
 const numberFormat = new Intl.NumberFormat("ru-RU");
-
-function avatarTone(raw: unknown): Tone {
-  return typeof raw === "string" && tones.includes(raw as Tone) ? raw as Tone : "graphite";
-}
 
 function accountName(user: User): string {
   const metadataName = user.user_metadata?.cortex_display_name || user.user_metadata?.name;
@@ -28,19 +24,10 @@ function accountName(user: User): string {
     : (user.email?.split("@")[0] || "Пользователь").slice(0, 40);
 }
 
-function initials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase()).join("") || "C";
-}
-
-function Avatar({ name, tone, size = "medium" }: { name: string; tone: Tone; size?: "medium" | "large" }) {
-  return <div className={`account-avatar account-avatar--${tone} account-avatar--${size}`} aria-hidden="true">
-    {initials(name)}
-  </div>;
-}
-
 export function AccountDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const telegramPhoto=useTelegramAvatar(user?.id);
   const [checking, setChecking] = useState(true);
   const [authCheckError, setAuthCheckError] = useState("");
   const [authRetry, setAuthRetry] = useState(0);
@@ -284,7 +271,7 @@ export function AccountDashboard() {
           <Link href="/support">Поддержка <UiIcon name="arrow-up-right" size={15} /></Link>
         </nav>
         <div className="account-sidebar-bottom">
-          <div className="account-sidebar-user"><Avatar name={displayName} tone={currentTone} /><div><strong>{displayName}</strong><span>{user?.email}</span></div></div>
+          <div className="account-sidebar-user"><Avatar name={displayName} tone={currentTone} photo={telegramPhoto} /><div><strong>{displayName}</strong><span>{user?.email}</span></div></div>
           <button className="account-signout" type="button" onClick={() => void signOut()} disabled={signingOut}>{signingOut ? "Выходим…" : "Выйти из аккаунта"}</button>
         </div>
       </aside>
@@ -293,7 +280,7 @@ export function AccountDashboard() {
         <header className="account-topbar">
           <Link href="/account" className="account-mobile-brand"><img src="/cortex-mark.svg" width="26" height="26" alt="" /> CORTEX</Link>
           <span>{panel === "overview" ? "Личный кабинет" : panel === "profile" ? "Настройки профиля" : "Безопасность аккаунта"}</span>
-          <span className="account-topbar-status"><span className="account-status-dot" /> Аккаунт активен</span>
+          <span className="account-topbar-status"><span className="account-status-dot" /> Аккаунт активен</span><button type="button" className="account-mobile-profile-avatar" aria-label="Мой профиль" onClick={()=>setPanel("profile")}><Avatar name={displayName} tone={currentTone} size="small" photo={telegramPhoto}/></button>
         </header>
         <nav className="account-mobile-tabs" aria-label="Разделы кабинета на телефоне">
           <button type="button" aria-current={panel === "overview" ? "page" : undefined} className={panel === "overview" ? "is-active" : ""} onClick={() => setPanel("overview")}>Обзор</button>
@@ -343,10 +330,10 @@ export function AccountDashboard() {
             <div className="account-eyebrow">CORTEX / ПРОФИЛЬ</div>
             <div className="account-title-row"><div><h1>Твой профиль.</h1><p>Настройки сохраняются в аккаунте и доступны при следующем входе.</p></div>{!saving && profileDirty && <span className="account-dirty-indicator" role="status">Есть несохранённые изменения</span>}</div>
             <section className="account-panel account-profile-panel">
-              <div className="account-profile-head"><Avatar name={name || displayName} tone={tone} size="large" /><div><strong>{name.trim() || displayName}</strong><span>{user?.email}</span><div className="account-verified"><UiIcon name="check" size={13} /> Почта подтверждена</div></div></div>
+              <div className="account-profile-head"><Avatar name={name || displayName} tone={tone} size="large" photo={telegramPhoto} /><div><strong>{name.trim() || displayName}</strong><span>{user?.email}</span><div className="account-verified"><UiIcon name="check" size={13} /> Почта подтверждена</div></div></div>
               <div className="account-profile-divider" />
               <div className="account-field"><label htmlFor="account-display-name">Имя в CORTEX</label><input id="account-display-name" value={name} maxLength={40} autoComplete="nickname" disabled={saving} onChange={e => { setName(e.target.value); setProfileSaved(false); }} placeholder="Как к тебе обращаться" /><span>Такое имя будет отображаться в личном кабинете.</span></div>
-              <fieldset className="account-avatar-picker" disabled={saving}><legend>Аватар профиля</legend><p>Выбери цвет. Инициалы будут обновляться вместе с именем.</p><div className="account-avatar-options">{tones.map(option => <button key={option} type="button" aria-label={`Выбрать аватар ${option}`} aria-pressed={tone === option} className={tone === option ? "is-selected" : ""} onClick={() => { setTone(option); setProfileSaved(false); }}><Avatar name={name || displayName} tone={option} /></button>)}</div></fieldset>
+              <fieldset className="account-avatar-picker" disabled={saving}><legend>Аватар профиля</legend><p>{telegramPhoto?"Используется фото из Telegram. Цвет ниже будет применяться, если фото недоступно или Telegram отвязан.":"Выбери цвет. Инициалы будут обновляться вместе с именем."}</p>{telegramPhoto&&<button type="button" className="account-outline-button" onClick={invalidateTelegramAvatar}>Обновить фото из Telegram</button>}<div className="account-avatar-options">{tones.map(option => <button key={option} type="button" aria-label={`Выбрать аватар ${option}`} aria-pressed={tone === option} className={tone === option ? "is-selected" : ""} onClick={() => { setTone(option); setProfileSaved(false); }}><Avatar name={name || displayName} tone={option} /></button>)}</div></fieldset>
               <div className="account-field"><label htmlFor="account-email">Электронная почта</label><input id="account-email" value={user?.email || ""} type="email" readOnly /><span>Почта подтверждена. Здесь её нельзя изменить случайно.</span></div>
               {reservation && <div className="account-notification-setting">
                 <label htmlFor="account-launch-notifications"><input id="account-launch-notifications" type="checkbox" checked={notificationsEnabled} disabled={savingNotifications} onChange={event => { notificationEdits.current++; notificationDraftDirty.current = event.target.checked !== reservation.notify_opt_in; setNotificationsEnabled(event.target.checked); setNotificationsMessage(""); setNotificationsError(false); }} /><span>Сообщить мне по почте о запуске CORTEX</span></label>
@@ -362,7 +349,7 @@ export function AccountDashboard() {
           </> : <>
             <div className="account-eyebrow">CORTEX / БЕЗОПАСНОСТЬ</div>
             <div className="account-title-row"><div><h1>Безопасность.</h1><p>Управляй доступом к аккаунту и активными входами.</p></div></div>
-            <TelegramSecurityLink active={panel === "security"} />
+            <TelegramSecurityLink active={panel === "security"} photo={telegramPhoto} />
             <section className="account-panel account-security-panel" aria-labelledby="account-session-heading">
               <div className="account-small-label">УЧЁТНАЯ ЗАПИСЬ</div>
               <h2 id="account-session-heading">Доступ к аккаунту</h2>
