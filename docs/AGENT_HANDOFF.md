@@ -1,3 +1,10 @@
+## 2026-11-21 UTC · Telegram bot and account-link development branch
+
+- Branch feat/cortex-telegram-bot-menu-20261121 based on verified website release branch fix/cortex-web-quality-20261120, not GitHub main.
+- Security page has Telegram link/unlink. One click opens bot directly, private /start completes linking and clears the single-use token. No return to site required.
+- New isolated menu processor with colors and optional premium emoji IDs; existing Stars webhook, ledger receipt checks and payment/refund settlement unchanged.
+- Bot is gated behind CORTEX_TELEGRAM_BOT_ENABLED, default false, and requires new RLS-protected link schema before activation.
+- Production, Supabase schema, Vercel env and Telegram bot configuration NOT changed. Next: CI, preview, review, schema migration, safe activation. Rollback: disable new bot flag and restore current production website deployment.
 ## 2026-11-20 UTC · Опубликован веб-релиз CORTEX
 
 - Исходник `fe6630a74af3e76219c3d1ba2a657ce17145d062`, Preview `dpl_2nc3SwR8urPCrxTGb6Qj1PutQVVM`, Production `dpl_4KtfshurZ7wriji7neTZ8VFSkRNZ`. Оба домена переключены на проверенную сборку. Для отката: `dpl_45YgM4ECZzMyH4L1bPiSkfWYinWB`, исходник `62b3dd6`.

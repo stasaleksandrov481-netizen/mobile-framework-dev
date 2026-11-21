@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
     // Other updates are interactive bot commands; never route payments through chat logic.
     const isPayment = Boolean(update.pre_checkout_query || update.message?.successful_payment ||
       update.message?.refunded_payment);
-    if (isPayment) {
+    // Stage bot features separately; payment processing retains its original path.
+    if (isPayment || process.env.CORTEX_TELEGRAM_BOT_ENABLED !== "true") {
       const status = await processTelegramStarsUpdate(update, {
         rpc: async (name, params) => admin.rpc(name, params),
         telegram: (name, params) => telegramBotApi(token, name, params),

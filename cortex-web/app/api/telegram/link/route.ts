@@ -69,7 +69,8 @@ function sameOrigin(request: NextRequest): boolean {
 }
 
 async function authenticated(request: NextRequest) {
-  if (!process.env.CORTEX_SUPABASE_SERVICE_ROLE_KEY ||
+  if (process.env.CORTEX_TELEGRAM_BOT_ENABLED !== "true" ||
+      !process.env.CORTEX_SUPABASE_SERVICE_ROLE_KEY ||
       !telegramConfigurationValid(process.env.CORTEX_TELEGRAM_BOT_TOKEN,
         process.env.CORTEX_TELEGRAM_WEBHOOK_SECRET)) return null;
   return account(request);

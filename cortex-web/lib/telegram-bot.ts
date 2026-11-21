@@ -47,7 +47,7 @@ function premium(emoji: string, id: string | undefined, options: EmojiOptions): 
   return options.enabled && icon(id) ? '<tg-emoji emoji-id="' + id + '">' + emoji + '</tg-emoji>' : emoji;
 }
 function buttons(options: EmojiOptions, hasLink: boolean): Button[][] {
-  const icons = options.enabled ? options : {};
+  const icons: EmojiOptions = options.enabled ? options : {};
   return [
     [
       { text: "Аккаунт", style: hasLink ? "success" : "primary", callback_data: "cortex:account",
@@ -77,7 +77,8 @@ function view(page: string, linked: boolean, options: EmojiOptions): View {
       body = linked
         ? "✅ <b>Telegram привязан.</b>\nАккаунт CORTEX подтверждён. Баланс и настройки доступны на сайте."
         : "🔒 <b>Telegram пока не привязан.</b>\nОткрой раздел «Безопасность» на сайте, создай ссылку и подтверди подключение.";
-      extra = [[{ text: linked ? "Управлять привязкой" : "Привязать Telegram", style: "primary",
+      extra = [[{ text: linked ? "Отвязать в кабинете" : "Привязать Telegram",
+        style: linked ? "danger" : "primary",
         url: site + "/account?tab=security" }]];
       break;
     case "plans":
